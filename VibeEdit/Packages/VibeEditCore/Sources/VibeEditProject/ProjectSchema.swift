@@ -1,0 +1,500 @@
+import Foundation
+
+// One declaration of the project format's typed fields. `Project.validate()` checks item properties from
+// `ItemProperty.all`, and `ProjectSchema.document` turns the same tables into a JSON Schema (published as
+// docs/reference/project.schema.json and by `schema get`). Adding a property is one entry here; rules that
+// span several fields (overlaps, links, layer bands) stay in Swift validation and are described in the schema.
+
+/// A typed, optional item property, at the top level of an item or inside one of its groups.
+public struct ItemProperty: Sendable {
+    public enum Rule: Sendable {
+        case number(ClosedRange<Double>)
+        case integer(ClosedRange<Int>)
+        case boolean
+        /// Text of 1…`maxLength` characters.
+        case text(maxLength: Int)
+        /// A `#RRGGBB` colour.
+        case color
+    }
+
+    /// `nil` for a top-level item field, else the object it lives in (`transform`, `color`, `textStyle`).
+    public let group: String?
+    public let key: String
+    public let rule: Rule
+    public let summary: String
+
+    init(_ group: String?, _ key: String, _ rule: Rule, _ summary: String) {
+        self.group = group
+        self.key = key
+        self.rule = rule
+        self.summary = summary
+    }
+
+    public static let groups = ["transform", "crop", "color", "textStyle", "backdrop"]
+
+    public static let all: [ItemProperty] = [
+        .init(nil, "speed", .number(0.01...100), "Source frames per timeline frame; the timeline duration is kept"),
+        .init(nil, "opacity", .number(0...1), "Picture opacity"),
+        .init(nil, "volumeDb", .number(Project.volumeDbRange), "Clip gain in dB"),
+        .init(nil, "muted", .boolean, "Silences the clip"),
+        .init(nil, "preservePitch", .boolean, "Keeps pitch when speed changes (default true)"),
+        .init(nil, "fadeIn", .integer(0...2_000_000_000), "Audio fade-in in timeline frames"),
+        .init(nil, "fadeOut", .integer(0...2_000_000_000), "Audio fade-out in timeline frames"),
+        .init(nil, "fill", .boolean, "Fill the frame (cropping) instead of fitting inside it; the project's clipFill by default"),
+        .init("transform", "zoom", .number(0.01...100), "Scale over the fitted or filled size"),
+        .init("transform", "pan", .number(-65536...65536), "Horizontal offset in output pixels"),
+        .init("transform", "tilt", .number(-65536...65536), "Vertical offset in output pixels"),
+        .init("transform", "rotation", .number(-3600...3600), "Rotation in degrees, counterclockwise, around the frame centre"),
+        .init("crop", "left", .number(0...0.95),
+              "Video picture: fraction of the width hidden on the left (left + right at most 0.95)"),
+        .init("crop", "right", .number(0...0.95), "Video picture: fraction of the width hidden on the right"),
+        .init("crop", "top", .number(0...0.95),
+              "Video picture: fraction of the height hidden at the top (top + bottom at most 0.95)"),
+        .init("crop", "bottom", .number(0...0.95), "Video picture: fraction of the height hidden at the bottom"),
+        .init("crop", "radius", .number(0...0.5),
+              "Video picture: corner radius as a fraction of the visible part's shorter side (0.5 = circle or pill)"),
+        .init("textStyle", "size", .number(0.005...1), "Font size as a fraction of the frame's short side (shrunk to fit 90% of the width)"),
+        .init("textStyle", "positionY", .number(0...1), "Baseline height from the frame's bottom (fraction): 0.1 low, 0.86 near the top"),
+        .init("textStyle", "strokeWidth", .number(0...50), "Outline width in points"),
+        .init("textStyle", "font", .text(maxLength: 128), "Font PostScript name (fonts list); missing fonts draw as Helvetica"),
+        .init("textStyle", "fill", .color, "Text colour, #RRGGBB (the preset's by default)"),
+        .init("textStyle", "stroke", .color, "Outline colour, #RRGGBB (default black)"),
+        .init("textStyle", "highlight", .color, "Word-by-word highlight colour, #RRGGBB (default #FFD400)"),
+        .init("textStyle", "align", .text(maxLength: 6), "left, center or right (the preset's by default)"),
+        .init("textStyle", "positionX", .number(0...1), "Horizontal anchor: left edge, centre or right edge by align"),
+        .init("textStyle", "lineHeight", .number(0.5...4), "Line spacing as a multiple of the font size (default 1.28)"),
+        .init("textStyle", "tracking", .number(-0.5...2), "Letter spacing as a share of the font size (default 0)"),
+        .init("textStyle", "uppercase", .boolean, "Draw the text in capitals"),
+    ] + ColorGrade.ranges.map { .init("color", $0.key, .number($0.range), ColorGrade.summaries[$0.key] ?? "") }
+        + backdropProperties + pictureProperties
+}
+
+extension ColorGrade {
+    public static let summaries = [
+        "exposure": "Exposure in stops (0 = unchanged)",
+        "contrast": "Contrast multiplier (1 = unchanged)",
+        "saturation": "Saturation multiplier (0 = black and white, 1 = unchanged)",
+        "lutStrength": "LUT mix (0 = off, 1 = full)",
+    ]
+}
+
+extension Item {
+    /// Checks every `ItemProperty`: groups are objects, values have the declared type and range.
+    func validateDeclaredProperties() throws {
+        for group in ItemProperty.groups {
+            guard let value = fields[group] else { continue }
+            guard case .object = value else { throw ProjectError.invalid("item.\(id).\(group): expected an object") }
+        }
+        // Walks the item's own fields (a handful) rather than every declared property; the first
+        // mismatch in `ItemProperty.all` order is reported, as before.
+        var first: (index: Int, expected: String)?
+        func check(_ values: [String: JSONValue], group: String?) {
+            for (key, value) in values {
+                guard let index = ItemProperty.index[ItemProperty.Key(group: group, key: key)],
+                    first.map({ index < $0.index }) ?? true,
+                    let expected = ItemProperty.all[index].rule.mismatch(value)
+                else { continue }
+                first = (index, expected)
+            }
+        }
+        check(fields, group: nil)
+        for group in ItemProperty.groups {
+            if case .object(let values) = fields[group] { check(values, group: group) }
+        }
+        guard let first else { return }
+        let property = ItemProperty.all[first.index]
+        let path = "item.\(id)." + (property.group.map { $0 + "." } ?? "") + property.key
+        throw ProjectError.invalid("\(path): expected \(first.expected)")
+    }
+}
+
+extension ItemProperty {
+    struct Key: Hashable {
+        let group: String?
+        let key: String
+    }
+
+    /// Position of each property in `all`.
+    static let index = Dictionary(
+        all.enumerated().map { (Key(group: $1.group, key: $1.key), $0) }, uniquingKeysWith: { first, _ in first })
+}
+
+extension ItemProperty.Rule {
+    /// What the value should have been, or nil when it fits.
+    func mismatch(_ value: JSONValue) -> String? {
+        switch self {
+        case .number(let range):
+            value.double.map { $0.isFinite && range.contains($0) } == true ? nil : "a number in \(range)"
+        case .integer(let range):
+            value.int.map(range.contains) == true ? nil : "an integer in \(range)"
+        case .boolean:
+            if case .bool = value { nil } else { "a boolean" }
+        case .text(let maxLength):
+            value.string.map { !$0.isEmpty && $0.count <= maxLength } == true ? nil : "text of 1…\(maxLength) characters"
+        case .color:
+            value.string.map(Self.isColor) == true ? nil : "a colour #RRGGBB"
+        }
+    }
+
+    public static let colorPattern = "^#[0-9A-Fa-f]{6}$"
+
+    static func isColor(_ text: String) -> Bool {
+        text.count == 7 && text.first == "#" && text.dropFirst().allSatisfy(\.isHexDigit)
+    }
+}
+
+/// The project format as JSON Schema (draft 2020-12). Unknown fields are allowed everywhere, because they
+/// round-trip; only the declared fields are typed.
+public enum ProjectSchema {
+    public static var document: JSONValue {
+        var root = fields(
+            "A VibeEdit project (project.vibeedit.json).",
+            required: ["schema", "id", "name", "rev", "format", "tracks"],
+            properties: [
+                "schema": .object(["const": .string(Project.schema)]),
+                "id": string("Stable project ID", minLength: 1),
+                "name": string("Display name", minLength: 1),
+                "rev": integer("Revision, +1 on every applied edit", minimum: 0),
+                "clipFill": boolean(
+                    "Clips fill the frame, cropping what does not fit, instead of fitting inside it. New projects "
+                        + "fit (false); a project without it fills, as projects did before it existed"),
+                "canvasFromFirstClip": boolean(
+                    "The first video or image clip placed on the timeline sets the canvas shape (portrait, landscape or "
+                        + "square, keeping the short side). Cleared by any canvas change, so a canvas set on purpose "
+                        + "stays; absent in projects made before it existed"),
+                "contentLanguage": string("BCP 47 language of speech and captions", pattern: "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"),
+                "format": object(
+                    "Output format", required: ["width", "height", "fps"],
+                    properties: [
+                        "width": integer("Pixels", minimum: 1, maximum: 16384),
+                        "height": integer("Pixels", minimum: 1, maximum: 16384),
+                        "fps": ref("rational"), "sampleRate": integer("Hz", minimum: 1),
+                    ]),
+                "media": array("Source files", of: ref("media")),
+                "tracks": array("Layers: visual kinds back to front, then audio", of: ref("track"), minItems: 1, maxItems: 256),
+                "markers": array("Timeline markers", of: ref("marker"), maxItems: 10_000),
+                "transitions": array("Transitions on adjacent video cuts", of: ref("transition"), maxItems: 10_000),
+                "luts": array("Project .cube LUT catalog", of: ref("lut"), maxItems: 1_000),
+                "audio": ref("audio"),
+                "output": outputSchema,
+                "review": reviewSchema,
+                "brand": brandSchema, "illustration": illustrationSchema,
+                "brief": planSchemas["brief"] ?? .null,
+                "plan": planSchemas["plan"] ?? .null,
+                "beatGrid": object(
+                    "Beat grid of one audio media", required: ["media", "bpm", "frames"],
+                    properties: [
+                        "media": string("Media ID"), "bpm": number("Beats per minute", 20...400),
+                        "frames": array("Sorted unique timeline frames", of: integer("Frame", minimum: 0), maxItems: 100_000),
+                    ]),
+                "providers": .object([
+                    "type": .string("object"), "description": .string("Preferred provider ID per capability"),
+                    "additionalProperties": .object(["type": .string("string")]),
+                ]),
+            ])
+        root["$schema"] = .string("https://json-schema.org/draft/2020-12/schema")
+        root["$id"] = .string("https://vibeedit.app/schema/\(Project.schema).json")
+        root["title"] = .string("VibeEdit project")
+        root["$defs"] = .object(definitions.merging(mediaDescriptionDefinitions) { $1 }.merging(["itemTransition": itemTransitionSchema]) { $1 })
+        return .object(root)
+    }
+
+    /// The published file's bytes: indented, sorted keys, trailing newline.
+    public static func data() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(document) + Data("\n".utf8)
+    }
+
+    static var definitions: [String: JSONValue] {
+        [
+            "rational": .object([
+                "description": .string("[numerator, denominator]"), "type": .string("array"),
+                "prefixItems": .array([integer("Numerator", minimum: 1), integer("Denominator", minimum: 1)]),
+                "minItems": .integer(2), "maxItems": .integer(2),
+            ]),
+            "media": .object(fields(
+                "A source file, referenced by path, never copied", required: ["id", "path", "fps", "frames"],
+                properties: [
+                    "id": string("Stable media ID", minLength: 1),
+                    "path": string("Relative to the project folder, or @assets/… in the workspace", minLength: 1, pattern: "^[^/]"),
+                    "kind": enumeration("Media kind; an image is held for as long as its items last (frames is the limit)",
+                                        ["video", "audio", "image"]),
+                    "fps": ref("rational"), "frames": integer("Length in source frames", minimum: 1),
+                    "width": integer("Pixels", minimum: 1, maximum: 16384),
+                    "height": integer("Pixels", minimum: 1, maximum: 16384),
+                    "hasAudio": boolean("Whether the file has sound"),
+                    "alpha": boolean("A movie with an alpha channel (a video sticker); previewed without a proxy"),
+                    "generated": boolean("Made by an image.generate provider (#550): review asks for the disclosure label"),
+                    TransitionPreset.soundLibraryField: string("The library item (scope:id) it was copied from"),
+                    "label": string("The name shown instead of the file's (a library item's name)"),
+                    "description": ref("mediaDescription"),
+                    "license": mediaLicenseSchema, "provenance": mediaProvenanceSchema,
+                    "data": .object([
+                        "type": .string("object"),
+                        "description": .string("The agent's own fields (P2-H10: takes, verdicts, reasons); free JSON, set by setMediaData"),
+                    ]),
+                ])),
+            "track": track,
+            "item": .object(item),
+            "color": .object(group("color", "Color grade; on an adjustment item it applies to every layer below", extra: [
+                "lut": .object(["description": .string("LUT ID from luts[]"), "type": .array([.string("string"), .string("null")])]),
+            ])),
+            "marker": .object(fields(
+                "A marker; kind section starts a named section", required: ["at", "kind", "label"],
+                properties: [
+                    "id": string("Stable ID"), "at": integer("Timeline frame", minimum: 0), "kind": string("Marker kind", minLength: 1),
+                    "label": string("Label", minLength: 1, maxLength: 120),
+                ])),
+            "transition": .object(fields(
+                "A transition between two adjacent clips on a video layer",
+                required: ["id", "kind", "from", "to", "duration"],
+                properties: [
+                    "id": string("Stable ID", minLength: 1),
+                    "kind": string(
+                        "Transition kind: " + TimelineTransition.renderedKinds.joined(separator: ", ")
+                            + ", or any name with motion", pattern: "^[a-z][a-z0-9-]{0,63}$"),
+                    "from": string("Outgoing item ID"), "to": string("Incoming item ID"),
+                    "duration": integer("Timeline frames", minimum: 1),
+                    "easing": string("How the tween runs: " + TimelineTransition.easingSummary + "; linear when absent"),
+                    "motion": .object([
+                        "type": .string("object"),
+                        "description": .string(
+                            "The tween as data: outgoing and incoming {property: [values]} over the tween; properties "
+                                + TransitionMotion.ranges.keys.sorted().joined(separator: ", ")),
+                    ]),
+                ])),
+            "lut": .object(fields(
+                "A .cube file in the project luts folder", required: ["id", "name", "path", "size"],
+                properties: [
+                    "id": string("Stable ID", minLength: 1), "name": string("Display name", minLength: 1, maxLength: 120),
+                    "path": string("luts/<file>.cube", pattern: "^luts/.+\\.cube$"),
+                    "size": integer("Cube dimension", minimum: 2, maximum: 64),
+                    ColorLUT.libraryHashField: string("SHA-256 of the library look's .cube it was copied from"),
+                    ColorLUT.libraryItemField: string("The library look (scope:id) it was copied from"),
+                ])),
+            "audio": audioSchema,
+        ]
+    }
+
+    private static var track: JSONValue {
+        var value = fields(
+            "A layer. Items never overlap on one layer.", required: ["id", "kind", "role", "name", "items"],
+            properties: [
+                "id": string("Stable layer ID", minLength: 1), "kind": enumeration("Layer kind", TrackKind.all),
+                "role": .object([
+                    "type": .string("string"), "minLength": .integer(1),
+                    "description": .string("Semantic role; any nonempty value, these are assigned by VibeEdit"),
+                    "examples": .array(TrackRole.known.map(JSONValue.string)),
+                ]),
+                "name": string("Display name", minLength: 1), "locked": boolean("Items cannot change until unlocked"),
+                "magnetic": boolean("Inserts append after the last item; drags reorder and compact"),
+                "hidden": boolean("Visual layers only: left out of preview and export"),
+                "muted": boolean("Audio layers only: silent, and its speech stops ducking music"),
+                "duckingEnabled": boolean("Music layers: suspend ducking without losing the level"),
+                "duckUnderSpeechDb": number("Music layers: level under speech", -60...0),
+                "duckAttackFrames": integer("Music layers: ramp in", minimum: 0, maximum: 10_000),
+                "duckReleaseFrames": integer("Music layers: ramp out", minimum: 0, maximum: 10_000),
+                "duckMinGapFrames": integer("Music layers: shorter speech gaps keep it down (2.5 s)", minimum: 0, maximum: 10_000),
+                "items": array("Items, in any order", of: ref("item")),
+            ])
+        // What an item carries depends on its layer's kind.
+        func items(_ rule: JSONValue) -> JSONValue {
+            .object(["properties": .object(["items": .object(["items": rule])])])
+        }
+        func when(_ kinds: [String], _ rule: JSONValue) -> JSONValue {
+            .object([
+                "if": .object(["properties": .object(["kind": .object(["enum": .array(kinds.map(JSONValue.string))])])]),
+                "then": items(rule),
+            ])
+        }
+        let requires = { (key: String) in JSONValue.object(["required": .array([.string(key)])]) }
+        value["allOf"] = .array([
+            when([TrackKind.video, TrackKind.audio], requires("media")),
+            when([TrackKind.text], requires("text")),
+            when([TrackKind.adjustment], .object(["not": .object(["anyOf": .array([requires("media"), requires("text")])])])),
+        ])
+        return .object(value)
+    }
+
+    private static var item: [String: JSONValue] {
+        var properties: [String: JSONValue] = [
+            "id": string("Stable item ID, unique in the project", minLength: 1),
+            "at": integer("Start, in timeline frames", minimum: 0),
+            "dur": integer("Length, in timeline frames", minimum: 1),
+            "in": integer("Source in-point, in media frames", minimum: 0),
+            "media": string("Media ID (video and audio layers)"),
+            "text": string("Caption or title text (text layers)"),
+            "textPreset": string(
+                "Text preset (text layers): built-in " + TextPreset.all.joined(separator: ", ")
+                    + " or any name (the first's defaults); default bold-outline", minLength: 1, maxLength: 80),
+            "freezeFrame": integer("Video: source frame held for the whole item", minimum: 0),
+            "reframePreset": string("Framing preset ID, or custom"),
+            "linkedAudio": string("Video: ID of its linked sound item"),
+            "linkedVideo": string("Audio: ID of its linked picture item"),
+            EffectRecipe.soundField: string("Audio: the clip whose effect preset placed this sound; applying it again replaces it"),
+            EffectRecipe.textField: string("Text: the clip whose effect preset placed this text; applying it again replaces it"),
+            "speedCurve": .object([
+                "type": .string("array"), "minItems": .integer(2), "maxItems": .integer(SpeedCurve.maximumPoints),
+                "description": .string(
+                    "Speed ramp: points from t 0 (clip start) to t 1 (clip end), speed linear between them; "
+                        + "speed then holds the curve's average. Set with setSpeedCurve."),
+                "items": .object([
+                    "type": .string("object"), "required": .array([.string("t"), .string("speed")]),
+                    "properties": .object([
+                        "t": .object(["type": .string("number"), "minimum": .integer(0), "maximum": .integer(1)]),
+                        "speed": .object([
+                            "type": .string("number"), "minimum": .number(Project.speedRange.lowerBound),
+                            "maximum": .number(Project.speedRange.upperBound),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            "reversed": .object([
+                "type": .string("object"),
+                "description": .string("Set by clip reverse: the original media and in-point, restored by reversing again"),
+                "properties": .object(["media": string("Original media ID"), "in": integer("Original in-point", minimum: 0)]),
+            ]),
+            "keyframes": .object([
+                "type": .string("object"),
+                "description": .string(
+                    "Animation (video, text and audio layers; audio animates volume only): property → keys sorted by "
+                        + "frame, counted from the item's start; "
+                        + "values between keys follow each key's ease, and hold before the first and after the last key"),
+                "additionalProperties": .bool(false),
+                "properties": .object(Dictionary(uniqueKeysWithValues: ItemMotion.ranges.map { name, range in
+                    (name, .object([
+                        "type": .string("array"), "minItems": .integer(1), "maxItems": .integer(1000),
+                        "description": .string(ItemMotion.summaries[name] ?? name),
+                        "items": .object([
+                            "type": .string("object"), "required": .array([.string("frame"), .string("value")]),
+                            "properties": .object([
+                                "frame": .object(["type": .string("integer")]),
+                                "value": .object([
+                                    "type": .string("number"), "minimum": .number(range.lowerBound),
+                                    "maximum": .number(range.upperBound),
+                                ]),
+                                "ease": string("Change to the next key: " + ItemMotion.Ease.summary + "; default inOut"),
+                            ]),
+                        ]),
+                    ]))
+                })),
+            ]),
+            "words": .object([
+                "type": .string("array"), "maxItems": .integer(CaptionWords.maximumWords),
+                "description": .string(
+                    "Text: timing of each word of the text (split at white space), in frames from the item's start; "
+                        + "set by captions generate when the provider returns word timings"),
+                "items": .object([
+                    "type": .string("object"), "required": .array([.string("text"), .string("at"), .string("dur")]),
+                    "properties": .object([
+                        "text": string("The word"), "at": .object(["type": .string("integer")]),
+                        "dur": integer("Frames", minimum: 1),
+                    ]),
+                ]),
+            ]),
+            "wordStyle": .object([
+                "description": .string("Text: show the words as they are spoken: a preset (highlight the current "
+                    + "word, karaoke fill, or reveal) or {spoken, upcoming, past} looks of {fill #RRGGBB, opacity 0–1}; "
+                    + "timings come from words, or are estimated"),
+                "oneOf": .array([
+                    .object(["type": .string("string"), "enum": .array(CaptionWords.styles.map(JSONValue.string))]),
+                    .object(["type": .string("object"), "additionalProperties": .object(["type": .string("object")])]),
+                ]),
+            ]),
+            "disclosure": boolean("Text: the label that discloses generated pictures under it (image disclose, #550)"),
+            "brandRoles": .object([
+                "type": .string("object"),
+                "description": .string(
+                    "Text: textStyle path → brand role (#453); applying a brand kit sets these from its palette and "
+                        + "fonts. Paths " + (LibraryBrand.colorPaths + [LibraryBrand.fontPath]).joined(separator: ", ")
+                        + "; roles " + (LibraryBrand.colorRoles + LibraryBrand.fontRoles).joined(separator: ", ")),
+                "additionalProperties": .object([
+                    "type": .string("string"),
+                    "enum": .array((LibraryBrand.colorRoles + LibraryBrand.fontRoles).map(JSONValue.string)),
+                ]),
+            ]),
+            "tag": .object([
+                "type": .string("object"), "description": .string("Editorial tags"),
+                "properties": .object([
+                    "role": enumeration("Speech coverage role", ["speech", "broll", "underVO"]),
+                    "section": string("Section name"),
+                ]),
+            ]),
+            "color": ref("color"),
+        ]
+        for name in ItemProperty.groups where name != "color" {
+            let summaries = [
+                "transform": "Framing",
+                "crop": "Video picture: the visible part of the source frame (the picture keeps its place; zoom and pan move it)",
+                "backdrop": "Video picture: what fills the frame around it (fit clips, off-aspect photos) instead of black",
+            ]
+            properties[name] = .object(group(
+                name, summaries[name] ?? "Text style overrides",
+                extra: name == "textStyle" ? ["lines": textLinesSchema] : [:]))
+        }
+        for property in ItemProperty.all where property.group == nil {
+            properties[property.key] = schema(for: property)
+        }
+        properties.merge(["voice": voiceItemSchema, "enter": ref("itemTransition"), "exit": ref("itemTransition")]) { $1 }
+        return fields("A timeline item; see the layer rules for which fields it needs", required: ["id", "at", "dur"],
+                      properties: properties)
+    }
+
+    private static func group(_ name: String, _ summary: String, extra: [String: JSONValue] = [:]) -> [String: JSONValue] {
+        var properties = extra
+        for property in ItemProperty.all where property.group == name { properties[property.key] = schema(for: property) }
+        return fields(summary, required: [], properties: properties)
+    }
+
+    private static func schema(for property: ItemProperty) -> JSONValue {
+        switch property.rule {
+        case .number(let range): number(property.summary, range)
+        case .integer(let range): integer(property.summary, minimum: range.lowerBound, maximum: range.upperBound)
+        case .boolean: boolean(property.summary)
+        case .text(let maxLength): string(property.summary, minLength: 1, maxLength: maxLength)
+        case .color: string(property.summary, pattern: ItemProperty.Rule.colorPattern)
+        }
+    }
+
+    // MARK: Builders
+
+    static func fields(
+        _ summary: String, required: [String], properties: [String: JSONValue]
+    ) -> [String: JSONValue] {
+        var value: [String: JSONValue] = [
+            "type": .string("object"), "description": .string(summary), "properties": .object(properties),
+        ]
+        if !required.isEmpty { value["required"] = .array(required.map(JSONValue.string)) }
+        return value
+    }
+
+    static func object(_ summary: String, required: [String], properties: [String: JSONValue]) -> JSONValue {
+        .object(fields(summary, required: required, properties: properties))
+    }
+
+    static func ref(_ name: String) -> JSONValue { .object(["$ref": .string("#/$defs/\(name)")]) }
+
+    static func array(_ summary: String, of items: JSONValue, minItems: Int? = nil, maxItems: Int? = nil) -> JSONValue {
+        var value: [String: JSONValue] = ["type": .string("array"), "description": .string(summary), "items": items]
+        if let minItems { value["minItems"] = .integer(minItems) }
+        if let maxItems { value["maxItems"] = .integer(maxItems) }
+        return .object(value)
+    }
+
+    static func string(
+        _ summary: String, minLength: Int? = nil, maxLength: Int? = nil, pattern: String? = nil
+    ) -> JSONValue {
+        var value: [String: JSONValue] = ["type": .string("string"), "description": .string(summary)]
+        if let minLength { value["minLength"] = .integer(minLength) }
+        if let maxLength { value["maxLength"] = .integer(maxLength) }
+        if let pattern { value["pattern"] = .string(pattern) }
+        return .object(value)
+    }
+
+    static func enumeration(_ summary: String, _ values: [String]) -> JSONValue {
+        .object([
+            "type": .string("string"), "description": .string(summary), "enum": .array(values.map(JSONValue.string)),
+        ])
+    }
+}

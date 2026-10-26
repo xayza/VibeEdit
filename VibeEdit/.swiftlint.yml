@@ -1,0 +1,25 @@
+included:
+  - VibeEdit
+  - Tests
+  - CLI
+  - MCPBridge
+  - Tools
+  - Plugins
+  - Packages/VibeEditCore/Sources
+  - Packages/VibeEditCore/Tests
+  - Packages/VibeEditCore/Benchmarks
+excluded:
+  - .build
+  - Packages/VibeEditCore/.build
+  # Generated: verbatim license texts (scripts/update-acknowledgements.py).
+  - VibeEdit/Models/Acknowledgements.swift
+disabled_rules:
+  - identifier_name
+  - trailing_comma
+  - opening_brace
+  - statement_position
+  - large_tuple
+line_length: 150
+function_body_length: 100
+type_body_length: 350
+file_length: 500

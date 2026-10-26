@@ -1,0 +1,51 @@
+{
+  "schema": "vibeedit.plugin/1",
+  "id": "example.toolkit",
+  "name": "Example Toolkit",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entrypoint": "bin/provider",
+  "transport": "session",
+  "capabilities": [],
+  "dependencies": [
+    {"id": "python", "name": "Python 3", "kind": "executable", "probe": {"executable": "python3", "arguments": ["--version"]}}
+  ],
+  "options": [
+    {"id": "sectionPrefix", "title": {"en": "Section prefix", "vi": "Tiền tố mốc"}, "type": "string", "default": "Mark", "scope": "project"},
+    {"id": "announce", "title": {"en": "Announce imports", "vi": "Báo khi nhập media"}, "type": "bool", "default": true}
+  ],
+  "contributes": {
+    "actions": [
+      {
+        "id": "example.toolkit.mark-playhead",
+        "title": {"en": "Mark section at playhead", "vi": "Đặt mốc tại playhead"},
+        "icon": "flag",
+        "placements": ["menu.plugins", "toolbar", "timeline.context"],
+        "when": "project && timeline",
+        "shortcut": "ctrl+opt+m"
+      },
+      {
+        "id": "example.toolkit.set-opacity",
+        "title": {"en": "Set clip opacity…", "vi": "Đặt độ mờ clip…"},
+        "icon": "circle.lefthalf.filled",
+        "placements": ["menu.plugins", "clip.context", "inspector.video"],
+        "when": "selection.kind == video",
+        "params": [
+          {"id": "opacity", "title": {"en": "Opacity", "vi": "Độ mờ"}, "type": "number", "minimum": 0, "maximum": 1, "default": 0.5}
+        ]
+      },
+      {
+        "id": "example.toolkit.describe-media",
+        "title": {"en": "Describe media", "vi": "Mô tả media"},
+        "placements": ["media.context", "panel.media"],
+        "when": "media",
+        "context": ["media"]
+      }
+    ],
+    "hooks": [
+      "media.imported",
+      {"event": "export.finished", "edits": true},
+      {"event": "edit.committed", "debounceMs": 1000}
+    ]
+  }
+}
