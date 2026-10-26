@@ -50,7 +50,7 @@ fields round-trip unchanged):
 | `contentLanguage` | BCP 47 language of speech/captions (default `vi`) |
 | `media[]` | `{id, path (relative), kind, fps, frames, width, height, hasAudio}` |
 | `tracks[]` | Ordered back-to-front: visual tracks first, then audio |
-| `transitions[]` | `{id, kind, from, to, duration}` (frames; Phase 1: preserved, not rendered) |
+| `transitions[]` | `{id, kind, from, to, duration}` (frames; rendered since Phase 2: crossfade/wipe/slide) |
 | `markers[]` | `{id, at, kind, label}` (sections) |
 | `luts[]`, `providers`, `audio`, `beatGrid` | Preserved; Phase 1 does not apply LUTs/beat grids |
 
@@ -70,9 +70,10 @@ Item fields: `id`, `media`, `in` (source frame at the media fps),
 Rules kept in the MVP: integer-frame timing; stable IDs (split keeps
 the ID on the left half); no overlap on one track; visual tracks
 before audio tracks; atomic saves; `rev` increments per edit.
-Fields the MVP does not yet interpret (kept, not dropped):
-`keyframes`, `color`/LUTs, `adjustment` items, `beatGrid`,
-`providers`, `interop`, `targets`.
+Fields the port does not yet interpret (kept, not dropped):
+main-track `keyframes`, `adjustment` items, `beatGrid`,
+`providers`, `interop`, `targets`. (Overlay/text keyframes and
+per-clip LUT/colour presets are interpreted since Phase 2.)
 
 ## 3. Core edit operations (original → Windows MVP)
 
@@ -87,7 +88,7 @@ and `docs/reference/commands.md`: 249 commands in total).
 | `timeline apply` (trim, split, move, delete, set properties) | `vibeedit trim/split/move/delete/speed`, MCP `vibeedit_timeline_apply` |
 | `media place`, `layers add` | `vibeedit add` (clip), web UI add-clip form |
 | `media import` | Web UI media upload → `media/`; CLI `add` with ffprobe metadata |
-| `captions import/export` (SRT) | Text items in the timeline; SRT import/export is Phase 2 |
+| `captions import/export` (SRT) | Phase 2: `vibeedit srt-import/srt-export`, UI SRT panel, MCP `vibeedit_srt_import/export` |
 | `timeline undo/redo` | CLI undo via `.bak` file; web UI undo/redo (50-step session history) |
 | `export start` | `vibeedit export --preset draft\|full`, web UI Export buttons, MCP `vibeedit_export_start` |
 | `media proxy`, `media analyze`, `media transcribe` | Not in Phase 1 (no ML providers bundled, same as the original's stance) |
@@ -99,22 +100,17 @@ Original CLI: `bashcut <group> <command>`; original MCP tools:
 `bashcut_action_<id>`, served by `bashcut-mcp` over stdio, forwarding
 to the app's automation socket.
 
-Windows MVP CLI: `python windows/vibeedit.py <command>` (see
-`windows/README.md` for the full list). Windows MVP MCP:
+Windows CLI: `python windows/vibeedit.py <command>` (see
+`windows/README.md` for the full list). Windows MCP:
 `windows/vibeedit_core/mcp.py`, stdio JSON-RPC 2.0, server name
-`vibeedit-mcp`, with a real subset of tools that call the same
-Project operations as the CLI and web UI:
+`vibeedit-mcp`, with real tools that call the same Project
+operations as the CLI and web UI — 23 tools after Phase 2 (see
+`windows/README.md` for the list).
 
-`vibeedit_project_get`, `vibeedit_project_create`,
-`vibeedit_project_open`, `vibeedit_project_save`,
-`vibeedit_timeline_get`, `vibeedit_timeline_apply`,
-`vibeedit_timeline_undo`, `vibeedit_media_list`,
-`vibeedit_export_start`.
-
-Not yet ported (Phase 2): the remaining ~240 tools (review, beats,
+Not yet ported (Phase 3): the remaining ~226 tools (review, beats,
 audio measurement, knowledge/skills, plugins, UI actions/dialogs,
 agent dock terminals, Resolve/OTIO export, batch), plugin-action
-tools, and the socket-based live app connection (the MVP MCP server
+tools, and the socket-based live app connection (the MCP server
 is single-project and edits the project file directly).
 
 ## 5. macOS-only modules → Windows mapping
@@ -122,25 +118,66 @@ is single-project and edits the project file directly).
 | macOS layer | Windows Phase 1 replacement | Limit |
 |---|---|---|
 | SwiftUI + AppKit UI, timeline, viewer | Web UI (`windows/static/`): preview top, editor panel, multi-track timeline strip bottom, CapCut-style | Preview plays the latest export only; no live timeline scrub |
-| AVFoundation + Core Image/Metal render | FFmpeg (`windows/vibeedit_core/render.py`): concat segments, scale/crop fill, drawtext, setpts/atempo, fade/afade, amix | No transitions (fades to/from black only), no keyframes, no LUTs, overlay audio not rendered, no Metal effects |
+| AVFoundation + Core Image/Metal render | FFmpeg (`windows/vibeedit_core/render.py`): concat/xfade segments, scale/crop fill, drawtext, setpts/atempo, fade/afade, amix, lut3d, eq presets, keyframe expressions | No full transitions library, no main-track keyframes, overlay audio not rendered, no Metal effects |
 | AVFoundation preview proxies | Draft export (half resolution, veryfast) | No per-clip proxy generation |
 | Core Text captions | FFmpeg drawtext (DejaVu on Linux, Arial/Segoe UI on Windows) | One style per caption item; no word-by-word karaoke |
 | SwiftTerm agent dock (Claude/Codex terminals) | Not ported | Agents use the MCP server / CLI from their own terminal |
 | Plugins (out-of-process, versioned API) | Not ported | Plugin results are preserved as project data only |
 | macOS Keychain secrets, Application Support paths | Plain project folder on Windows; no secrets are stored by the MVP | Do not put API keys in project JSON |
 
-## 6. Phase 2 list (explicitly NOT in Phase 1)
+## 6. Phase 2 — DONE (what Phase 1 did not do, now implemented)
 
-- Full transitions library (crossfades, wipes, slides) and the
-  original transition preview stills.
-- Keyframe animation (zoom/pan/tilt/opacity/volume curves).
-- LUT grading and adjustment layers.
-- SRT caption import/export; transcription and voice providers.
-- Beat grid, audio measurement/loudness, ducking automation.
+- Transitions: `transitions[]` keeps the original shape
+  `{id, kind, from, to, duration}` with duration in frames; kinds
+  accepted are `dissolve` (also `crossfade`/`fade`), `wipe`,
+  `wipe-left/right/up/down`, `slide`, `slide-left/right/up/down`,
+  mapping to FFmpeg xfade names (fade, wipeleft, wiperight, wipeup,
+  wipedown, slideleft, slideright, slideup, slidedown). Duration
+  0.1–2.0 s, must not exceed the shorter adjacent clip, clips must
+  be directly consecutive on the main track. Rendered with xfade
+  (video) + acrossfade (audio); edge fades on the incoming side
+  are skipped at a transition. Output timeline = project timeline
+  minus transition durations (overlays/text/music after a boundary
+  shift earlier accordingly). Transition preview stills from the
+  original are NOT ported.
+- Keyframes: stored on items as `keyframes[]` with `at` in frames
+  relative to the item start and properties `x`, `y` (0..1),
+  `scale` (>0), `opacity` (0..1), `volume` (dB, -60..24). Rendered
+  linearly: overlay/text position (overlay x/y and drawtext x/y
+  expressions use main-timeline time), overlay/text scale (scale
+  and drawtext fontsize expressions), text opacity (drawtext alpha
+  expression), audio volume (volume expression, eval=frame).
+  Overlay opacity is rendered stepwise (clip split at opacity
+  keyframes, constant alpha per segment) because FFmpeg's
+  colorchannelmixer alpha expression has no time variable.
+  Keyframes on main-track clips are stored but not rendered.
+- LUT/colour: item `color` = `{lut, preset, strength}`; LUT via
+  FFmpeg lut3d (validated .cube with LUT_3D_SIZE; missing/invalid
+  is a hard error). Presets via eq: vivid, warm, cool, faded, mono.
+  Adjustment layers are NOT ported.
+- SRT: import into a text track (overlap-rejected, validated
+  before any cue is added) and export from a text track; CLI
+  `srt-import`/`srt-export`, UI import/export, MCP
+  `vibeedit_srt_import/export`.
+- MCP: 23 real tools (was 9). New: media_place, clip_trim/split/
+  move/delete/speed/keyframes/color, text_add, transition_set/
+  remove, srt_import/export, export_status.
+- Windows launcher: `windows/run_vibeedit.bat` + `run_vibeedit.ps1`
+  (check Python + FFmpeg, start server, poll port, open browser)
+  and `windows/INSTALL.md` (Vietnamese).
+
+## 7. Phase 3 list (explicitly NOT in Phase 2)
+
+- Full original transitions library beyond crossfade/wipe/slide
+  (whip, iris, zoom, glitch, etc.) and transition preview stills.
+- Keyframes on main-track clips; tilt keyframes; karaoke captions.
+- Adjustment layers; LUT strength blending (strength is stored).
+- Transcription and voice providers; beat grid, audio
+  measurement/loudness, ducking automation.
 - Plugins, agent dock terminal, knowledge/skills, review panel.
 - Resolve/OTIO export; batch processing.
 - Overlay-item audio in renders.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
   Swift 6, macOS 14) and a VibeEdit logo/splash replacement.
-- A real Windows installer (the MVP runs from source with Python +
-  FFmpeg; see `windows/README.md`).
+- A real Windows installer (the port runs from source with Python +
+  FFmpeg, or via the launcher scripts; see `windows/INSTALL.md`).

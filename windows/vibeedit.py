@@ -17,6 +17,11 @@ Usage (run from the repo root, or from windows/ with adjusted paths):
     python windows/vibeedit.py export <project> [--preset draft|full] [--out FILE]
     python windows/vibeedit.py serve [--project DIR] [--port 8000]
     python windows/vibeedit.py mcp [project]
+    python windows/vibeedit.py transition <project> <from> <to> <kind> <dur_s>
+    python windows/vibeedit.py keyframe <project> <item> <at_s> <property> <value>
+    python windows/vibeedit.py color <project> <item> [--lut FILE] [--preset NAME]
+    python windows/vibeedit.py srt-import <project> <file> [--track t1]
+    python windows/vibeedit.py srt-export <project> <file> [--track t1]
 
 Times in CLI arguments are frames (the original's unit), except
 export durations reported in seconds. Media paths in ``add`` are
@@ -176,6 +181,49 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_transition(args) -> int:
+    proj, path = _open(args.path)
+    trans = proj.add_transition(args.from_item, args.to_item, args.kind,
+                                args.duration)
+    _save_with_backup(proj, path)
+    print(json.dumps(trans, ensure_ascii=False))
+    return 0
+
+
+def cmd_keyframe(args) -> int:
+    proj, path = _open(args.path)
+    item = proj.add_keyframe(args.item, args.at, args.property, args.value)
+    _save_with_backup(proj, path)
+    print(json.dumps(item.get("keyframes", []), ensure_ascii=False))
+    return 0
+
+
+def cmd_color(args) -> int:
+    proj, path = _open(args.path)
+    item = proj.set_color(args.item, args.lut, args.preset)
+    _save_with_backup(proj, path)
+    print(json.dumps(item.get("color", {}), ensure_ascii=False))
+    return 0
+
+
+def cmd_srt_import(args) -> int:
+    proj, path = _open(args.path)
+    with open(args.file, encoding="utf-8") as fh:
+        items = proj.import_srt(args.track, fh.read())
+    _save_with_backup(proj, path)
+    print(f"imported {len(items)} cues onto {args.track}")
+    return 0
+
+
+def cmd_srt_export(args) -> int:
+    proj, _ = _open(args.path)
+    text = proj.export_srt(args.track)
+    with open(args.file, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    print(f"exported {len(proj.data['tracks'])} tracks' captions to {args.file}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="vibeedit")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -244,6 +292,31 @@ def main(argv=None) -> int:
     p.add_argument("--preset", default="full", choices=["full", "draft"])
     p.add_argument("--out", default=None)
     p.set_defaults(fn=cmd_export)
+
+    p = sub.add_parser("transition")
+    p.add_argument("path"); p.add_argument("from_item"); p.add_argument("to_item")
+    p.add_argument("kind"); p.add_argument("duration", type=float)
+    p.set_defaults(fn=cmd_transition)
+
+    p = sub.add_parser("keyframe")
+    p.add_argument("path"); p.add_argument("item"); p.add_argument("at", type=float)
+    p.add_argument("property"); p.add_argument("value", type=float)
+    p.set_defaults(fn=cmd_keyframe)
+
+    p = sub.add_parser("color")
+    p.add_argument("path"); p.add_argument("item")
+    p.add_argument("--lut", default=None); p.add_argument("--preset", default=None)
+    p.set_defaults(fn=cmd_color)
+
+    p = sub.add_parser("srt-import")
+    p.add_argument("path"); p.add_argument("file")
+    p.add_argument("--track", default="t1")
+    p.set_defaults(fn=cmd_srt_import)
+
+    p = sub.add_parser("srt-export")
+    p.add_argument("path"); p.add_argument("file")
+    p.add_argument("--track", default="t1")
+    p.set_defaults(fn=cmd_srt_export)
 
     p = sub.add_parser("serve")
     p.add_argument("--project", default=None)

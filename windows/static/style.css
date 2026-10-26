@@ -34,5 +34,6 @@ label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color:
 .clip.text { background: #22352a; border-color: #76a58a; }
 .clip.audio { background: #3b3020; border-color: #c29a57; }
 .clip.selected { outline: 2px solid #e2b47f; }
+.transition-marker { position: absolute; top: 2px; bottom: 2px; background: #c4915e; color: #17120d; border-radius: 4px; padding: 2px 4px; font-size: 11px; overflow: hidden; white-space: nowrap; z-index: 2; }
 #timelineText { white-space: pre-wrap; font-size: 12px; color: #b8b1a6; background: #0d0c0b; border-radius: 8px; padding: 8px; }
 @media (max-width: 900px) { .editor { grid-template-columns: 1fr; } }

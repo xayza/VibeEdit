@@ -1,5 +1,23 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 2
+
+- Transitions between consecutive main-track clips (crossfade,
+  wipe, slide; 0.1–2.0 s), rendered with FFmpeg xfade/acrossfade;
+  the output timeline shortens by the transition durations.
+- Keyframes for overlay/text clips (position, scale, opacity) and
+  volume keyframes for audio clips, rendered with FFmpeg
+  expressions (overlay opacity stepwise, the rest linear); keyframes
+  on main-track clips are stored but not rendered yet.
+- SRT caption import/export; per-clip .cube LUT (lut3d) and eq
+  colour presets (vivid, warm, cool, faded, mono); an invalid LUT
+  is a hard error, never a silent skip.
+- MCP expanded from 9 to 23 real tools; new CLI commands
+  (transition, keyframe, color, srt-import, srt-export); UI panels
+  for transitions, keyframes, colour and SRT; Windows launcher
+  scripts (`windows/run_vibeedit.bat`, `run_vibeedit.ps1`) and
+  `windows/INSTALL.md`. See `VibeEdit/docs/windows-port.md` §6–§7.
+
 - Set the first TestFlight candidate version to 0.0.1 (build 1).
 - Add the Mac App Store category, sandbox entitlements, and VibeEdit app icon required for TestFlight validation.
 

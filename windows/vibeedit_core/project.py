@@ -37,12 +37,134 @@ import copy
 import itertools
 import json
 import os
+import re
 import uuid
 
 SCHEMA = "vibeedit.project/1"
 LEGACY_SCHEMA = "bashcut.project/1"
 PROJECT_FILENAME = "project.vibeedit.json"
 LEGACY_PROJECT_FILENAME = "project.bashcut.json"
+
+# Transition kinds accepted by the Windows renderer, mapped to FFmpeg
+# xfade transition names in render.py. The original schema also uses
+# dissolve, wipe, wipe-right, wipe-up, wipe-down, slide and slide-up;
+# those are accepted as aliases and stored verbatim.
+TRANSITION_XFADE = {
+    "dissolve": "fade", "crossfade": "fade", "fade": "fade",
+    "wipe": "wiperight", "wipe-left": "wipeleft", "wipe-right": "wiperight",
+    "wipe-up": "wipeup", "wipe-down": "wipedown",
+    "slide": "slideleft", "slide-left": "slideleft",
+    "slide-right": "slideright", "slide-up": "slideup",
+    "slide-down": "slidedown",
+}
+TRANSITION_KINDS = sorted(TRANSITION_XFADE)
+
+# Honest FFmpeg eq presets for the original colour/adjustment idea.
+# Values are eq filter arguments; "none" applies nothing.
+COLOR_PRESETS = {
+    "none": "",
+    "vivid": "eq=brightness=0.02:contrast=1.15:saturation=1.25",
+    "warm": "eq=brightness=0.02:contrast=1.05:saturation=1.10",
+    "cool": "eq=brightness=0.00:contrast=1.05:saturation=1.05",
+    "faded": "eq=brightness=0.05:contrast=0.85:saturation=0.80",
+    "mono": "eq=saturation=0",
+}
+
+# Keyframe properties. Times are stored in frames relative to the start
+# of their item; values are fractions for x/y, a multiplier for scale,
+# 0..1 for opacity, and dB for volume.
+KEYFRAME_PROPS = ("x", "y", "scale", "opacity", "volume")
+
+
+def validate_cube(path: str) -> int:
+    """Validate a .cube LUT file. Returns LUT_3D_SIZE. Raises ValueError."""
+    if not os.path.isfile(path):
+        raise ValueError(f"LUT file not found: {path}")
+    if not str(path).lower().endswith(".cube"):
+        raise ValueError(f"LUT file must end with .cube: {path}")
+    size = None
+    with open(path, encoding="utf-8", errors="strict") as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith("LUT_3D_SIZE"):
+                parts = line.split()
+                if len(parts) != 2 or not parts[1].isdigit():
+                    raise ValueError(f"Invalid LUT_3D_SIZE line in {path}")
+                size = int(parts[1])
+                break
+            if line and not line.startswith(("#", "TITLE", "DOMAIN_")):
+                raise ValueError(f"Invalid .cube content in {path}: {line!r}")
+    if size is None:
+        raise ValueError(f"No LUT_3D_SIZE found in {path}")
+    return size
+
+
+def keyframe_points(item: dict, prop: str, fps) -> list[tuple[float, float]]:
+    """Sorted (seconds-relative-to-item-start, value) points for a property."""
+    points = []
+    for kf in item.get("keyframes") or []:
+        if prop in kf:
+            points.append((frames_to_seconds(int(kf["at"]), fps),
+                           float(kf[prop])))
+    points.sort()
+    return points
+
+
+def interpolate_keyframes(points: list[tuple[float, float]],
+                          t: float) -> float | None:
+    """Linear interpolation between keyframe points; clamps outside range."""
+    if not points:
+        return None
+    if t <= points[0][0]:
+        return points[0][1]
+    if t >= points[-1][0]:
+        return points[-1][1]
+    for (t0, v0), (t1, v1) in zip(points, points[1:]):
+        if t0 <= t <= t1:
+            if t1 == t0:
+                return v1
+            return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+    return points[-1][1]
+
+
+def srt_timestamp(seconds: float) -> str:
+    total_ms = int(round(seconds * 1000))
+    h, rem = divmod(total_ms, 3600000)
+    m, rem = divmod(rem, 60000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def parse_srt(text: str) -> list[tuple[float, float, str]]:
+    """Parse SRT text into (start_s, end_s, text) cues. Raises ValueError."""
+    cues: list[tuple[float, float, str]] = []
+    pattern = re.compile(
+        r"(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*"
+        r"(\d{2}):(\d{2}):(\d{2}),(\d{3})")
+    blocks = re.split(r"\r?\n\s*\r?\n", text.strip())
+    for block in blocks:
+        lines = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
+        if not lines:
+            continue
+        if lines[0].isdigit():
+            lines = lines[1:]
+        if not lines:
+            continue
+        match = pattern.search(lines[0])
+        if not match:
+            raise ValueError(f"Invalid SRT timecode line: {lines[0]!r}")
+        nums = [int(g) for g in match.groups()]
+        start = nums[0] * 3600 + nums[1] * 60 + nums[2] + nums[3] / 1000.0
+        end = nums[4] * 3600 + nums[5] * 60 + nums[6] + nums[7] / 1000.0
+        if end <= start:
+            raise ValueError(f"SRT cue ends before it starts: {lines[0]!r}")
+        body = " ".join(lines[1:])
+        body = re.sub(r"<[^>]+>", "", body).strip()
+        if body:
+            cues.append((start, end, body))
+    if not cues:
+        raise ValueError("No SRT cues found")
+    return cues
 
 _counter = itertools.count(1)
 
@@ -347,6 +469,170 @@ class Project:
         item["volume"] = float(volume_db)
         self._bump()
         return item
+
+    # -- Phase 2: transitions, keyframes, colour, SRT ------------------
+    def add_transition(self, from_id: str, to_id: str, kind: str,
+                       duration_s: float) -> dict:
+        """Add a transition between two consecutive main-track clips.
+
+        Stored in the original transitions[] shape: {id, kind, from, to,
+        duration} with duration in frames. Duration must be 0.1–2.0 s
+        and must not exceed the shorter adjacent clip.
+        """
+        if kind not in TRANSITION_XFADE:
+            raise ValueError(
+                f"Unknown transition kind: {kind!r} "
+                f"(choose one of {', '.join(TRANSITION_KINDS)})")
+        duration_s = float(duration_s)
+        if not 0.1 <= duration_s <= 2.0:
+            raise ValueError("Transition duration must be 0.1–2.0 seconds")
+        _, from_item = self.item(from_id)
+        _, to_item = self.item(to_id)
+        main = next((t for t in self.data["tracks"]
+                     if t.get("role") == "main" and t["kind"] == "video"), None)
+        if main is None:
+            raise ValueError("Project has no main video track")
+        main_ids = [i["id"] for i in main["items"]]
+        if from_id not in main_ids or to_id not in main_ids:
+            raise ValueError("Transitions only join main-track clips")
+        if int(from_item["at"]) + int(from_item["dur"]) != int(to_item["at"]):
+            raise ValueError("Transition clips must be directly consecutive "
+                             "(no gap between them)")
+        dur_frames = seconds_to_frames(duration_s, self.fps)
+        if dur_frames <= 0 or dur_frames > min(int(from_item["dur"]),
+                                               int(to_item["dur"])):
+            raise ValueError("Transition duration exceeds the shorter "
+                             "adjacent clip")
+        for existing in self.data["transitions"]:
+            if existing["from"] == from_id and existing["to"] == to_id:
+                raise ValueError("A transition already exists for this cut")
+        transition = {"id": _new_id("tr"), "kind": kind,
+                      "from": from_id, "to": to_id,
+                      "duration": dur_frames}
+        self.data["transitions"].append(transition)
+        self._bump()
+        return transition
+
+    def remove_transition(self, transition_id: str) -> None:
+        before = len(self.data["transitions"])
+        self.data["transitions"] = [t for t in self.data["transitions"]
+                                    if t["id"] != transition_id]
+        if len(self.data["transitions"]) == before:
+            raise KeyError(f"Unknown transition: {transition_id}")
+        self._bump()
+
+    def set_keyframes(self, item_id: str, keyframes: list[dict]) -> dict:
+        """Replace an item's keyframes. Times are frames relative to the
+        item start; values are validated per property."""
+        _, item = self.item(item_id)
+        dur = int(item["dur"])
+        cleaned: list[dict] = []
+        for kf in keyframes:
+            at = int(kf["at"])
+            if not 0 <= at <= dur:
+                raise ValueError("Keyframe time must fall inside the item")
+            entry = {"at": at}
+            for prop in KEYFRAME_PROPS:
+                if prop in kf:
+                    value = float(kf[prop])
+                    if prop in ("x", "y") and not 0.0 <= value <= 1.0:
+                        raise ValueError("x/y keyframes must be 0..1")
+                    if prop == "scale" and value <= 0:
+                        raise ValueError("scale keyframes must be positive")
+                    if prop == "opacity" and not 0.0 <= value <= 1.0:
+                        raise ValueError("opacity keyframes must be 0..1")
+                    if prop == "volume" and not -60.0 <= value <= 24.0:
+                        raise ValueError("volume keyframes must be -60..24 dB")
+                    entry[prop] = value
+            if len(entry) == 1:
+                raise ValueError("Keyframe must set at least one property")
+            cleaned.append(entry)
+        cleaned.sort(key=lambda k: k["at"])
+        item["keyframes"] = cleaned
+        self._bump()
+        return item
+
+    def add_keyframe(self, item_id: str, at_seconds: float, prop: str,
+                     value: float) -> dict:
+        _, item = self.item(item_id)
+        if prop not in KEYFRAME_PROPS:
+            raise ValueError(f"Unknown keyframe property: {prop!r}")
+        existing = [dict(kf) for kf in item.get("keyframes") or []]
+        at = seconds_to_frames(float(at_seconds), self.fps)
+        merged = False
+        for kf in existing:
+            if kf["at"] == at:
+                kf[prop] = float(value)
+                merged = True
+        if not merged:
+            existing.append({"at": at, prop: float(value)})
+        return self.set_keyframes(item_id, existing)
+
+    def set_color(self, item_id: str, lut: str | None = None,
+                  preset: str | None = None) -> dict:
+        """Set a clip's colour: a .cube LUT file and/or an eq preset.
+
+        A missing or invalid LUT is a hard error, never a silent skip.
+        """
+        _, item = self.item(item_id)
+        color = dict(item.get("color") or {})
+        if lut is not None:
+            validate_cube(lut)
+            color["lut"] = lut
+        if preset is not None:
+            if preset not in COLOR_PRESETS:
+                raise ValueError(
+                    f"Unknown colour preset: {preset!r} "
+                    f"(choose one of {', '.join(sorted(COLOR_PRESETS))})")
+            color["preset"] = preset
+        if not color:
+            raise ValueError("Provide a LUT path and/or a colour preset")
+        color.setdefault("strength", 1.0)
+        item["color"] = color
+        self._bump()
+        return item
+
+    def import_srt(self, track_id: str, text: str) -> list[dict]:
+        """Import SRT cues onto a text track. All cues are validated
+        (including overlap) before any of them is added."""
+        track = self.track(track_id)
+        if track["kind"] != "text":
+            raise ValueError("SRT cues belong on a text track")
+        cues = parse_srt(text)
+        items = []
+        for start_s, end_s, body in cues:
+            at = seconds_to_frames(start_s, self.fps)
+            dur = seconds_to_frames(end_s, self.fps) - at
+            if dur <= 0:
+                raise ValueError(f"SRT cue too short to place: {body!r}")
+            item = {"id": _new_id("s"), "at": at, "dur": dur, "text": body,
+                    "textStyle": {"size": 0.062, "positionY": 0.8,
+                                  "positionX": 0.5}}
+            self._check_overlap(track, item)
+            for other in items:
+                o_start, o_end = other["at"], other["at"] + other["dur"]
+                if at < o_end and o_start < at + dur:
+                    raise ValueError(
+                        f"SRT cue overlaps another imported cue: {body!r}")
+            items.append(item)
+        for item in items:
+            track["items"].append(item)
+        track["items"].sort(key=lambda i: i["at"])
+        self._bump()
+        return items
+
+    def export_srt(self, track_id: str = "t1") -> str:
+        track = self.track(track_id)
+        lines = []
+        for index, item in enumerate(
+                sorted(track["items"], key=lambda i: i["at"]), start=1):
+            start = frames_to_seconds(item["at"], self.fps)
+            end = frames_to_seconds(item["at"] + item["dur"], self.fps)
+            lines.append(str(index))
+            lines.append(f"{srt_timestamp(start)} --> {srt_timestamp(end)}")
+            lines.append(item.get("text", ""))
+            lines.append("")
+        return "\n".join(lines)
 
     # -- readouts -----------------------------------------------------
     def timeline_text(self) -> str:

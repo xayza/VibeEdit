@@ -44,7 +44,33 @@ async function load() {
     $("preview").src = "/api/preview?" + Date.now();
     $("previewLabel").textContent = "Preview: latest export.";
   }
-  renderMedia(); renderTracks(); renderInspector();
+  renderMedia(); renderTracks(); renderInspector(); renderTransitions();
+}
+function renderTransitions() {
+  const list = $("transitionList");
+  const trans = project.transitions || [];
+  list.innerHTML = trans.map((t) =>
+    `<li>${t.kind} ${t.from} → ${t.to} (${t.duration} frames) <button data-tr="${t.id}" class="danger">Remove</button></li>`).join("") || "<li>No transitions yet.</li>";
+  list.querySelectorAll("button[data-tr]").forEach((b) => b.addEventListener("click", async () => {
+    try { await api("/api/project", { op: "remove_transition", transition: b.dataset.tr }); setStatus("Transition removed."); await load(); }
+    catch (err) { setStatus(err.message, true); }
+  }));
+}
+function renderKeyframes() {
+  const box = $("keyframeBox");
+  const found = selectedId ? findItem(selectedId) : null;
+  box.hidden = !found;
+  if (!found) return;
+  const kfs = found.item.keyframes || [];
+  $("keyframeList").innerHTML = kfs.map((kf, i) => {
+    const entries = Object.entries(kf).filter(([k]) => k !== "at").map(([k, v]) => `${k}=${v}`).join(", ");
+    return `<li>${(kf.at / fps()).toFixed(2)}s: ${entries} <button data-kf="${i}" class="danger">Delete</button></li>`;
+  }).join("") || "<li>No keyframes.</li>";
+  $("keyframeList").querySelectorAll("button[data-kf]").forEach((b) => b.addEventListener("click", async () => {
+    const rest = kfs.filter((_, i) => String(i) !== b.dataset.kf);
+    try { await api("/api/project", { op: "set_keyframes", item: found.item.id, keyframes: rest }); await load(); }
+    catch (err) { setStatus(err.message, true); }
+  }));
 }
 function renderMedia() {
   $("mediaList").innerHTML = project.media.map((m) =>
@@ -89,9 +115,22 @@ function renderTracks() {
       el.textContent = item.text || item.media || item.id;
       el.title = `${item.id} — ${item.at}..${item.at + item.dur} frames`;
       el.draggable = true;
-      el.addEventListener("click", () => { selectedId = item.id; renderTracks(); renderInspector(); });
+      el.addEventListener("click", () => { selectedId = item.id; renderTracks(); renderInspector(); renderKeyframes(); });
       el.addEventListener("dragstart", () => { selectedId = item.id; });
       lane.appendChild(el);
+    }
+    if (track.role === "main") {
+      for (const t of (project.transitions || [])) {
+        const from = track.items.find((i) => i.id === t.from);
+        if (!from) continue;
+        const marker = document.createElement("div");
+        marker.className = "transition-marker";
+        marker.style.left = ((from.at + from.dur) / fps()) * pxPerSec + "px";
+        marker.style.width = Math.max((t.duration / fps()) * pxPerSec, 12) + "px";
+        marker.textContent = "⇄ " + t.kind;
+        marker.title = `${t.kind} (${t.duration} frames)`;
+        lane.appendChild(marker);
+      }
     }
     row.appendChild(lane);
     wrap.appendChild(row);
@@ -112,6 +151,9 @@ function renderInspector() {
   $("inspFadeOut").value = item.fadeOut || 0;
   $("inspVolume").value = item.volume || 0;
   $("inspText").value = item.text || "";
+  $("inspLut").value = (item.color && item.color.lut) || "";
+  $("inspPreset").value = (item.color && item.color.preset) || "";
+  renderKeyframes();
 }
 
 $("ruler").addEventListener("click", (e) => {
@@ -168,7 +210,46 @@ $("inspectorForm").addEventListener("submit", async (e) => {
     await api("/api/project", { op: "set_fade", item: $("inspId").value, fadeIn: Number($("inspFadeIn").value), fadeOut: Number($("inspFadeOut").value) });
     if ($("inspText").value) await api("/api/project", { op: "set_text", item: $("inspId").value, text: $("inspText").value });
     await api("/api/project", { op: "set_volume", item: $("inspId").value, volume: Number($("inspVolume").value) });
+    if ($("inspLut").value || $("inspPreset").value) await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null });
     setStatus("Clip updated."); await load();
+  } catch (err) { setStatus(err.message, true); }
+});
+$("transitionForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const found = selectedId ? findItem(selectedId) : null;
+  if (!found) { setStatus("Select the clip on the left of the cut first.", true); return; }
+  const main = project.tracks.find((t) => t.role === "main");
+  const items = [...main.items].sort((a, b) => a.at - b.at);
+  const idx = items.findIndex((i) => i.id === found.item.id);
+  const next = items[idx + 1];
+  if (!next || next.at !== found.item.at + found.item.dur) { setStatus("Selected clip has no directly consecutive next clip on the main track.", true); return; }
+  try {
+    await api("/api/project", { op: "add_transition", from: found.item.id, to: next.id, kind: $("trKind").value, duration: Number($("trDur").value) });
+    setStatus("Transition added."); await load();
+  } catch (err) { setStatus(err.message, true); }
+});
+$("keyframeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!selectedId) return;
+  try {
+    await api("/api/project", { op: "add_keyframe", item: selectedId, at: Number($("kfAt").value), property: $("kfProp").value, value: Number($("kfValue").value) });
+    setStatus("Keyframe added."); await load();
+  } catch (err) { setStatus(err.message, true); }
+});
+$("srtImportForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const data = await api("/api/project", { op: "srt_import", track: "t1", srt: $("srtText").value });
+    setStatus(`Imported ${data.result.length} SRT cues.`); await load();
+  } catch (err) { setStatus(err.message, true); }
+});
+$("btnSrtExport").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/project", { op: "srt_export", track: "t1" });
+    const blob = new Blob([data.srt], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "captions.srt"; a.click();
+    setStatus("SRT exported.");
   } catch (err) { setStatus(err.message, true); }
 });
 async function splitAtPlayhead() {

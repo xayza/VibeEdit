@@ -59,6 +59,32 @@
     </form>
   </div>
   <div class="panel">
+    <h3>Transition</h3>
+    <p>Pick the clip on the left of a cut; the transition joins it to the next consecutive main-track clip.</p>
+    <form id="transitionForm">
+      <label>Kind <select id="trKind">
+        <option value="dissolve">Crossfade (dissolve)</option>
+        <option value="wipe-left">Wipe left</option>
+        <option value="wipe-right">Wipe right</option>
+        <option value="wipe-up">Wipe up</option>
+        <option value="wipe-down">Wipe down</option>
+        <option value="slide-left">Slide left</option>
+        <option value="slide-right">Slide right</option>
+        <option value="slide-up">Slide up</option>
+        <option value="slide-down">Slide down</option>
+      </select></label>
+      <label>Duration (s, 0.1–2.0) <input id="trDur" type="number" step="0.1" min="0.1" max="2" value="0.5"></label>
+      <button type="submit" class="primary">Add transition after selected clip</button>
+    </form>
+    <ul id="transitionList"></ul>
+    <h3>Subtitles (SRT)</h3>
+    <form id="srtImportForm">
+      <label>Paste SRT <textarea id="srtText" rows="4" placeholder="1&#10;00:00:01,000 --> 00:00:03,000&#10;Hello"></textarea></label>
+      <button type="submit" class="primary">Import SRT to Captions</button>
+    </form>
+    <button id="btnSrtExport" class="secondary">Export Captions as SRT</button>
+  </div>
+  <div class="panel">
     <h3>Inspector</h3>
     <div id="inspectorEmpty">Select a clip on the timeline to edit it.</div>
     <form id="inspectorForm" hidden>
@@ -71,10 +97,36 @@
       <label>Fade out (s) <input id="inspFadeOut" type="number" step="0.1" min="0"></label>
       <label>Volume (dB) <input id="inspVolume" type="number" step="1"></label>
       <label>Text <input id="inspText"></label>
+      <label>LUT file (.cube, full path) <input id="inspLut" placeholder="C:\luts\my.cube"></label>
+      <label>Colour preset <select id="inspPreset">
+        <option value="">(none)</option>
+        <option value="vivid">Vivid</option>
+        <option value="warm">Warm</option>
+        <option value="cool">Cool</option>
+        <option value="faded">Faded</option>
+        <option value="mono">Mono</option>
+      </select></label>
       <button type="submit" class="primary">Apply to clip</button>
       <button type="button" id="btnSplit">Split at playhead</button>
       <button type="button" id="btnDelete" class="danger">Delete clip</button>
     </form>
+    <div id="keyframeBox" hidden>
+      <h4>Keyframes (time in seconds, relative to clip start)</h4>
+      <ul id="keyframeList"></ul>
+      <form id="keyframeForm">
+        <label>Time (s) <input id="kfAt" type="number" step="0.1" min="0" value="0"></label>
+        <label>Property <select id="kfProp">
+          <option value="x">Position X (0–1)</option>
+          <option value="y">Position Y (0–1)</option>
+          <option value="scale">Scale (&gt;0)</option>
+          <option value="opacity">Opacity (0–1)</option>
+          <option value="volume">Volume (dB)</option>
+        </select></label>
+        <label>Value <input id="kfValue" type="number" step="0.1" value="1"></label>
+        <button type="submit" class="primary">Add keyframe</button>
+      </form>
+      <p><small>Position/scale/volume keyframes are rendered linearly. Overlay opacity is rendered stepwise (held at each keyframe). Main-track keyframes are stored but not rendered yet.</small></p>
+    </div>
   </div>
 </section>
 

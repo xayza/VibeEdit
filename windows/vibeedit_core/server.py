@@ -63,6 +63,8 @@ class State:
 
     def apply(self, op: dict) -> dict:
         proj = self.project
+        if op.get("op") == "srt_export":
+            return {"srt": proj.export_srt(op.get("track", "t1"))}
         self.undo_stack.append(proj.snapshot())
         if len(self.undo_stack) > 50:
             self.undo_stack.pop(0)
@@ -101,6 +103,22 @@ class State:
                 result = proj.set_text(op["item"], op["text"])
             elif kind == "set_volume":
                 result = proj.set_volume(op["item"], float(op["volume"]))
+            elif kind == "add_transition":
+                result = proj.add_transition(op["from"], op["to"],
+                                             op["kind"], float(op["duration"]))
+            elif kind == "remove_transition":
+                proj.remove_transition(op["transition"])
+                result = {"deleted": op["transition"]}
+            elif kind == "set_keyframes":
+                result = proj.set_keyframes(op["item"], op["keyframes"])
+            elif kind == "add_keyframe":
+                result = proj.add_keyframe(op["item"], float(op["at"]),
+                                           op["property"], float(op["value"]))
+            elif kind == "set_color":
+                result = proj.set_color(op["item"], op.get("lut"),
+                                        op.get("preset"))
+            elif kind == "srt_import":
+                result = proj.import_srt(op.get("track", "t1"), op["srt"])
             elif kind == "set_project":
                 proj.data["name"] = op.get("name", proj.data["name"])
                 fmt = proj.data["format"]

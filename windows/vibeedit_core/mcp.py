@@ -43,6 +43,35 @@ TOOLS = [
      "description": "List the project's media entries."},
     {"name": "vibeedit_export_start",
      "description": "Start an FFmpeg export (draft or full). Synchronous in Phase 1."},
+    # Phase 2 tools — each calls a real Project operation below.
+    {"name": "vibeedit_media_place",
+     "description": "Place a media entry as a clip on a track."},
+    {"name": "vibeedit_clip_trim",
+     "description": "Trim a clip edge to a timeline frame."},
+    {"name": "vibeedit_clip_split",
+     "description": "Split a clip at a timeline frame."},
+    {"name": "vibeedit_clip_move",
+     "description": "Move a clip to another track and/or start frame."},
+    {"name": "vibeedit_clip_delete",
+     "description": "Delete a clip or text item."},
+    {"name": "vibeedit_text_add",
+     "description": "Add a text item to a text track."},
+    {"name": "vibeedit_clip_speed",
+     "description": "Set a clip's playback speed."},
+    {"name": "vibeedit_transition_set",
+     "description": "Set a transition between two consecutive main-track clips."},
+    {"name": "vibeedit_transition_remove",
+     "description": "Remove a transition by id."},
+    {"name": "vibeedit_srt_import",
+     "description": "Import SRT text onto a text track."},
+    {"name": "vibeedit_srt_export",
+     "description": "Export a text track as SRT text."},
+    {"name": "vibeedit_export_status",
+     "description": "Report the last export started by this server, if any."},
+    {"name": "vibeedit_clip_keyframes",
+     "description": "Replace a clip's keyframes (or add one keyframe)."},
+    {"name": "vibeedit_clip_color",
+     "description": "Set a clip's LUT file and/or colour preset."},
 ]
 
 
@@ -51,6 +80,7 @@ class MCPServer:
         self.folder = folder
         self.project: Project | None = None
         self.path: str | None = None
+        self.last_export: dict | None = None
         if folder:
             self.open(folder)
 
@@ -141,6 +171,24 @@ class MCPServer:
                 elif kind == "set_fade":
                     results.append(proj.set_fade(
                         op["item"], op.get("fadeIn"), op.get("fadeOut")))
+                elif kind == "set_volume":
+                    results.append(proj.set_volume(op["item"],
+                                                   float(op["volume"])))
+                elif kind == "set_text":
+                    results.append(proj.set_text(op["item"], op["text"]))
+                elif kind == "set_keyframes":
+                    results.append(proj.set_keyframes(op["item"],
+                                                      op["keyframes"]))
+                elif kind == "set_color":
+                    results.append(proj.set_color(op["item"], op.get("lut"),
+                                                  op.get("preset")))
+                elif kind == "add_transition":
+                    results.append(proj.add_transition(
+                        op["from"], op["to"], op["kind"],
+                        float(op["duration"])))
+                elif kind == "remove_transition":
+                    proj.remove_transition(op["transition"])
+                    results.append({"deleted": op["transition"]})
                 else:
                     raise ValueError(f"Unknown operation: {kind}")
             self._save()
@@ -153,7 +201,84 @@ class MCPServer:
             out = os.path.join(proj.folder, "render",
                                f"export-{preset}.mp4")
             report = render(proj.data, proj.folder, out, preset=preset)
+            self.last_export = report
             return report
+        if name == "vibeedit_export_status":
+            return {"last_export": self.last_export}
+        if name == "vibeedit_media_place":
+            proj = self._require()
+            result = proj.add_clip(args["media"], args["track"],
+                                   int(args["at"]), int(args.get("in", 0)),
+                                   int(args["dur"]) if args.get("dur") is not None else None,
+                                   float(args.get("speed", 1.0)))
+            self._save()
+            return result
+        if name == "vibeedit_clip_trim":
+            proj = self._require()
+            result = proj.trim(args["item"], args["edge"], int(args["toFrame"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_split":
+            proj = self._require()
+            result = proj.split(args["item"], int(args["atFrame"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_move":
+            proj = self._require()
+            result = proj.move(args["item"], args["track"], int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_delete":
+            proj = self._require()
+            proj.delete(args["item"])
+            self._save()
+            return {"deleted": args["item"]}
+        if name == "vibeedit_text_add":
+            proj = self._require()
+            result = proj.add_text(args["track"], args["text"],
+                                   int(args["at"]), int(args["dur"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_speed":
+            proj = self._require()
+            result = proj.set_speed(args["item"], float(args["speed"]))
+            self._save()
+            return result
+        if name == "vibeedit_transition_set":
+            proj = self._require()
+            result = proj.add_transition(args["from"], args["to"],
+                                         args["kind"], float(args["duration"]))
+            self._save()
+            return result
+        if name == "vibeedit_transition_remove":
+            proj = self._require()
+            proj.remove_transition(args["transition"])
+            self._save()
+            return {"deleted": args["transition"]}
+        if name == "vibeedit_srt_import":
+            proj = self._require()
+            result = proj.import_srt(args.get("track", "t1"), args["srt"])
+            self._save()
+            return {"imported": len(result)}
+        if name == "vibeedit_srt_export":
+            proj = self._require()
+            return {"srt": proj.export_srt(args.get("track", "t1"))}
+        if name == "vibeedit_clip_keyframes":
+            proj = self._require()
+            if "keyframes" in args:
+                result = proj.set_keyframes(args["item"], args["keyframes"])
+            else:
+                result = proj.add_keyframe(args["item"], float(args["at"]),
+                                           args["property"],
+                                           float(args["value"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_color":
+            proj = self._require()
+            result = proj.set_color(args["item"], args.get("lut"),
+                                    args.get("preset"))
+            self._save()
+            return result
         raise ValueError(f"Unknown tool: {name}")
 
 
