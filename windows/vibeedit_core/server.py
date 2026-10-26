@@ -192,6 +192,10 @@ class State:
                     ratio=op.get("ratio"))
             elif kind == "project_stats":
                 result = proj.project_stats()
+            elif kind == "add_track":
+                result = proj.add_track(op.get("kind", "video"),
+                                        op.get("role", ""),
+                                        op.get("name", ""))
             elif kind == "set_project":
                 proj.data["name"] = op.get("name", proj.data["name"])
                 fmt = proj.data["format"]
@@ -284,6 +288,27 @@ def make_handler(state: State):
                     self._serve_file(state.last_export)
                 else:
                     self._send_json({"error": "No export yet"}, 404)
+            elif parsed.path == "/api/waveform":
+                # Real waveform peaks for one media id (decoded with
+                # FFmpeg, RMS per bucket, normalised). Never invented:
+                # an undecodable file is a 400, not a drawn shape.
+                from .waveform import waveform_peaks
+                query = urllib.parse.parse_qs(parsed.query)
+                media_id = (query.get("media") or [""])[0]
+                buckets = int((query.get("buckets") or ["64"])[0])
+                try:
+                    with state.lock:
+                        medium = state.project.media(media_id)
+                        path = medium["path"]
+                        if not os.path.isabs(path):
+                            path = os.path.join(state.project_dir, path)
+                        peaks = waveform_peaks(path, buckets)
+                except (KeyError, FileNotFoundError, ValueError,
+                        RuntimeError) as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                self._send_json({"media": media_id, "buckets": buckets,
+                                 "peaks": peaks})
             elif parsed.path == "/api/review":
                 # Phase 8 review panel: validation + stats from the
                 # live project document, plus the last export report

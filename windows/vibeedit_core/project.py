@@ -378,6 +378,21 @@ class Project:
                     return track, item
         raise KeyError(f"Unknown item: {item_id}")
 
+    def add_track(self, kind: str, role: str, name: str) -> dict:
+        """Add a new empty track (used by Add Layer and the Voiceover
+        panel). Track ids follow the MCP tool convention: t1, t2, ..."""
+        if kind not in ("video", "text", "audio"):
+            raise ValueError(f"Unknown track kind: {kind!r}")
+        used = {t["id"] for t in self.data["tracks"]}
+        n = 1
+        while f"t{n}" in used:
+            n += 1
+        track = {"id": f"t{n}", "kind": kind, "role": role or "",
+                 "name": name or kind, "items": []}
+        self.data["tracks"].append(track)
+        self._bump()
+        return track
+
     def media(self, media_id: str) -> dict:
         for medium in self.data["media"]:
             if medium["id"] == media_id:
