@@ -405,7 +405,24 @@ def cmd_project_stats(args) -> int:
     return 0
 
 
+def _effective_argv(argv, frozen: bool) -> list[str]:
+    """Resolve the argv list for main().
+
+    Frozen exe (PyInstaller) with no arguments defaults to
+    ``serve --open-browser --port 8000`` so double-clicking
+    VibeEdit.exe just works like a real app. The unfrozen CLI
+    keeps its old behaviour: no arguments means argparse's
+    "required subcommand" error, never a surprise server.
+    """
+    if argv is None:
+        argv = list(sys.argv[1:])
+    if frozen and not argv:
+        return ["serve", "--open-browser", "--port", "8000"]
+    return list(argv)
+
+
 def main(argv=None) -> int:
+    argv = _effective_argv(argv, getattr(sys, "frozen", False))
     parser = argparse.ArgumentParser(prog="vibeedit")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -604,6 +621,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("serve")
     p.add_argument("--project", default=None)
     p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--open-browser", action="store_true",
+                   help="open the editor URL in the default browser "
+                        "once the server starts")
     p.set_defaults(fn=lambda a: _serve(a))
 
     p = sub.add_parser("mcp")
@@ -620,7 +640,8 @@ def main(argv=None) -> int:
 
 def _serve(args) -> int:
     from vibeedit_core.server import run_server
-    run_server(args.project, args.port)
+    run_server(args.project, args.port,
+               open_browser_flag=getattr(args, "open_browser", False))
     return 0
 
 

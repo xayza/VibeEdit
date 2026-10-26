@@ -2,7 +2,11 @@
 # PyInstaller spec for the VibeEdit Windows port. One-folder build,
 # same entry point as `python vibeedit.py` (no separate packaged code
 # path). Static web UI files are bundled as data. FFmpeg is NOT
-# bundled: it must be in PATH or placed next to VibeEdit.exe.
+# bundled by this spec: it must be in PATH or placed next to
+# VibeEdit.exe. The GitHub Actions workflow
+# (.github/workflows/build-windows.yml) copies ffmpeg.exe and
+# ffprobe.exe into dist/VibeEdit/ after the PyInstaller build, so
+# the artifact from Actions needs no separate FFmpeg install.
 # NOTE: this spec was syntax-validated on the Linux VM only
 # (ast.parse); the exe itself must be built on Windows with
 # build_windows.bat, because PyInstaller cannot cross-build a

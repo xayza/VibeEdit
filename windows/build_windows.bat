@@ -1,17 +1,23 @@
 @echo off
 REM VibeEdit Windows build script (run on Windows, not on the Linux VM).
 REM Builds a runnable one-folder app with PyInstaller from vibeedit.py.
-REM Requires: Python 3.10+ in PATH, FFmpeg in PATH (not bundled).
+REM Requires: Python 3.10+ in PATH, FFmpeg in PATH (not bundled by
+REM this script alone; the GitHub Actions workflow copies
+REM ffmpeg.exe/ffprobe.exe into dist\VibeEdit\ after this script).
 REM Output: dist\VibeEdit\VibeEdit.exe (plus a _internal folder).
 REM The exe still needs FFmpeg in PATH at runtime, or ffmpeg.exe next
 REM to VibeEdit.exe in dist\VibeEdit\.
+REM CI note (Phase 6): this script is also run by GitHub Actions.
+REM `pause` waits for a keypress and would hang a CI runner, so
+REM every pause below is skipped when GITHUB_ACTIONS is set
+REM (GitHub sets it automatically on windows-latest runners).
 
 setlocal
 cd /d "%~dp0"
 where python >nul 2>&1
 if errorlevel 1 (
   echo [VibeEdit] Python not found in PATH. Install Python 3.10+ with "Add python.exe to PATH" and retry.
-  pause
+  if not defined GITHUB_ACTIONS   pause
   exit /b 1
 )
 where ffmpeg >nul 2>&1
@@ -23,7 +29,7 @@ if not exist .venv (
   python -m venv .venv
   if errorlevel 1 (
     echo [VibeEdit] Failed to create .venv.
-    pause
+    if not defined GITHUB_ACTIONS pause
     exit /b 1
   )
 )
@@ -32,13 +38,13 @@ pip install --upgrade pip >nul
 pip install pyinstaller
 if errorlevel 1 (
   echo [VibeEdit] Failed to install PyInstaller.
-  pause
+  if not defined GITHUB_ACTIONS   pause
   exit /b 1
 )
 pyinstaller --clean --noconfirm vibeedit.spec
 if errorlevel 1 (
   echo [VibeEdit] PyInstaller build failed.
-  pause
+  if not defined GITHUB_ACTIONS   pause
   exit /b 1
 )
 echo.
@@ -54,4 +60,4 @@ if not exist scripts\install_shortcuts.ps1 (
 ) else (
   echo [VibeEdit] Then run: scripts\install_shortcuts.ps1  (creates Start Menu + Desktop shortcuts to run_vibeedit.bat)
 )
-pause
+if not defined GITHUB_ACTIONS pause

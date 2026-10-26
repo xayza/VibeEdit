@@ -1,4 +1,48 @@
-# VibeEdit — Windows (Phase 5)
+# VibeEdit — Windows (Phase 6)
+
+## What Phase 6 adds (on top of Phase 5)
+
+- **Ready-made Windows exe via GitHub Actions** (the main Phase 6
+  deliverable): new `.github/workflows/build-windows.yml` runs
+  on `windows-latest` on pushes to `main` touching `windows/**`
+  (or the workflow file) and on manual dispatch. It checks out
+  the repo, sets up Python 3.12, installs Pillow + PyInstaller,
+  runs the existing `windows/build_windows.bat` (its `pause`
+  prompts are now skipped when `GITHUB_ACTIONS` is set, so CI
+  cannot hang on them), downloads the gyan.dev FFmpeg
+  essentials build, copies `ffmpeg.exe` + `ffprobe.exe` into
+  `dist/VibeEdit/` next to `VibeEdit.exe` (the app already
+  looks for FFmpeg next to the frozen exe), smoke-tests the
+  exe with `VibeEdit.exe --help`, and uploads `dist/VibeEdit/`
+  as the **VibeEdit-Windows** artifact. Download it from the
+  repo's Actions tab (see `windows/CHECK_WINDOWS.md` section 0
+  for the exact steps); no Python or separate FFmpeg install is
+  needed to run it. Honest limit: the workflow has NOT been run
+  yet — it can only run on GitHub after it is pushed — so the
+  exe appears only after its first green run, and it is never
+  in the repo itself. The artifact bundles the gyan.dev FFmpeg
+  build (GPL/LGPL); see CHECK_WINDOWS.md for the licence note.
+- **Exe easy-run behaviour:** `serve --open-browser` opens the
+  editor URL once the server starts (browser failure never
+  crashes the server), and the frozen exe with no arguments now
+  defaults to `serve --open-browser --port 8000`, so
+  double-clicking `VibeEdit.exe` just works. The unfrozen CLI
+  is unchanged: no arguments still means the "required
+  subcommand" error, never a surprise server.
+- **MCP expanded from 66 to 78 real tools:** clip copy (same
+  project, preserving keyframes/colour/fades/volume/speed/text
+  style/karaoke), clip paste into another project (media entry
+  copied with it; missing media on the destination reported,
+  never invented), text preset list/apply (`title`, `subtitle`,
+  `lower_third`, `top_caption`), text set, clip volume, export
+  preset list (full: project resolution, fast, CRF 20; draft:
+  half resolution, veryfast, CRF 28), timeline duration, media
+  duration (stored + ffprobe), project backup (`.bak` copy) and
+  project rename. Every tool calls real Project/export code.
+- 91 tests OK (79 Phase 1–5 + 12 Phase 6), plus a web-server
+  smoke test (HTTP 200 for `/`, `/api/project` and
+  `/api/mcp-tools`) and a YAML-parse validation of the new
+  workflow.
 
 ## What Phase 5 adds (on top of Phase 4)
 
@@ -225,15 +269,16 @@ timeline model in Python and renders with FFmpeg. See
   `bashcut.project/1` / `project.bashcut.json` files. Unknown
   fields round-trip unchanged.
 
-## What Phase 5 does NOT do yet
+## What Phase 6 does NOT do yet
 
 Agent dock terminals (the Phase 5 dock is a documented panel +
-live tool list, not a terminal emulator), a Windows .exe built
-and tested on Windows, voice providers, additional transcription
-providers, or the remaining ~183 original MCP tools (66 of 249
-ported). Still open: a checked PyInstaller build on Windows and a
-visual UI check in a real browser on Windows. See the Phase 5/6
-lists in `VibeEdit/docs/windows-port.md`.
+live tool list, not a terminal emulator), a Windows .exe actually
+built and downloaded from a green Actions run (the workflow
+exists but has not run yet), voice providers, additional
+transcription providers, or the remaining ~171 original MCP
+tools (78 of 249 ported). Still open: a visual UI check in a
+real browser on Windows. See the Phase 6/7 lists in
+`VibeEdit/docs/windows-port.md`.
 
 ## Requirements
 
@@ -308,13 +353,13 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-66 tools (Phase 5 total) — Phase 4's 54 plus:
-`vibeedit_clip_color_preset_strength`, `vibeedit_tool_status`,
-`vibeedit_windows_check`, `vibeedit_karaoke_syllable_add`,
-`vibeedit_agent_dock_info`, `vibeedit_project_validate`,
-`vibeedit_track_list`, `vibeedit_clip_list`,
-`vibeedit_color_preset_list`, `vibeedit_mcp_tools_list`,
-`vibeedit_text_list`, `vibeedit_project_format`. Every tool calls a
+78 tools (Phase 6 total) — Phase 5's 66 plus:
+`vibeedit_clip_copy`, `vibeedit_clip_paste_cross_project`,
+`vibeedit_text_preset_list`, `vibeedit_text_preset_apply`,
+`vibeedit_export_preset_list`, `vibeedit_timeline_duration`,
+`vibeedit_media_duration`, `vibeedit_project_backup`,
+`vibeedit_project_rename`, `vibeedit_clip_volume`,
+`vibeedit_text_set`, `vibeedit_media_add`. Every tool calls a
 real Project or export operation; none is a stub.
 
 ## Tests

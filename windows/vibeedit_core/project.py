@@ -104,6 +104,17 @@ COLOR_PRESETS = {
     "mono": "eq=saturation=0",
 }
 
+# Text presets (Phase 6): size is a fraction of the frame height,
+# positionX/positionY are fractions of the frame (0.5 = centre).
+# Applied by set_text_style(); the renderer already reads
+# textStyle.size/positionX/positionY, so presets need no render change.
+TEXT_PRESETS = {
+    "title": {"size": 0.12, "positionX": 0.5, "positionY": 0.5},
+    "subtitle": {"size": 0.055, "positionX": 0.5, "positionY": 0.85},
+    "lower_third": {"size": 0.05, "positionX": 0.25, "positionY": 0.85},
+    "top_caption": {"size": 0.055, "positionX": 0.5, "positionY": 0.15},
+}
+
 # Keyframe properties. Times are stored in frames relative to the start
 # of their item; values are fractions for x/y, a multiplier for scale,
 # 0..1 for opacity, dB for volume, and degrees for tilt (Phase 4:
@@ -547,6 +558,71 @@ class Project:
         item["volume"] = float(volume_db)
         self._bump()
         return item
+
+    def set_text_style(self, item_id: str, preset: str | None = None,
+                       size: float | None = None,
+                       position_x: float | None = None,
+                       position_y: float | None = None) -> dict:
+        """Apply a text preset and/or explicit style values to a
+        text item. Unknown presets raise ValueError; explicit values
+        override the preset's values for that field."""
+        _, item = self.item(item_id)
+        if "text" not in item:
+            raise ValueError("Item has no text field")
+        style = dict(item.get("textStyle", {}))
+        if preset is not None:
+            if preset not in TEXT_PRESETS:
+                raise ValueError(
+                    f"Unknown text preset: {preset!r} "
+                    f"(choose one of {', '.join(sorted(TEXT_PRESETS))})")
+            style.update(TEXT_PRESETS[preset])
+        if size is not None:
+            style["size"] = float(size)
+        if position_x is not None:
+            style["positionX"] = float(position_x)
+        if position_y is not None:
+            style["positionY"] = float(position_y)
+        item["textStyle"] = style
+        self._bump()
+        return item
+
+    def copy_item_data(self, item: dict, track_id: str, at: int) -> dict:
+        """Copy an item dict onto ``track_id`` at frame ``at`` with a
+        new id, preserving keyframes, colour, fades, volume, speed,
+        text style and karaoke timings. For media clips the media
+        entry must already exist in this project (same media id);
+        cross-project copies must copy the media entry first (see
+        MCP vibeedit_clip_paste_cross_project). Overlap on the
+        target track raises ValueError, like add_clip/add_text."""
+        track = self.track(track_id)
+        if track["kind"] == "text" and "text" not in item:
+            raise ValueError("Cannot place a media clip on a text track")
+        if track["kind"] != "text" and "text" in item:
+            raise ValueError("Text items belong on a text track")
+        if "text" in item:
+            new = self.add_text(track_id, item["text"], int(at),
+                                int(item["dur"]))
+            if "textStyle" in item:
+                new["textStyle"] = copy.deepcopy(item["textStyle"])
+            if "karaoke" in item:
+                new["karaoke"] = copy.deepcopy(item["karaoke"])
+            self._bump()
+            return new
+        medium = self.media(item["media"])  # KeyError if absent
+        new = self.add_clip(medium["id"], track_id, int(at),
+                            int(item.get("in", 0)), int(item["dur"]),
+                            float(item.get("speed", 1.0)))
+        for field in ("keyframes", "color", "fadeIn", "fadeOut",
+                      "volume"):
+            if field in item:
+                new[field] = copy.deepcopy(item[field])
+        self._bump()
+        return new
+
+    def duplicate_item(self, item_id: str, track_id: str, at: int) -> dict:
+        """Copy an item of this project onto ``track_id`` at ``at``."""
+        _, item = self.item(item_id)
+        return self.copy_item_data(item, track_id, at)
 
     # -- Phase 2: transitions, keyframes, colour, SRT ------------------
     def add_transition(self, from_id: str, to_id: str, kind: str,

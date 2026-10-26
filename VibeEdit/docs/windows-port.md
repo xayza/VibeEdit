@@ -389,14 +389,68 @@ is single-project and edits the project file directly).
   plus a web-server smoke test (HTTP 200 for `/`, `/api/project`
   and `/api/mcp-tools`).
 
-## 8. Phase 6 list (explicitly NOT in Phase 5)
+## 7d. Phase 6 — DONE (exe route + easy run + MCP 78)
+
+- GitHub Actions Windows build (the exe deliverable, honestly
+  built): new `.github/workflows/build-windows.yml` runs on
+  `windows-latest` on pushes to `main` touching `windows/**`
+  or the workflow file, plus `workflow_dispatch`. Steps, all
+  real for a windows-latest runner: checkout, setup-python
+  3.12, pip install Pillow + PyInstaller, run the existing
+  `windows/build_windows.bat` under `cmd`, download the gyan.dev
+  FFmpeg essentials zip, copy `ffmpeg.exe` + `ffprobe.exe`
+  into `dist/VibeEdit/` next to `VibeEdit.exe` (Phase 5
+  `find_tool()` already searches next to the frozen exe —
+  verified in `render.py` before relying on it), smoke-test
+  with `VibeEdit.exe --help`, upload `dist/VibeEdit/` as the
+  **VibeEdit-Windows** artifact (upload-artifact@v4). One real
+  CI bug fixed before shipping the workflow:
+  `build_windows.bat`'s `pause` prompts would hang a
+  non-interactive runner, so every pause is now skipped when
+  `GITHUB_ACTIONS` is set. The workflow has NOT been run yet
+  (it can only run on GitHub after push); the exe is NOT in
+  the repo and was NOT built on the Linux VM. Download steps
+  are documented in `windows/CHECK_WINDOWS.md` section 0.
+  Licence note recorded there: the artifact bundles the
+  gyan.dev FFmpeg build (GPL/LGPL).
+- Exe easy-run behaviour: `serve --open-browser` opens the
+  editor URL once the server starts (a browser failure prints
+  a message and never crashes the server; verified with a
+  mocked `webbrowser.open` and a flag-plumbing test, not a
+  real browser launch on the VM). The frozen exe with no
+  arguments defaults to `serve --open-browser --port 8000`
+  (`_effective_argv` in `vibeedit.py`); the unfrozen CLI is
+  unchanged (no arguments = required-subcommand error).
+  No separate `VibeEdit.bat` is shipped: double-clicking the
+  exe itself is enough.
+- MCP: 78 real tools (was 66). New: clip_copy (same project,
+  preserving keyframes/colour/fades/volume/speed/text style/
+  karaoke via new `Project.copy_item_data`/`duplicate_item`),
+  clip_paste_cross_project (media entry copied with the item;
+  missing media on the destination reported, never invented),
+  text_preset_list/apply (new `TEXT_PRESETS`: title, subtitle,
+  lower_third, top_caption, via `Project.set_text_style`),
+  text_set, clip_volume, export_preset_list (full: project
+  resolution, fast, CRF 20; draft: half resolution, veryfast,
+  CRF 28), timeline_duration, media_duration (stored +
+  ffprobe), project_backup (`.bak` copy), project_rename,
+  media_add (ffprobe metadata when the file exists, warning
+  otherwise).
+- 91 tests OK (79 Phase 1–5 + 12 Phase 6), plus a web-server
+  smoke test (HTTP 200 for `/`, `/api/project` and
+  `/api/mcp-tools`) and a PyYAML parse validation of the new
+  workflow (runs-on windows-latest, 7 steps, artifact
+  VibeEdit-Windows).
+
+## 8. Phase 7 list (explicitly NOT in Phase 6)
 
 - Additional transcription providers behind the `transcribe.py`
   interface; voice providers.
 - Agent dock terminal emulator, knowledge/skills, review panel,
   transition preview stills.
-- The remaining ~183 original MCP tools; a Windows .exe built
-  and tested on Windows; a visual UI check in a real browser on
-  Windows.
+- The remaining ~171 original MCP tools; a Windows .exe
+  downloaded from a green Actions run and tested on Windows;
+  a visual UI check in a real browser on Windows.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
-  Swift 6, macOS 14) and a VibeEdit logo/splash replacement.
+  Swift 6, macOS 14) and a VibeEdit logo/splash replacement
+  beyond the web header.

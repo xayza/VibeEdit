@@ -1,4 +1,4 @@
-# VibeEdit Windows checklist (Phase 5)
+# VibeEdit Windows checklist (Phase 6)
 
 Step-by-step checks for running the Windows port on Windows. Every
 step below was verified by reading the launcher/build scripts in
@@ -10,8 +10,39 @@ scripts do not perform.
 > Honest limits, stated up front: no Windows `.exe` was built on
 > the Linux VM used for this port (PyInstaller cannot cross-build
 > a Windows exe from Linux), and the web UI was not visually
-> checked on Windows. Building the exe and looking at the UI in a
-> real browser are user checks on Windows — see steps 6–7.
+> checked on Windows. Phase 6 adds the honest route to a
+> ready-made exe: a GitHub Actions workflow that builds it on a
+> real windows-latest runner (section 0). That workflow has NOT
+> been run yet — it can only run on GitHub after it is pushed —
+> so until its first green run appears, there is no exe to
+> download; building locally (step 6) is the fallback.
+
+## 0. Ready-made exe — download from GitHub Actions (recommended)
+
+No Python install, no separate FFmpeg install, no build step:
+
+1. Open https://github.com/xayza/VibeEdit in a browser.
+2. Click the **Actions** tab, then the **Build Windows exe**
+   workflow, then the latest **successful** run (green check).
+   (If no successful run exists yet, the workflow has not run
+   since it was added — wait for it, or build locally per step 6.)
+3. Scroll to **Artifacts**, download **VibeEdit-Windows**,
+   extract the zip to a writable folder.
+4. Double-click **VibeEdit.exe**. With no arguments it starts
+   the editor server and opens http://127.0.0.1:8000/ in your
+   browser automatically (Phase 6 frozen-exe default). Close
+   the VibeEdit console window to stop the app.
+5. FFmpeg is already inside: `ffmpeg.exe` and `ffprobe.exe`
+   sit next to `VibeEdit.exe` in the extracted folder, and the
+   app looks for them there before PATH. Do not move
+   `VibeEdit.exe` away from its folder on its own — the exe
+   needs `_internal\` and the bundled FFmpeg next to it.
+
+FFmpeg licence note: the artifact bundles the gyan.dev FFmpeg
+essentials build. FFmpeg is GPL/LGPL-licensed software; the
+bundled build's licence terms travel with it (see the FFmpeg
+project's licence pages). If you redistribute the artifact,
+include the FFmpeg licence information for that build.
 
 ## 1. Get the code
 
@@ -90,8 +121,12 @@ opens your browser there.
 From a terminal instead (from the repo root):
 
 ```bat
-python windows\vibeedit.py serve --port 8000
+python windows\vibeedit.py serve --port 8000 --open-browser
 ```
+
+(`--open-browser` is new in Phase 6: it opens the editor URL
+once the server starts. Without it, open
+http://127.0.0.1:8000/ yourself.)
 
 or from inside `windows\`:
 
@@ -106,11 +141,16 @@ stops the app. To stop, close that window or press Ctrl+C in it.
 
 ## 6. Build a Windows exe (optional, on Windows only)
 
-From the `windows\` folder, double-click or run:
+Prefer the ready-made artifact in section 0. To build locally
+instead, from the `windows\` folder, double-click or run:
 
 ```bat
 build_windows.bat
 ```
+
+(Phase 6: the script's `pause` prompts are skipped when
+`GITHUB_ACTIONS` is set, so the same script also runs
+unattended in the Actions workflow.)
 
 The script checks Python, creates/activates `windows\.venv`,
 installs PyInstaller, and runs `pyinstaller vibeedit.spec`.
@@ -133,6 +173,10 @@ a writable folder or pass `--project` to a writable folder.
 
 ## 7. User checks on Windows (not done on the Linux VM)
 
+- [ ] The Actions "Build Windows exe" run goes green, the
+      VibeEdit-Windows artifact downloads, and double-clicking
+      `VibeEdit.exe` opens the UI at http://127.0.0.1:8000/
+      with no Python/FFmpeg install.
 - [ ] `run_vibeedit.bat` opens the UI at http://127.0.0.1:8000/
       and an export renders (needs FFmpeg in PATH).
 - [ ] The web UI looks right in a real browser (preview top,

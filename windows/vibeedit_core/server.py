@@ -412,11 +412,30 @@ def make_handler(state: State):
     return Handler
 
 
-def run_server(project_dir: str | None, port: int = 8000) -> None:
+def open_browser(url: str) -> bool:
+    """Open a URL in the default browser. Returns False (never
+    raises) when no browser can be opened, so the server keeps
+    running and the user can still open the URL by hand."""
+    try:
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except Exception:  # noqa: BLE001 - browser opening is best-effort
+        return False
+
+
+def run_server(project_dir: str | None, port: int = 8000,
+               open_browser_flag: bool = False) -> None:
     state = State(project_dir)
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(state))
-    print(f"VibeEdit Windows MVP running at http://127.0.0.1:{port}/")
+    url = f"http://127.0.0.1:{port}/"
+    print(f"VibeEdit Windows MVP running at {url}")
     print(f"Project folder: {state.project_dir}")
+    if open_browser_flag:
+        if open_browser(url):
+            print(f"Opened {url} in your browser.")
+        else:
+            print(f"Could not open a browser automatically; "
+                  f"open {url} yourself.")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()

@@ -1,5 +1,29 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 6
+
+- GitHub Actions Windows build (`.github/workflows/build-windows.yml`,
+  windows-latest, on push to main touching `windows/**` or the
+  workflow, plus manual dispatch): checkout, Python 3.12, Pillow +
+  PyInstaller, `windows/build_windows.bat` (its `pause` prompts are
+  now skipped under `GITHUB_ACTIONS` so CI cannot hang), gyan.dev
+  FFmpeg essentials downloaded and `ffmpeg.exe`/`ffprobe.exe`
+  copied next to `VibeEdit.exe`, smoke test `VibeEdit.exe --help`,
+  artifact **VibeEdit-Windows** uploaded. The workflow has NOT run
+  yet (it can only run on GitHub after push); the exe is not in
+  the repo and was not built on the Linux VM. Download steps and
+  the FFmpeg GPL/LGPL licence note are in
+  `windows/CHECK_WINDOWS.md` section 0.
+- Exe easy-run behaviour: `serve --open-browser` (browser failure
+  never crashes the server) and a frozen exe with no arguments
+  defaults to `serve --open-browser --port 8000`; the unfrozen CLI
+  is unchanged.
+- MCP expanded from 66 to 78 real tools (clip copy, cross-project
+  paste, text presets list/apply, text set, clip volume, export
+  presets, timeline/media duration, project backup/rename, media
+  add). 91 tests OK.
+  See `VibeEdit/docs/windows-port.md` §7d–§8.
+
 ## VibeEdit Windows port — Phase 5
 
 - Windows compatibility audit + fixes: FFmpeg filter-embedded

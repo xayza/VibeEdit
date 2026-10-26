@@ -7,7 +7,8 @@ original BashCut MCP tools (``bashcut_<group>_<command>``) with the
 ``vibeedit_`` prefix; the full original catalog has 249 tools, of
 which Phase 1 implements the core timeline/project subset below.
 Phase 2 added 14 more tools, Phase 3 another 15 (38 total),
-Phase 4 another 16 (54 total), and Phase 5 another 12 (66 total).
+Phase 4 another 16 (54 total), Phase 5 another 12 (66 total),
+and Phase 6 another 12 (78 total).
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -162,6 +163,31 @@ TOOLS = [
      "description": "List text items, optionally on one track."},
     {"name": "vibeedit_project_format",
      "description": "Read the open project's format (width, height, fps, sample rate)."},
+    # Phase 6 tools — each calls a real Project/export operation.
+    {"name": "vibeedit_clip_copy",
+     "description": "Copy an item (clip or text) within the open project to another track and start frame, preserving keyframes, colour, fades, volume, speed, text style and karaoke."},
+    {"name": "vibeedit_clip_paste_cross_project",
+     "description": "Paste an item from the open project into another project folder (media entry copied with it; a missing media file on the destination is reported, never invented)."},
+    {"name": "vibeedit_text_preset_list",
+     "description": "List text presets (title, subtitle, lower_third, top_caption) with size/position."},
+    {"name": "vibeedit_text_preset_apply",
+     "description": "Apply a text preset (and optional explicit size/position overrides) to a text item."},
+    {"name": "vibeedit_export_preset_list",
+     "description": "List export presets (full: project resolution, fast, CRF 20; draft: half resolution, veryfast, CRF 28)."},
+    {"name": "vibeedit_timeline_duration",
+     "description": "Timeline duration in frames and seconds for the open project."},
+    {"name": "vibeedit_media_duration",
+     "description": "Stored + ffprobe duration for one media entry."},
+    {"name": "vibeedit_project_backup",
+     "description": "Copy the open project's file to a .bak backup and report its path."},
+    {"name": "vibeedit_project_rename",
+     "description": "Rename the open project (its folder name is unchanged)."},
+    {"name": "vibeedit_clip_volume",
+     "description": "Set a clip's volume in dB."},
+    {"name": "vibeedit_text_set",
+     "description": "Replace a text item's text."},
+    {"name": "vibeedit_media_add",
+     "description": "Add a media entry from a file path (ffprobe metadata when the file exists; otherwise stored with a warning)."},
 ]
 
 
@@ -650,6 +676,124 @@ class MCPServer:
             return {"items": items}
         if name == "vibeedit_project_format":
             return {"format": self._require().data["format"]}
+        if name == "vibeedit_clip_copy":
+            proj = self._require()
+            result = proj.duplicate_item(args["item"], args["track"],
+                                         int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_paste_cross_project":
+            import os
+            from .export_ops import media_metadata  # noqa: F401 - noqa
+            src = self._require()
+            _, item = src.item(args["item"])
+            dest_folder = args["dest"]
+            found = find_project_file(dest_folder)
+            if not found:
+                raise FileNotFoundError(
+                    f"No project file in folder: {dest_folder}")
+            dest = Project(load_project(found),
+                           os.path.dirname(os.path.abspath(found)))
+            warning = None
+            if "media" in item:
+                medium = src.media(item["media"])
+                if not any(m["id"] == medium["id"]
+                           for m in dest.data["media"]):
+                    dest.data["media"].append(dict(medium))
+                dest_path = medium["path"]
+                dest_abs = (dest_path if os.path.isabs(dest_path)
+                            else os.path.join(dest.folder, dest_path))
+                if not os.path.isfile(dest_abs):
+                    warning = (f"Media file not found relative to "
+                               f"destination project: {dest_abs}")
+            result = dest.copy_item_data(item, args["track"],
+                                         int(args["at"]))
+            save_project(dest.data, found)
+            out = dict(result)
+            if warning:
+                out["media_warning"] = warning
+            out["destination_project"] = found
+            return out
+        if name == "vibeedit_text_preset_list":
+            from .project import TEXT_PRESETS
+            return {"presets": dict(TEXT_PRESETS)}
+        if name == "vibeedit_text_preset_apply":
+            proj = self._require()
+            result = proj.set_text_style(
+                args["item"], preset=args.get("preset"),
+                size=args.get("size"), position_x=args.get("position_x"),
+                position_y=args.get("position_y"))
+            self._save()
+            return result
+        if name == "vibeedit_export_preset_list":
+            proj = self._require()
+            return {"presets": {
+                "full": {"width": proj.width, "height": proj.height,
+                         "ffmpeg_preset": "fast", "crf": "20"},
+                "draft": {"width": proj.width // 2,
+                          "height": proj.height // 2,
+                          "ffmpeg_preset": "veryfast", "crf": "28"}}}
+        if name == "vibeedit_timeline_duration":
+            proj = self._require()
+            return {"frames": proj.duration_frames(),
+                    "seconds": round(proj.duration_seconds(), 3)}
+        if name == "vibeedit_media_duration":
+            from .export_ops import media_metadata
+            proj = self._require()
+            meta = media_metadata(proj.data, proj.folder, args["media"])
+            return {"media": args["media"],
+                    "duration": meta.get("duration"),
+                    "probed": meta.get("probed", False),
+                    "warning": meta.get("warning"),
+                    "probe_error": meta.get("probe_error")}
+        if name == "vibeedit_project_backup":
+            import os
+            import shutil
+            if self.path is None:
+                raise RuntimeError("No project file open to back up")
+            backup = self.path + ".bak"
+            shutil.copyfile(self.path, backup)
+            return {"backup": backup}
+        if name == "vibeedit_project_rename":
+            proj = self._require()
+            proj.data["name"] = args["name"]
+            proj._bump()
+            self._save()
+            return {"name": proj.data["name"], "rev": proj.rev}
+        if name == "vibeedit_clip_volume":
+            proj = self._require()
+            result = proj.set_volume(args["item"], float(args["volume"]))
+            self._save()
+            return result
+        if name == "vibeedit_text_set":
+            proj = self._require()
+            result = proj.set_text(args["item"], args["text"])
+            self._save()
+            return result
+        if name == "vibeedit_media_add":
+            import os
+            proj = self._require()
+            path = args["path"]
+            abs_path = (path if os.path.isabs(path)
+                        else os.path.join(proj.folder, path))
+            meta: dict = {}
+            warning = None
+            if os.path.isfile(abs_path):
+                from .render import probe_media
+                meta = probe_media(abs_path)
+            else:
+                warning = f"Media file not found on disk: {abs_path}"
+            medium = proj.add_media(
+                path, kind=args.get("kind") or
+                ("video" if meta.get("width") else "audio"),
+                **{k: v for k, v in meta.items() if k in
+                   ("width", "height", "fps", "frames", "duration",
+                    "hasAudio")})
+            self._save()
+            out = dict(medium)
+            if warning:
+                out["warning"] = warning
+            return out
         raise ValueError(f"Unknown tool: {name}")
 
 
