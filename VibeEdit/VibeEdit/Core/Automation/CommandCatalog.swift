@@ -1,0 +1,398 @@
+import VibeEditProject
+import Foundation
+
+/// Every automation command, declared once. Modes, CLI parsing, MCP tools and agent instructions derive from it.
+public enum CommandCatalog {
+    /// Left-rail library panels, matching `LibraryTab` (checked by `EditorUIStateTests`).
+    /// Sheets and popovers `ui.action open` can show.
+    public static let dialogs = [
+        "new-project", "export", "export-report", "agent-changes", "review", "history", "plugins", "settings",
+        "doctor", "knowledge", "ask", "sections", "external-changes", "plugin-proposals", "commands", "shortcuts",
+        "add-plugin", "library-search", "library-generate", "quick-edit", "recents", "voice-clone", "assets",
+        "batch",
+    ]
+    public static let exportPresets = OutputPresetName.all
+
+    /// The plugin capability each provider-backed command runs on: `capabilities get`, the capability_missing errors
+    /// and the running-provider checks all read this one list (flexibility audit, D7).
+    public static let capabilities: [String: String] = [
+        "captions.generate": "captions.transcribe", "media.transcribe": "captions.transcribe",
+        "voice.check": "captions.transcribe", "captions.align": "captions.transcribe", "beats.detect": "audio.beats",
+        "voice.speak": "voice.synthesize", "voice.lines": "voice.synthesize", "image.generate": "image.generate",
+        "audio.measure": "audio.loudness", "audio.mix-measure": "audio.loudness",
+        "media.sync": "audio.sync", "audio.energy": "audio.energy", "library.search": "library.search",
+        "library.generate": "library.generate", "media.subjects": "vision.faces", "media.ocr": "vision.text", "image.cutout": "vision.cutout",
+    ]
+
+    /// Every command, provider jobs with `requestId` and `dryRun` (flexibility audit, D8).
+    public static let specs: [CommandSpec] = declaredSpecs.map(withRequestParameters)
+
+    private static let declaredSpecs: [CommandSpec] = readSpecs + projectSpecs + editSpecs + captionSpecs + layerSpecs + styleSpecs
+        + formatSpecs + clipSpecs + jobSpecs + capabilitySpecs + analysisSpecs + [reviewSyncSpec] + timelineStillsSpecs
+        + [colorMeasureSpec] + planSpecs
+        + workflowSpecs + planCheckSpecs + planCutSpecs + quoteSpecs + selectsSpecs
+        + variantSpecs + packagingSpecs + ledgerSpecs + batchSpecs
+        + sourceMediaSpecs
+        + pluginSpecs + pluginViewSpecs
+        + storageSpecs + agentSpecs + quickEditSpecs + appSpecs + chatSpecs
+        + privilegedSpecs + uiSpecs + toolSpecs + knowledgeSpecs + skillSpecs + librarySpecs + fontSpecs + voiceCloneSpecs + imageSpecs
+
+    /// A provider job (`capabilities`) with the request ID and dry-run parameters, when it does not have them yet.
+    static func withRequestParameters(_ spec: CommandSpec) -> CommandSpec {
+        guard capabilities[spec.name] != nil, spec.execution == .job,
+            !spec.parameters.contains(where: { $0.name == "requestId" })
+        else { return spec }
+        return CommandSpec(
+            spec.name, spec.mode, spec.summary, parameters: spec.parameters + paidRequestParameters,
+            execution: spec.execution)
+    }
+
+    public static let modes: [String: CommandMode] = Dictionary(uniqueKeysWithValues: specs.map { ($0.name, $0.mode) })
+
+    public static func spec(named name: String) -> CommandSpec? { specs.first { $0.name == name } }
+
+    static let provider = CommandParameter(
+        "provider", .string, "Provider ID overriding the project preference for one request", cli: .option("provider"))
+    private static let outputName = CommandParameter(
+        "name", .string, "Output base name without an extension", required: true, cli: .option("name"))
+    private static let outputDirectory = CommandParameter(
+        "directory", .string, "Output folder, relative to the project; defaults to its render folder",
+        cli: .option("output-dir"))
+
+    private static let readSpecs: [CommandSpec] = [
+        CommandSpec(
+            "context.get", .read, contextSummary),
+        CommandSpec("project.get", .read, "Read the whole open project document."),
+        CommandSpec(
+            "timeline.get", .read,
+            "Read the revision, format and tracks (IDs, roles, V1/A1 labels), and scale per video or image item: "
+                + "fit or fill, baseScale, zoom and maxZoom (keyframes), pixelRatio (output pixels per source pixel; "
+                + "over 1 is upscaled) now and at maxZoom, maxZoomNative (the largest zoom before upscaling), shown "
+                + "size, frameCoverage and backdrop (blur, color or null). media lists each media's path, kind, license and provenance as stored.",
+            parameters: [
+                CommandParameter(
+                    "format", .string, "json (default) or a compact text listing", choices: ["json", "text"],
+                    cli: .option("format"))
+            ]),
+        mediaListSpec,
+        reviewSpec,
+        reviewMeasureSpec, reviewAcceptSpec, reviewVerifySpec, reviewPacketSpec, reviewCompareSpec,
+        reviewPictureSpec,
+        reviewShotsSpec,
+        reviewLayoutSpec,
+        platformsGetSpec,
+        CommandSpec(
+            "export.status", .read,
+            "Read the export state: while one runs, its job, step, preset and path (last receipt under lastExport); "
+                + "after a failed export, state failed with its error and path (receipt under lastExport); otherwise "
+                + "the most recent receipt (clips on Main, cuts: the joins between them, transitions included). Includes "
+                + "the queue (job IDs for jobs.cancel) and delivered: each exported file of this session measured (stream "
+                + "starts and drift, fps and size against the preset, black and silent stretches), which review run reads (P1-E6)."),
+        CommandSpec(
+            "plugins.list", .read,
+            "List installed plugins with their category, providers and project provider preferences. With health, "
+                + "health {plugin, state, dependencies} from checks run now (Plugins sheet, Check Health); with views, "
+                + "views {panels (ready plugins with a rail panel or views (plugin API 8): title and icon, each view "
+                + "with where it lives and whether it is shown, tools, skills, required plugins, used capabilities), "
+                + "open panel, sheet, the host's plugin features, apiVersion}.",
+            parameters: [
+                pluginCategory,
+                CommandParameter("health", .boolean, "Run health checks", cli: .flag("health")),
+                CommandParameter("plugin", .string, "With health: only this plugin", cli: .option("plugin")),
+                CommandParameter("views", .boolean, "Add plugin panels and views", cli: .flag("views")),
+            ]),
+    ]
+
+    static let leaveCurrent = [
+        CommandParameter("saveCurrent", .boolean, "Save the open project first when it has unsaved changes",
+                         default: .bool(false), cli: .flag("save-current")),
+        CommandParameter("discardCurrent", .boolean, "Drop unsaved changes of the open project",
+                         default: .bool(false), cli: .flag("discard-current")),
+    ]
+
+    private static let layerSpecs: [CommandSpec] = [
+        CommandSpec(
+            "layers.add", .edit,
+            "Add an empty layer: text goes to the front of the picture stack, video and adjustment layers behind text, "
+                + "audio layers below the others.",
+            parameters: [
+                CommandParameter("kind", .string, "Layer kind", required: true,
+                                 choices: ["video", "adjustment", "text", "audio"], cli: .option("kind")),
+                CommandParameter("role", .string, "Role such as overlay, captions, music or sfx; never main",
+                                 cli: .option("role")),
+                CommandParameter("name", .string, "Display name", cli: .option("name")),
+                baseRevision,
+            ]),
+        CommandSpec(
+            "media.import", .edit,
+            "Add a media file (path relative to the project or absolute): video, audio or a still image (PNG keeps "
+                + "transparency; placed for 3 s, trims to any length). A folder adds every video, audio and image file "
+                + "directly inside it, in name order, as one edit: {files [{path, media, kind, seconds, existing}], "
+                + "added}; import a folder once rather than file by file. With place (one file), also put it on a layer like Import. "
+                + "A file already in the project, unchanged, reuses its media and returns existing true. origin, license, "
+                + "source and author record where it came from (license is free text, or a JSON object with an open "
+                + "id and the facts you know: commercial, redistribute, attributionRequired, attribution; stored as "
+                + "given). proxy reports the preview copy: converting with a job when this Mac cannot decode the "
+                + "video (AV1, VP9) and VibeEdit converts it to H.264 in media/converted.",
+            parameters: [
+                CommandParameter("path", .string, "Media file or folder path", required: true, isPath: true, cli: .positional),
+                CommandParameter("kind", .string, "Media kind; from the file type by default",
+                                 choices: ["video", "audio", "image"], cli: .option("kind")),
+                CommandParameter("place", .boolean, "Also place it on a layer", default: .bool(false),
+                                 cli: .flag("place")),
+                CommandParameter("track", .string, "Layer ID for place; defaults to the main layer (music for audio)",
+                                 cli: .option("track")),
+                CommandParameter("atFrame", .integer, "Timeline frame for place", minimum: 0, cli: .option("at-frame")),
+            ] + mediaRightsParameters + [baseRevision]),
+        CommandSpec(
+            "media.proxy", .edit,
+            "Queue preview proxies (smaller, quick-to-seek copies in .vibeedit/cache/proxies; export keeps the originals) "
+                + "for heavy video media, or one media item. Imports queue them automatically. Returns a status per "
+                + "media: queued with its job ID, exists, not-needed, skipped, converting (with codec and job) when "
+                + "this Mac cannot decode the video and ffmpeg converts it to H.264 in media/converted (the media then "
+                + "reads the copy), or unsupported (with codec and reason) when there is no ffmpeg.",
+            parameters: [
+                CommandParameter("media", .string, "Project media ID; all video media by default", cli: .positional),
+                CommandParameter("force", .boolean, "Make proxies even for light footage, replacing existing ones",
+                                 default: .bool(false), cli: .flag("force")),
+            ]),
+        CommandSpec(
+            "media.place", .edit,
+            "Place project media on a layer (main by default, music for audio), with linked sound on a dialogue layer; "
+                + "an occupied range spills onto a free or new layer. With from and to (source seconds, such as media "
+                + "resolve-range gives), only that part is placed.",
+            parameters: [
+                CommandParameter("media", .string, "Project media ID", required: true, cli: .option("media")),
+                CommandParameter("from", .number, "Source start in seconds", range: 0...86_400, cli: .option("from")),
+                CommandParameter("to", .number, "Source end in seconds", range: 0...86_400, cli: .option("to")),
+                CommandParameter("track", .string, "Layer ID; defaults to the main layer (music for audio)",
+                                 cli: .option("track")),
+                CommandParameter("atFrame", .integer, "Timeline frame; defaults to the playhead or the end of the main layer",
+                                 minimum: 0, cli: .option("at-frame")),
+                baseRevision,
+            ]),
+        CommandSpec(
+            "timeline.move", .edit,
+            "Move an item and its linked partner; an occupied range spills onto a free or new layer.",
+            parameters: [
+                CommandParameter("item", .string, "Item ID", required: true, cli: .positional),
+                CommandParameter("track", .string, "Destination layer ID", required: true, cli: .option("track")),
+                CommandParameter("atFrame", .integer, "Timeline frame", required: true, minimum: 0,
+                                 cli: .option("at-frame")),
+                baseRevision,
+            ]),
+        CommandSpec(
+            "timeline.close-gap", .edit,
+            "Delete an empty gap on a layer (the main layer by default): later clips on that layer move left by the "
+                + "gap's length, with their linked sound.",
+            parameters: [
+                CommandParameter("atFrame", .integer, "A frame inside the gap", required: true, minimum: 0,
+                                 cli: .option("at-frame")),
+                CommandParameter("track", .string, "Layer ID; defaults to the main layer", cli: .option("track")),
+                baseRevision,
+            ]),
+        CommandSpec(
+            "layers.set", .edit,
+            "Change a layer's header switches like the timeline header: hide a visual layer, mute an audio layer, "
+                + "lock any layer (a locked layer refuses edits until unlocked); set a caption layer's language (P1-F4), "
+                + "which output.captions picks a layer by.",
+            parameters: [
+                CommandParameter("track", .string, "Layer ID or label (V2, A1)", required: true, cli: .positional),
+                CommandParameter("hidden", .boolean, "Hidden (visual layers)", cli: .option("hidden")),
+                CommandParameter("muted", .boolean, "Muted (audio layers)", cli: .option("muted")),
+                CommandParameter("locked", .boolean, "Locked", cli: .option("locked")),
+                CommandParameter("language", .string, "Language tag such as vi or en; none clears it", cli: .option("language")),
+                baseRevision,
+            ]),
+    ]
+
+    private static let capabilitySpecs: [CommandSpec] = [
+        CommandSpec(
+            "captions.generate", .edit,
+            "Place captions of project media as one undoable edit, from its stored transcript (media.transcribe) or by "
+                + "transcribing it with a captions.transcribe provider (the whole file is kept as its transcript). "
+                + "Captions follow the clips where the media is heard (trim, position, speed): place the clips first. "
+                + "The job's result says transcript: stored, transcribed or range (only from/to transcribed).",
+            parameters: [
+                CommandParameter("media", .string, "Project media ID", required: true, cli: .option("media")),
+                CommandParameter("replace", .boolean, "Replace this media's captions", default: .bool(false), cli: .flag("replace")),
+                CommandParameter("wordStyle", .string, "Show words as they are spoken (see captions.words)",
+                                 choices: CaptionWords.styles + ["none"], cli: .option("word-style")),
+                CommandParameter("from", .number, "Transcribe only from this source second of the media (with replace, "
+                                 + "only this media's captions heard in the range are replaced)", range: 0...86_400,
+                                 cli: .option("from")),
+                CommandParameter("to", .number, "Transcribe only up to this source second of the media", range: 0...86_400,
+                                 cli: .option("to")),
+                provider, freshTranscript,
+            ],
+            execution: .job),
+        CommandSpec(
+            "beats.detect", .edit, "Detect beats in audio media and set its beat grid as one undoable edit.",
+            parameters: [
+                CommandParameter("media", .string, "Audio media ID already placed on the timeline", required: true,
+                                 cli: .option("media")),
+                provider,
+            ],
+            execution: .job),
+    ]
+
+    private static let privilegedSpecs: [CommandSpec] = [
+        CommandSpec(
+            "export.start", .privileged,
+            "Request a background video export; the user approves it in the app first. Approved exports queue behind a running one. "
+                + "Vertical presets default under the platform's recompression line (platforms list: bitrateMbps); "
+                + "bitrate overrides it. Feed shapes: feed-4x5 (1080×1350), square, portrait-3x4 (1080×1440). The "
+                + "export status reports the bitrate written. Started at once (no approval needed), the result has job: "
+                + "wait with jobs wait JOB --done, or pass wait to get the finished job (up to 100 s; save also saves "
+                + "the project once it lands). An agent's export with any preset but quick-draft needs "
+                + "a draft audit with verdict pass of the current timeline (run append audit --point draft) or the "
+                + "user's G5 approval at this revision: else audit_missing. " + exportStagesNote + exportGraphicsDraftNote
+                + exportPresetsNote + exportNameOverwriteAndWithout,
+            parameters: exportPresetParameters + [
+                outputName,
+                outputDirectory,
+                CommandParameter("includeSRT", .boolean, "Also write a SubRip file", default: .bool(false),
+                                 cli: .flag("include-srt")),
+                CommandParameter("normalizeAudio", .boolean, "Run two-pass LUFS normalization with a plugin",
+                                 default: .bool(false), cli: .flag("normalize-audio")),
+                exportWithout, exportNoSteps,
+            ] + exportFileParameters + exportWaitParameters,
+            execution: .approval),
+        CommandSpec(
+            "export.otio", .privileged, "Request an OpenTimelineIO export; the user approves it in the app first.",
+            parameters: [outputName, outputDirectory],
+            execution: .approval),
+    ]
+
+    private static let uiSpecs: [CommandSpec] = [
+        CommandSpec(
+            "ui.dialog", .read,
+            "Read the open dialogs (alerts, file panels, sheets), topmost last, with their option IDs."),
+        CommandSpec(
+            "ui.respond", .ui,
+            "Answer the topmost dialog like the user: choose an option ID or title, or give a path to a file panel. A window "
+            + "is answered only with --dialog (sheet:batch add-step:captions.replace, load-preset:NAME, run; see ui dialog).",
+            parameters: [
+                CommandParameter("option", .string, "Option ID or title", cli: .positional),
+                CommandParameter("path", .string, "File or folder for an open/save panel", isPath: true,
+                                 cli: .option("path")),
+                CommandParameter("dialog", .string, "Only answer if this dialog ID is topmost", cli: .option("dialog")),
+            ]),
+        CommandSpec(
+            "ui.select", .ui,
+            "Select timeline items in the app (omit them to clear the selection), or a layer with --track. "
+                + "Several items: --items a,b,c; --add keeps the current selection.",
+            parameters: [
+                CommandParameter("item", .string, "Stable item ID", cli: .positional),
+                CommandParameter("items", .string, "More item IDs, comma-separated", cli: .option("items")),
+                CommandParameter("add", .boolean, "Add to the current selection", cli: .flag("add")),
+                CommandParameter("track", .string, "Layer (track) ID to select", cli: .option("track")),
+            ]),
+        CommandSpec(
+            "ui.actions", .read,
+            "List every editor action (buttons, menu items, keyboard shortcuts) with its shortcuts and whether it is enabled now."),
+        CommandSpec(
+            "ui.action", .edit,
+            "Run an editor action like the user: by ID (timeline.split, timeline.zoom-in, playback.toggle) or by "
+                + "shortcut (cmd+b, space, cmd+=). Actions that open a dialog return at once; answer it with ui.respond. "
+                + "With a target: open DIALOG (a sheet or popover: " + dialogs.joined(separator: ", ") + "), panel "
+                + "PANEL (a library panel in the left rail: " + libraryPanels.joined(separator: ", ") + "), source "
+                + "MEDIA (the source viewer, with --in/--out frames marked) or notify MESSAGE (a short status message).",
+            parameters: [
+                CommandParameter("action", .string, "Action ID or shortcut, or open, panel, source, notify",
+                                 required: true, cli: .positional),
+                CommandParameter("target", .string, "The dialog, panel, media ID or message of open, panel, source, notify",
+                                 cli: .positional),
+                CommandParameter("in", .integer, "source: in frame", minimum: 0, cli: .option("in")),
+                CommandParameter("out", .integer, "source: out frame (exclusive)", minimum: 1, cli: .option("out")),
+            ]),
+        CommandSpec(
+            "ui.view", .ui,
+            "Read the editor view state, or change it: timeline zoom (pixels per second), viewer zoom, snapping, safe area, "
+                + "color compare, agent dock and chat message, side panes, inspector tab, Settings section and search, Knowledge section, "
+                + "Plugins tab and Browse category, the Media panel's source (footage, project, shared, selects, clips), the open library panel's "
+                + "search and filters, and scroll the timeline to a frame; fullScreen: the preview of viewer.fullscreen is on.",
+            parameters: [
+                CommandParameter("zoom", .integer, "Timeline zoom in pixels per second", minimum: 1, maximum: 600, cli: .option("zoom")),
+                CommandParameter("zoomAnchor", .integer, "Frame kept in place by --zoom; the playhead by default", minimum: 0,
+                                 cli: .option("zoom-anchor")),
+                CommandParameter("snap", .boolean, "Snapping on or off", cli: .option("snap")),
+                CommandParameter("safeArea", .boolean, "Safe-area overlay on or off", cli: .option("safe-area")),
+                CommandParameter("viewerZoom", .string, "Viewer zoom: fit, or a percentage of the output size",
+                                 choices: EditorViewerZoom.choices, cli: .option("viewer-zoom")),
+                CommandParameter("compare", .boolean, "Color before/after compare on or off", cli: .option("compare")),
+                CommandParameter("agentDock", .boolean, "Agent column shown or hidden", cli: .option("agent-dock")),
+                CommandParameter("rightTab", .string, "Side pane to show; the other stays", choices: UIAction.rightTabs, cli: .option("right-tab")),
+                CommandParameter("reveal", .integer, "Scroll the timeline so this frame is visible", minimum: 0,
+                                 cli: .option("reveal")),
+                CommandParameter("inspector", .string, "Inspector tab", choices: UIAction.inspectorTabs,
+                                 cli: .option("inspector")),
+                CommandParameter("chatDraft", .string, "Text in the shown chat agent's message box, as if typed", cli: .option("chat-draft")),
+                CommandParameter("settingsSection", .string, "Settings section (open Settings with ui.action open settings)",
+                                 choices: UIAction.settingsSections, cli: .option("settings-section")),
+                CommandParameter("settingsSearch", .string, "Settings search text: lists matching settings of every "
+                                 + "section; empty clears it", cli: .option("settings-search")),
+                CommandParameter("knowledgeSection", .string, "Knowledge window section (open it with ui.action open knowledge)",
+                                 choices: UIAction.knowledgeSections, cli: .option("knowledge-section")),
+                CommandParameter("pluginsTab", .string, "Plugins sheet tab (open it with ui.action open plugins)",
+                                 choices: UIAction.pluginsTabs, cli: .option("plugins-tab")),
+                CommandParameter("pluginsCategory", .string, "Category Plugins › Browse shows; all shows every one",
+                                 choices: ["all"] + UIAction.pluginCategories,
+                                 cli: .option("plugins-category")),
+                CommandParameter("mediaSource", .string, "What the Media panel lists", choices: UIAction.mediaSources, cli: .option("media-source")),
+                CommandParameter("libraryQuery", .string, "Search text of the open library panel; empty clears it",
+                                 cli: .option("library-query")),
+                CommandParameter("libraryPack", .string, "Pack the open library panel shows; empty shows all",
+                                 cli: .option("library-pack")),
+                CommandParameter("libraryTag", .string, "Tag the open library panel shows; empty shows all",
+                                 cli: .option("library-tag")),
+                CommandParameter("libraryScope", .string, "Scope the open library panel shows",
+                                 choices: ["all"] + LibraryScope.allCases.map(\.rawValue), cli: .option("library-scope")),
+            ] + libraryViewParameters),
+        CommandSpec(
+            "ui.seek", .ui, "Move the viewer to a timeline frame.",
+            parameters: [CommandParameter("frame", .integer, "Timeline frame", required: true, minimum: 0,
+                                          cli: .positional)]),
+        uiFrameSpec, uiFramesSpec,
+    ]
+
+    /// Library tools and health checks (each matches a panel or sheet in the app).
+    private static let toolSpecs: [CommandSpec] = [
+        CommandSpec(
+            "luts.import", .edit, "Check a .cube LUT, copy it into the project's luts folder and add it (Filters panel).",
+            parameters: [
+                CommandParameter("path", .string, ".cube file", required: true, isPath: true, cli: .positional),
+                CommandParameter("name", .string, "Display name; defaults to the file name", cli: .option("name")),
+                baseRevision,
+            ]),
+        CommandSpec(
+            "edl.import", .edit,
+            "Convert a legacy edl.json into project.vibeedit.json beside it and open it (Welcome screen). Fails if the "
+                + "open project has unsaved changes unless saveCurrent or discardCurrent is set.",
+            parameters: [CommandParameter("path", .string, "edl.json file", required: true, isPath: true, cli: .positional)]
+                + leaveCurrent),
+        recentProjectsSpec,
+        CommandSpec("doctor.run", .read, "Run the Doctor checks (workspace, tools, plugins) and return the results."),
+    ]
+}
+
+extension CommandCatalog {
+    /// Open Recent › View All… (#529).
+    static let recentProjectsSpec = CommandSpec(
+        "project.recents", .read,
+        "List recently opened projects, newest first (Open Recent › View All…): name, path, lastOpened and exists. "
+            + "--remove takes one off the list (needs a session).",
+        parameters: [
+            CommandParameter("query", .string, "Only projects whose name or path matches these words (fuzzy)",
+                             cli: .option("query")),
+            CommandParameter("remove", .string, "Project file or folder to remove from the list", isPath: true,
+                             cli: .option("remove")),
+        ])
+
+    /// `export start --without` (#520).
+    static let exportWithoutSummary = "without leaves audio layers of those roles out of this file (music: the same cut "
+        + "with voice and sound effects only, for a platform's own sound); its loudness and QC stay out of review."
+    static let exportWithout = CommandParameter(
+        "without", .string, "Audio roles to leave out (music, sfx, voiceover, dialogue)",
+        cli: .option("without"))
+}

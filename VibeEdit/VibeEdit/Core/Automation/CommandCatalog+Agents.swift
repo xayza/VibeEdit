@@ -1,0 +1,157 @@
+import VibeEditProject
+
+extension CommandCatalog {
+    /// Settings › Agents: the agent kit for VibeEdit's tabs and for Claude Code and Codex outside VibeEdit.
+    static let agentSpecs: [CommandSpec] = [
+        CommandSpec(
+            "agent.status", .read,
+            "The agent kit (editing skills) VibeEdit uses: its folder, version and skills, whether VibeEdit's Claude and "
+                + "Codex tabs load it, and for Claude Code and Codex outside VibeEdit: the CLI, whether the kit is set "
+                + "up, and the configuration folder (CLAUDE_CONFIG_DIR, CODEX_HOME) with where it came from."),
+        CommandSpec(
+            "agent.setup", .privileged,
+            "Set up the agent kit like Settings › Agents: in-app (load it in VibeEdit's tabs), claude (install the "
+                + "vibeedit plugin in Claude Code) or codex (link the skills and register the MCP server); remove "
+                + "undoes it. Can also choose the kit folder and the agents' configuration folders.",
+            parameters: [
+                CommandParameter("target", .string, "What to set up", required: true,
+                                 choices: ["in-app", "claude", "codex"], cli: .positional),
+                CommandParameter("remove", .boolean, "Undo the setup instead", default: .bool(false),
+                                 cli: .flag("remove")),
+                CommandParameter("kit", .string, "Kit folder to use, or built-in", cli: .option("kit")),
+                CommandParameter("claudeConfigDir", .string,
+                                 "Claude Code's configuration folder (CLAUDE_CONFIG_DIR), or default to detect it",
+                                 cli: .option("claude-config-dir")),
+                CommandParameter("codexHome", .string, "Codex's home folder (CODEX_HOME), or default to detect it",
+                                 cli: .option("codex-home")),
+            ],
+            execution: .approval),
+        CommandSpec(
+            "agent.kit-check", .read,
+            "Check bashcut-agent-kit's signed releases for a newer agent kit than the one VibeEdit uses (built-in or "
+                + "downloaded). A chosen kit folder is never updated."),
+        CommandSpec(
+            "agent.kit-update", .privileged,
+            "Download and install the newest signed agent kit release (Settings › Agents › Download & Update), then "
+                + "refresh Claude Code and Codex where the kit is set up.",
+            execution: .approval),
+        CommandSpec(
+            "agent.terminals", .read,
+            "The terminals the agent dock can open: built-in (claude, codex, shell) and agent CLIs from plugins with the "
+                + "agent.terminal capability, whether each can continue its last conversation in this project, and the "
+                + "open terminal tabs."),
+        CommandSpec(
+            "agent.open", .ui,
+            "Open a terminal tab in the agent dock like its + menu: claude, codex, shell or a terminal plugin's ID. "
+                + "Returns once it started; a plugin's launch error is this command's error.",
+            parameters: [
+                CommandParameter("terminal", .string, "claude, codex, shell or a plugin ID (agent terminals)",
+                                 required: true, cli: .positional),
+                CommandParameter("new", .boolean, "Start a new conversation instead of continuing the last one",
+                                 default: .bool(false), cli: .flag("new")),
+            ]),
+        CommandSpec(
+            "agent.detach", .ui,
+            "Remove timeline items sent to the shown terminal tab with Send to Agent (ui action clip.send-to-agent), "
+                + "like the chip's ×; without --items, all of them. While items are attached, the scope guard checks "
+                + "that tab's edits against them.",
+            parameters: [CommandParameter("items", .string, "Item IDs, comma-separated", cli: .option("items"))]),
+        CommandSpec(
+            "agent.ask", .ui,
+            "Ask the user multiple-choice questions in a card over the caller's terminal tab, the way Claude Code's "
+                + "AskUserQuestion does (VibeEdit's Claude tabs route that tool here with `vibeedit agent hook`). Returns once the user "
+                + "answers: answers maps each question to the chosen labels (comma-separated) or the text typed under "
+                + "Other; answered is false when the user chose to answer in the terminal, closed the tab or "
+                + "timeout passed.",
+            parameters: [
+                CommandParameter(
+                    "questions", .array,
+                    "AskUserQuestion's questions: question, header, multiSelect and options of label, description and "
+                        + "optional preview",
+                    required: true, cli: .positionalJSONFile),
+                CommandParameter("timeout", .integer, "Seconds to wait for the answer",
+                                 default: .integer(AgentAskDefaults.seconds), minimum: 5,
+                                 maximum: AgentAskDefaults.maximumSeconds, cli: .option("timeout")),
+            ]),
+    ]
+
+    /// Quick Edit next to Send to Agent (#449): a one-click request on the selection for the open agent.
+    static let quickEditSpecs: [CommandSpec] = [
+        CommandSpec(
+            "agent.quick-edit", .edit,
+            "A quick edit on the selected clips (or --items) like the Quick Edit menu next to Send to Agent: the open "
+                + "agent (else the first chat agent) gets the request with those clips as its scope (lower music adds "
+                + "the music under them) and is asked to review only that range afterwards (review run --from --to). "
+                + "faster, remove, music-lower, caption and punch-in are worded by VibeEdit, with --text added; custom "
+                + "sends --text. Returns {kind, sentTo, items, range, request}; a chat agent still working is an error.",
+            parameters: [
+                CommandParameter("kind", .string, "What to do", required: true,
+                                 choices: ["faster", "remove", "music-lower", "caption", "punch-in", "custom"],
+                                 cli: .positional),
+                CommandParameter("text", .string, "The request for custom, or a note added to the others",
+                                 sensitive: true, cli: .option("text")),
+                CommandParameter("items", .string, "Item IDs, comma-separated (default the selection)",
+                                 cli: .option("items")),
+            ]),
+    ]
+
+    /// Chat-agent tabs: plugins with the `agent.chat` capability (docs/specs/11-chat-agents.md), such as AI Editor.
+    static let chatSpecs: [CommandSpec] = [
+        CommandSpec(
+            "chat.status", .read,
+            "The chat agents in the agent dock (plugins with the agent.chat capability): each one's plugin ID, name, "
+                + "provider and model, whether it is ready (an API key is set) and whether a turn is running."),
+        CommandSpec(
+            "chat.send", .edit,
+            "Send a message to a chat agent like typing it in its tab. Returns at once; poll chat transcript until "
+                + "running is false to read the reply and the commands it ran.",
+            parameters: [
+                CommandParameter("text", .string, "Message", required: true, sensitive: true, cli: .positional),
+                plugin,
+                CommandParameter("image", .string, "PNG or JPEG to attach, such as a ui frame", cli: .option("image")),
+            ]),
+        CommandSpec(
+            "chat.attach", .ui,
+            "Attach timeline items to a chat agent's request like Send to Agent on the clip menu: they show as chips "
+                + "in its input, and every message carries them with the rule to edit only these items until they are "
+                + "detached. Items already attached (or their linked partner) are skipped.",
+            parameters: [
+                CommandParameter("items", .string, "Item IDs, comma-separated", required: true, cli: .option("items")),
+                plugin,
+            ]),
+        CommandSpec(
+            "chat.detach", .ui,
+            "Remove attached timeline items from a chat agent's request, like the chip's ×; without --items, all of them.",
+            parameters: [
+                CommandParameter("items", .string, "Item IDs, comma-separated", cli: .option("items")),
+                plugin,
+            ]),
+        CommandSpec("chat.stop", .ui, "Stop a chat agent's running turn.", parameters: [plugin]),
+        CommandSpec(
+            "chat.commands", .read,
+            "The slash commands a chat agent's tab offers: the app's (new, clear, stop, settings, copy, export), "
+                + "the agent kit's skills (skill:<name>) and the plugin's own (for AI Editor: compact, model, thinking, "
+                + "session), with their arguments and choices.",
+            parameters: [plugin]),
+        CommandSpec(
+            "chat.command", .edit,
+            "Run a slash command as typed in a chat agent's tab, such as \"/compact keep the caption decisions\" or "
+                + "\"/thinking low\"; returns what it showed. /export needs a path here.",
+            parameters: [
+                CommandParameter("line", .string, "The command line, starting with /", required: true, sensitive: true, cli: .positional),
+                plugin,
+            ]),
+        CommandSpec(
+            "chat.reset", .edit, "Start a new conversation with a chat agent for this project; the old one is forgotten.",
+            parameters: [plugin]),
+        CommandSpec(
+            "chat.transcript", .read,
+            "A chat agent's conversation for this project: messages, tool rows (command, ok) and whether a turn is "
+                + "running.",
+            parameters: [plugin]),
+    ]
+
+    private static let plugin = CommandParameter(
+        "plugin", .string, "Chat agent plugin ID; by default the one shown in the dock, else the first",
+        cli: .option("plugin"))
+}

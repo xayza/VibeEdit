@@ -1,0 +1,418 @@
+import VibeEditAgent
+import VibeEditAutomation
+import VibeEditProject
+import Foundation
+
+/// Agent knowledge commands: memos and project skills, and the structured lessons, preferences, facts, proposals and
+/// history (#67). Agents' writes that every project reads, and decisions on proposals, wait for the user's approval.
+extension ProjectDocument {
+    func registerKnowledgeCommands() {
+        registerMemoCommands()
+        registerLessonCommands()
+        registerValueCommands()
+        registerClaimCommands()
+        registerReviewCommands()
+        registerSkillCommands()
+    }
+
+    private func registerMemoCommands() {
+        handle("knowledge.get") { document, _, _ in
+            document.agents.loadKnowledge()
+            let knowledge = document.agents.knowledge
+            var result: [String: JSONValue] = [
+                "memo": .string(knowledge.memo),
+                "userMemo": .string(knowledge.userMemo),
+                "project": knowledge.store?.project.map { .string($0.path) } ?? .null,
+                "skills": .array(knowledge.skills.map { skill in
+                    .object([
+                        "name": .string(skill.name), "claude": .bool(skill.claude), "codex": .bool(skill.codex),
+                        "path": .string(skill.url.appendingPathComponent("SKILL.md").path),
+                        "text": .string((try? String(
+                            contentsOf: skill.url.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? ""),
+                    ])
+                }),
+            ]
+            if let store = knowledge.store {
+                result["memoSplit"] = .object(Dictionary(uniqueKeysWithValues: KnowledgeScope.allCases.map { scope in
+                    (scope.rawValue, JSONValue.string(store.memoSplitState(scope)))
+                }))
+            }
+            if let legacy = knowledge.legacy {
+                result["legacy"] = .object(["path": .string(legacy.url.path), "text": .string(legacy.text)])
+            }
+            return .object(result)
+        }
+        handleAuthored("knowledge.memo") { document, arguments, author in
+            let scope = try Self.knowledgeScope(arguments.optionalString("scope")) ?? .project
+            let clear = arguments.bool("clear")
+            guard clear != (arguments.optionalString("text") != nil) else {
+                throw RPCFailure(-32602, clear ? "Give the memo text or clear, not both" : "Missing text (or pass clear)")
+            }
+            let text = clear ? "" : try arguments.string("text")
+            let source = Self.knowledgeSource(author, arguments)
+            document.agents.loadKnowledge()
+            return try document.knowledgeChange("knowledge.memo", approval: scope == .user, author: author,
+                                                arguments: ["scope": scope.rawValue]) {
+                try document.agents.knowledge.writeMemo(text, scope: scope, source: source)
+                return .bool(true)
+            }
+        }
+        handleAuthored("knowledge.split-memo") { document, arguments, author in
+            let scope = try Self.knowledgeScope(arguments.optionalString("scope")) ?? .project
+            let store = document.agents.knowledgeStore
+            let source = Self.knowledgeSource(author, arguments)
+            defer { document.agents.loadKnowledge() }
+            if arguments.bool("keep") {
+                try store.keepMemo(scope, source: source)
+                return .object(["memoSplit": .string(store.memoSplitState(scope))])
+            }
+            guard let entries = arguments.values["entries"] else {
+                throw RPCFailure(-32602, "Missing entries (or set keep)")
+            }
+            let split = try MemoSplit(json: entries)
+            guard !split.isEmpty else { throw RPCFailure(-32602, "Nothing to split; use keep to keep the memo as notes") }
+            let result = try store.splitMemo(split, scope: scope, source: source)
+            if author != .user {
+                document.message = String(format: String(localized: "%@ split the memo: %d entries wait for review"),
+                                          author.rawValue.capitalized, result.lessons.count + result.values.count)
+            }
+            return .object([
+                "lessons": .array(try result.lessons.map(Self.json)),
+                "values": .array(try result.values.map(Self.json)),
+                "skipped": .array(result.skipped.map(JSONValue.string)),
+            ])
+        }
+        handleAuthored("knowledge.skill") { document, arguments, author in
+            document.agents.loadKnowledge()
+            try document.agents.knowledge.writeSkill(
+                named: arguments.string("name"), text: arguments.string("text"),
+                source: Self.knowledgeSource(author, arguments))
+            return .bool(true)
+        }
+        handleAuthored("knowledge.migrate") { document, arguments, author in
+            let scope = try Self.knowledgeScope(arguments.optionalString("to")) ?? .user
+            document.agents.loadKnowledge()
+            guard let legacy = document.agents.knowledge.legacy else {
+                throw RPCFailure(-32602, "No older memo in the agent workspace or home folder")
+            }
+            let source = Self.knowledgeSource(author, arguments)
+            return try document.knowledgeChange("knowledge.migrate", approval: scope == .user, author: author,
+                                                arguments: ["from": legacy.url.path, "to": scope.rawValue]) {
+                try document.agents.knowledge.migrateLegacy(to: scope, source: source)
+                return .bool(true)
+            }
+        }
+    }
+
+    private func registerLessonCommands() {
+        handle("knowledge.lessons") { document, arguments, _ in
+            let filter = KnowledgeFilter(
+                query: arguments.optionalString("query") ?? "",
+                scope: try Self.knowledgeScope(arguments.optionalString("scope")),
+                status: try Self.lessonStatus(arguments.optionalString("status")), tag: arguments.optionalString("tag"),
+                sort: arguments.optionalString("sort").flatMap(KnowledgeFilter.Sort.init(rawValue:)) ?? .newest)
+            return try .array(filter.apply(document.agents.knowledgeStore.lessons(filter.scope)).map(Self.json))
+        }
+        handleAuthored("knowledge.add-lesson") { document, arguments, author in
+            let scope = try Self.knowledgeScope(arguments.optionalString("scope")) ?? .project
+            var status = try Self.lessonStatus(arguments.optionalString("status")) ?? .active
+            // Lessons every project reads start as proposals when an agent writes them; the user approves them.
+            if scope == .user, author != .user { status = .proposed }
+            let lesson = try document.agents.knowledgeStore.addLesson(
+                title: arguments.string("title"), symptom: arguments.optionalString("symptom") ?? "",
+                cause: arguments.optionalString("cause") ?? "", fix: arguments.optionalString("fix") ?? "",
+                evidence: arguments.optionalString("evidence") ?? "", check: arguments.optionalString("check"),
+                tags: Self.tags(arguments) ?? [],
+                status: status, scope: scope, source: Self.knowledgeSource(author, arguments),
+                seenIn: document.knowledgeProjectName)
+            return try Self.json(lesson)
+        }
+        handleAuthored("knowledge.update-lesson") { document, arguments, author in
+            let store = document.agents.knowledgeStore
+            let id = try arguments.string("id")
+            let lesson = try store.lesson(id)
+            let patch = LessonPatch(
+                title: arguments.values["title"]?.string, symptom: arguments.values["symptom"]?.string,
+                cause: arguments.values["cause"]?.string, fix: arguments.values["fix"]?.string,
+                evidence: arguments.values["evidence"]?.string, check: arguments.values["check"]?.string,
+                tags: Self.tags(arguments),
+                status: try Self.lessonStatus(arguments.optionalString("status")),
+                seen: arguments.bool("seen"), seenIn: document.knowledgeProjectName)
+            // Taking a lesson out of review is the user's decision, like knowledge approve.
+            let decides = lesson.status == .proposed && patch.status.map { $0 != .proposed } == true
+            let source = Self.knowledgeSource(author, arguments)
+            // Counting a sighting changes no rule, so it needs no approval even for every project.
+            return try document.knowledgeChange(
+                "knowledge.update-lesson", approval: (lesson.scope == .user && !patch.onlySeen) || decides, author: author,
+                arguments: Self.approvalArguments(lesson, arguments)) {
+                try Self.json(store.updateLesson(id, patch, source: source))
+            }
+        }
+        handleAuthored("knowledge.remove-lesson") { document, arguments, author in
+            let store = document.agents.knowledgeStore
+            let lesson = try store.lesson(arguments.string("id"))
+            let source = Self.knowledgeSource(author, arguments)
+            return try document.knowledgeChange(
+                "knowledge.remove-lesson", approval: lesson.scope == .user, author: author,
+                arguments: Self.approvalArguments(lesson, arguments)) {
+                try Self.json(store.removeLesson(lesson.id, source: source))
+            }
+        }
+    }
+
+    private func registerValueCommands() {
+        for kind in KnowledgeValueKind.allCases {
+            handle("knowledge.\(kind.rawValue)") { document, arguments, _ in
+                let scope = kind == .facts ? .project : try Self.knowledgeScope(arguments.optionalString("scope"))
+                let key = arguments.optionalString("key")
+                return try .array(document.agents.knowledgeStore.values(kind, scope: scope)
+                    .filter { key == nil || $0.key == key }.map(Self.json))
+            }
+            handleAuthored(Self.setMethod(kind)) { document, arguments, author in
+                let scope = kind == .facts ? .project : try Self.knowledgeScope(arguments.optionalString("scope")) ?? .user
+                let key = try arguments.string("key")
+                let value = arguments.bool("remove") ? nil : arguments.values["value"]?.string
+                guard arguments.bool("remove") || value != nil else { throw RPCFailure(-32602, "Missing value") }
+                let store = document.agents.knowledgeStore
+                let source = Self.knowledgeSource(author, arguments)
+                let details = try Self.valueDetails(kind, arguments, author: author)
+                let creator = kind == .prefs && CreatorProfile.isCreatorKey(key)
+                if creator {
+                    let media = Set(document.project.media.map(\.id))
+                    try CreatorProfile.validate(key: key, value: value, mediaExists: media.contains)
+                }
+                // An agent's preference for every project waits in the proposals inbox (#69), unless the user lets
+                // agents act without confirmation; the creator's profile always waits (P3-I5).
+                if scope == .user, author != .user {
+                    if document.settings.agentActionsAutoApproved, !creator {
+                        document.registry.recordApproval(
+                            method: Self.setMethod(kind), author: author, approved: true, automatic: true)
+                        DebugLog.write("approval", "auto-approved \(Self.setMethod(kind)) from \(author) key \(key)")
+                    } else {
+                        let proposal = try store.proposeValue(
+                            kind, key: key, value: value, scope: scope, source: source, confirmedBy: details.confirmedBy)
+                        document.message = String(format: String(localized: "%@ proposes a preference: %@"),
+                                                  author.rawValue.capitalized, key)
+                        return .object(["approval": .string("proposed"), "proposal": try Self.json(proposal)])
+                    }
+                }
+                return try store.setValue(kind, key: key, value: value, scope: scope, source: source, details: details)
+                    .map(Self.json) ?? .null
+            }
+        }
+    }
+
+    private func registerClaimCommands() {
+        handle("knowledge.claims") { document, _, _ in
+            try .array(document.agents.knowledgeStore.claims().map { try Self.json($0, scope: .project) })
+        }
+        handleAuthored("knowledge.set-claim") { document, arguments, author in
+            let remove = arguments.bool("remove")
+            guard remove || (arguments.optionalString("text") != nil && arguments.optionalString("source") != nil) else {
+                throw RPCFailure(-32602, "Give the claim's text and source (or remove)")
+            }
+            let claim = try document.agents.knowledgeStore.setClaim(
+                key: arguments.string("key"), text: remove ? nil : arguments.optionalString("text"),
+                source: arguments.optionalString("source"), author: Self.knowledgeSource(author, arguments))
+            return try claim.map { try Self.json($0, scope: .project) } ?? .null
+        }
+    }
+
+    private func registerReviewCommands() {
+        handle("knowledge.proposals") { document, arguments, _ in
+            let store = document.agents.knowledgeStore
+            let scope = try Self.knowledgeScope(arguments.optionalString("scope"))
+            return try .array(store.proposals(scope).map { try Self.json($0, type: "lesson") }
+                + store.valueProposals(scope).map(Self.json))
+        }
+        for approve in [true, false] {
+            let method = approve ? "knowledge.approve" : "knowledge.reject"
+            handleAuthored(method) { document, arguments, author in
+                let store = document.agents.knowledgeStore
+                let id = try arguments.string("id")
+                let source = Self.knowledgeSource(author, arguments)
+                if id.hasPrefix("p-") {
+                    let proposal = try store.valueProposal(id)
+                    let edited = approve ? arguments.optionalString("value") : nil
+                    var shown = ["id": id, "key": proposal.key, "scope": proposal.scope.rawValue,
+                                 "value": edited ?? proposal.value ?? "(remove)"]
+                    if let session = arguments.optionalString("session") { shown["session"] = session }
+                    return try document.knowledgeChange(method, approval: true, author: author, arguments: shown) {
+                        approve
+                            ? try store.approveValue(id, value: edited, source: source).map(Self.json) ?? .null
+                            : try Self.json(store.rejectValue(id, source: source))
+                    }
+                }
+                let lesson = try store.lesson(id)
+                guard lesson.status == .proposed else { throw RPCFailure(-32602, "Lesson \(lesson.id) is not a proposal") }
+                guard arguments.values["value"] == nil else {
+                    throw RPCFailure(-32602, "value is for preference proposals (p-…); edit a lesson with update-lesson")
+                }
+                return try document.knowledgeChange(
+                    method, approval: true, author: author, arguments: Self.approvalArguments(lesson, arguments)) {
+                    try Self.json(approve ? store.approve(lesson.id, source: source) : store.reject(lesson.id, source: source))
+                }
+            }
+        }
+        handle("knowledge.history") { document, arguments, _ in
+            let kind = try arguments.optionalString("kind").map { name in
+                guard let kind = KnowledgeChange.Kind(rawValue: name) else {
+                    throw RPCFailure(-32602, "kind must be lesson, prefs, facts, memo or skill")
+                }
+                return kind
+            }
+            return try .array(document.agents.knowledgeStore.history(
+                Self.knowledgeScope(arguments.optionalString("scope")), kind: kind,
+                target: arguments.optionalString("target"), limit: arguments.optionalInt("limit") ?? 50)
+                .map(Self.json))
+        }
+        handle("knowledge.verdicts") { document, arguments, _ in
+            guard document.fileURL != nil else { throw RPCFailure(-32602, "Save the project first") }
+            let verdict = try arguments.optionalString("verdict").map { name in
+                guard let kind = KnowledgeVerdict.Kind(rawValue: name) else {
+                    throw RPCFailure(-32602, "verdict must be keep, undo, reject or edit")
+                }
+                return kind
+            }
+            return document.agents.knowledgeStore.verdictsJSON(
+                verdict: verdict, subject: arguments.optionalString("subject"), limit: arguments.optionalInt("limit") ?? 20)
+        }
+        handleAuthored("knowledge.revert") { document, arguments, author in
+            let store = document.agents.knowledgeStore
+            let change = try store.change(arguments.string("id"))
+            let source = Self.knowledgeSource(author, arguments)
+            var shown = ["id": change.id, "kind": change.kind.rawValue, "target": change.target,
+                         "scope": change.scope.rawValue, "change": change.action.rawValue]
+            if let session = arguments.optionalString("session") { shown["session"] = session }
+            return try document.knowledgeChange(
+                "knowledge.revert", approval: change.scope == .user, author: author, arguments: shown) {
+                let reverted = try store.revert(change.id, source: source)
+                document.agents.loadKnowledge()
+                return try Self.json(reverted)
+            }
+        }
+    }
+
+    // MARK: Helpers
+
+    /// The open project's name, for a lesson's sources; nil while it is unsaved.
+    var knowledgeProjectName: String? { fileURL == nil ? nil : project.name }
+
+    private static func setMethod(_ kind: KnowledgeValueKind) -> String {
+        kind == .prefs ? "knowledge.set-pref" : "knowledge.set-fact"
+    }
+
+    private static func knowledgeScope(_ value: String?) throws -> KnowledgeScope? {
+        guard let value else { return nil }
+        guard let scope = KnowledgeScope(rawValue: value) else {
+            throw RPCFailure(-32602, "scope must be project or user")
+        }
+        return scope
+    }
+
+    private static func lessonStatus(_ value: String?) throws -> LessonStatus? {
+        guard let value else { return nil }
+        guard let status = LessonStatus(rawValue: value) else {
+            throw RPCFailure(-32602, "status must be proposed, active or disabled")
+        }
+        return status
+    }
+
+    /// A preference's confirmation (the user's own by default when the user sets it, else inferred) or a fact's
+    /// evidence (the user's when the user sets it without saying).
+    private static func valueDetails(
+        _ kind: KnowledgeValueKind, _ arguments: CommandArguments, author: Author
+    ) throws -> KnowledgeValueDetails {
+        switch kind {
+        case .prefs:
+            let given = try arguments.optionalString("confirmedBy").map { name in
+                guard let value = KnowledgeConfirmation(rawValue: name) else {
+                    throw RPCFailure(-32602, "confirmedBy must be user or inferred")
+                }
+                return value
+            }
+            return KnowledgeValueDetails(confirmedBy: given ?? (author == .user ? .user : .inferred))
+        case .facts:
+            let status = try arguments.optionalString("status").map { name in
+                guard let value = KnowledgeFactEvidence.Status(rawValue: name) else {
+                    throw RPCFailure(-32602, "status must be measured, estimated or user")
+                }
+                return value
+            }
+            return KnowledgeValueDetails(evidence: KnowledgeFactEvidence(
+                source: arguments.optionalString("source"), measure: arguments.optionalString("measure"),
+                n: arguments.optionalInt("n"), status: status ?? (author == .user ? .user : nil)))
+        }
+    }
+
+    private static func tags(_ arguments: CommandArguments) -> [String]? {
+        arguments.values["tags"]?.string.map { $0.split(separator: ",").map(String.init) }
+    }
+
+    static func knowledgeSource(_ author: Author, _ arguments: CommandArguments) -> KnowledgeSource {
+        KnowledgeSource(agent: author.rawValue, session: arguments.optionalString("session"))
+    }
+
+    private static func approvalArguments(_ lesson: KnowledgeLesson, _ arguments: CommandArguments) -> [String: String] {
+        var shown = ["id": lesson.id, "title": lesson.title, "scope": lesson.scope.rawValue]
+        for (name, value) in arguments.values where name != "id" && name != "session" {
+            shown[name == "title" ? "new title" : name] = value.string ?? "\(value)"
+        }
+        return shown
+    }
+
+    private static let entryEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    /// An entry's stored fields plus the scope it was read from.
+    private static func json<Entry: Encodable>(_ entry: Entry, scope: KnowledgeScope) throws -> JSONValue {
+        guard case .object(var fields) = try JSONDecoder().decode(JSONValue.self, from: entryEncoder.encode(entry)) else {
+            return .null
+        }
+        fields["scope"] = .string(scope.rawValue)
+        return .object(fields)
+    }
+
+    private static func json(_ lesson: KnowledgeLesson) throws -> JSONValue { try json(lesson, scope: lesson.scope) }
+    private static func json(_ proposal: KnowledgeValueProposal) throws -> JSONValue {
+        try json(proposal, type: "value", scope: proposal.scope)
+    }
+
+    /// A proposal in `knowledge proposals`: the entry plus `type` (`lesson` or `value`).
+    private static func json(_ lesson: KnowledgeLesson, type: String) throws -> JSONValue {
+        try json(lesson, type: type, scope: lesson.scope)
+    }
+
+    private static func json<Entry: Encodable>(_ entry: Entry, type: String, scope: KnowledgeScope) throws -> JSONValue {
+        guard case .object(var fields) = try json(entry, scope: scope) else { return .null }
+        fields["type"] = .string(type)
+        return .object(fields)
+    }
+    private static func json(_ value: KnowledgeValue) throws -> JSONValue { try json(value, scope: value.scope) }
+    /// A history change: its stored fields, its scope, and `diff` (a unified line diff of before and after).
+    private static func json(_ change: KnowledgeChange) throws -> JSONValue {
+        guard case .object(var fields) = try json(change, scope: change.scope) else { return .null }
+        fields["diff"] = .string(change.diff)
+        fields["revertible"] = .bool(change.isRevertible)
+        return .object(fields)
+    }
+
+    /// Runs `action` now, or, when `approval` is set and an agent asked, after the user approves it.
+    func knowledgeChange(
+        _ method: String, approval: Bool, author: Author, arguments: [String: String],
+        action: @escaping @MainActor () throws -> JSONValue
+    ) throws -> JSONValue {
+        guard approval, author != .user else { return try action() }
+        var result = JSONValue.bool(true)
+        let request = try queuePrivilegedApproval(method: method, author: author, arguments: arguments) {
+            result = try action()
+        }
+        if !request.autoApproved { message = String(localized: "Waiting for approval: \(method)") }
+        return request.autoApproved
+            ? result
+            : .object(["approval": .string("pending"), "requestId": .string(request.id.uuidString)])
+    }
+}

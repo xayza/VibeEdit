@@ -1,0 +1,140 @@
+import VibeEditProject
+import Foundation
+
+public struct RPCRequest: Codable, Sendable {
+    public var jsonrpc = "2.0"
+    public let id: JSONValue
+    public let method: String
+    public var params: [String: JSONValue]
+    public let token: String?
+    public init(
+        id: JSONValue = .integer(1), method: String, params: [String: JSONValue] = [:],
+        token: String? = nil
+    ) {
+        self.id = id
+        self.method = method
+        self.params = params
+        self.token = token
+    }
+}
+public protocol RPCFailureProviding: Error {
+    var rpcFailure: RPCFailure { get }
+}
+
+public struct RPCFailure: Error, Codable, Sendable, LocalizedError {
+    public let code: Int
+    public let message: String
+    public let data: JSONValue?
+    public init(_ code: Int, _ message: String, data: JSONValue? = nil) {
+        self.code = code
+        self.message = message
+        self.data = data
+    }
+    public var errorDescription: String? { message }
+    public static func from(_ error: any Error, fallbackCode: Int = -32603) -> RPCFailure {
+        if let failure = error as? RPCFailure { return failure }
+        if let provider = error as? any RPCFailureProviding { return provider.rpcFailure }
+        if case ProjectError.staleRevision(let expected, let actual) = error {
+            return RPCFailure(-32002, error.localizedDescription, data: .object([
+                "expected": .integer(expected), "actual": .integer(actual)
+            ]))
+        }
+        return RPCFailure(error is DecodingError ? -32700 : fallbackCode, error.localizedDescription)
+    }
+    /// A project error as invalid arguments, except a stale revision, which keeps -32002 and its expected/actual.
+    public static func invalid(_ error: ProjectError) -> RPCFailure {
+        if case .staleRevision = error { return from(error) }
+        return RPCFailure.from(error, fallbackCode: -32602)
+    }
+    /// sysexits-compatible process statuses; the original RPC code remains in the JSON error.
+    public var exitStatus: Int32 {
+        switch code {
+        case -32002: 75 // stale revision: temporary failure
+        case -32000, -32003: 69 // transport unavailable or editor busy
+        case -32001, -32004: 77 // permission denied, or an edit outside the attached scope
+        case -32600, -32601, -32602: 64 // invalid request or arguments
+        case -32700: 65 // malformed response data
+        default: 70 // internal error
+        }
+    }
+    public var payload: JSONValue {
+        var fields: [String: JSONValue] = ["code": .integer(code), "message": .string(message)]
+        if let data { fields["data"] = data }
+        return .object(["error": .object(fields)])
+    }
+}
+public struct RPCResponse: Codable, Sendable {
+    public var jsonrpc = "2.0"
+    public let id: JSONValue
+    public let result: JSONValue?
+    public let error: RPCFailure?
+    public init(id: JSONValue, result: JSONValue? = nil, error: RPCFailure? = nil) {
+        self.id = id
+        self.result = result
+        self.error = error
+    }
+}
+
+public enum CommandMode: String, Sendable { case read, ui, edit, privileged }
+/// Agent operations use the core `EditOperation` codec; internal operations
+/// (`group`, `restore`) are rejected at this boundary.
+public enum WireOperations {
+    /// With `project`, `patchItems` ops are expanded against it first (`ItemPatch`).
+    public static func decode(_ value: JSONValue, project: Project? = nil) throws -> [EditOperation] {
+        guard case .array(var array) = value, !array.isEmpty, array.count <= 1000 else {
+            throw RPCFailure(-32602, "ops must be a nonempty array of at most 1000 operations")
+        }
+        if let project {
+            do {
+                array = try ItemPatch.expand(array, in: project)
+            } catch let error as ProjectError {
+                throw RPCFailure.invalid(error)
+            }
+        }
+        return try array.map { operation in
+            do {
+                return try EditOperation(json: operation)
+            } catch let error as ProjectError {
+                throw RPCFailure.invalid(error)
+            }
+        }
+    }
+}
+
+// Socket lines are read with `JSONValue(parsing:)` (JSONSerialization) instead of `Decodable`, which tries every
+// scalar type for every value: same values, several times faster on large answers such as `project get`.
+extension RPCRequest {
+    /// A request line, with the same fields the `Decodable` form requires: jsonrpc, id, method and params; token
+    /// optional.
+    public static func parse(_ data: Data) throws -> RPCRequest {
+        guard case .object(let fields)? = try? JSONValue(parsing: data), fields["jsonrpc"]?.string != nil,
+            let id = fields["id"], let method = fields["method"]?.string, case .object(let params)? = fields["params"]
+        else { throw RPCFailure(-32600, "Invalid JSON-RPC request") }
+        let token: String?
+        switch fields["token"] {
+        case nil, .null?: token = nil
+        case .string(let value)?: token = value
+        default: throw RPCFailure(-32600, "Invalid JSON-RPC request")
+        }
+        return RPCRequest(id: id, method: method, params: params, token: token)
+    }
+}
+
+extension RPCResponse {
+    /// A response line: jsonrpc and id, an optional result (null is none) and an optional error {code, message, data}.
+    public static func parse(_ data: Data) throws -> RPCResponse {
+        guard case .object(let fields)? = try? JSONValue(parsing: data), fields["jsonrpc"]?.string != nil,
+            let id = fields["id"]
+        else { throw RPCFailure(-32700, "Malformed response from VibeEdit") }
+        var failure: RPCFailure?
+        if let error = fields["error"], error != .null {
+            guard let code = error.object["code"]?.int, let message = error.object["message"]?.string else {
+                throw RPCFailure(-32700, "Malformed error from VibeEdit")
+            }
+            let data = error.object["data"]
+            failure = RPCFailure(code, message, data: data == .null ? nil : data)
+        }
+        let result = fields["result"]
+        return RPCResponse(id: id, result: result == .null ? nil : result, error: failure)
+    }
+}
