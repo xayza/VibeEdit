@@ -1,0 +1,199 @@
+import VibeEditDocument
+import VibeEditEngine
+import Foundation
+import Testing
+
+@MainActor
+struct SettingsModelTests {
+    private let suite = "vibeedit-settings-tests-" + UUID().uuidString
+
+    private func defaults() throws -> UserDefaults {
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    @Test("The agent kit banner remembers the kit version it showed in full (P1-8)")
+    func kitBannerSeen() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(settings.agentKitPromptSeen == nil)
+        settings.agentKitPromptSeen = "1.2.0"
+        #expect(SettingsModel(defaults: defaults).agentKitPromptSeen == "1.2.0")
+    }
+
+    @Test("Defaults match earlier builds and every change is stored under the old keys")
+    func persistence() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(settings.workspace == nil)
+        #expect(settings.defaultProviderRaw == SettingsModel.lastUsedAgent && settings.lastAgentRaw == nil)
+        #expect(settings.allowAgentEdits && settings.allowExternalAgents && !settings.autoApprovePrivileged)
+        #expect(settings.defaultExportPresetRaw == "tiktok")
+        #expect(settings.savedExportPreset == nil)
+        #expect(settings.interfaceLanguage == "system")
+
+        settings.workspace = URL(fileURLWithPath: "/tmp/workspace")
+        settings.defaultProviderRaw = "claude"
+        settings.lastAgentRaw = "codex"
+        settings.allowAgentEdits = false
+        settings.autoApprovePrivileged = true
+        settings.defaultExportPresetRaw = ExportPreset.youtube1080.rawValue
+        settings.interfaceLanguage = "vi"
+        #expect(defaults.string(forKey: "agentWorkspace") == "/tmp/workspace")
+        #expect(defaults.stringArray(forKey: "AppleLanguages") == ["vi"])
+        #expect(settings.savedExportPreset == .youtube1080)
+
+        let reloaded = SettingsModel(defaults: defaults)
+        #expect(reloaded.workspace?.path == "/tmp/workspace")
+        #expect(reloaded.defaultProviderRaw == "claude" && reloaded.lastAgentRaw == "codex")
+        #expect(!reloaded.allowAgentEdits && reloaded.autoApprovePrivileged)
+        #expect(reloaded.interfaceLanguage == "vi")
+
+        reloaded.interfaceLanguage = "system"
+        // Reads fall back to the global domain, so look at the suite itself.
+        #expect(defaults.persistentDomain(forName: suite)?["AppleLanguages"] == nil)
+        reloaded.workspace = nil
+        #expect(defaults.string(forKey: "agentWorkspace") == nil)
+    }
+
+    @Test("Developer mode is off by default and stored")
+    func developerMode() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(!settings.developerMode)
+        settings.developerMode = true
+        #expect(defaults.bool(forKey: "developerMode"))
+        #expect(SettingsModel(defaults: defaults).developerMode)
+    }
+
+    @Test("Dangerously allow all agent actions is on by default, overrides the agent switches and is stored")
+    func allowAllAgents() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(settings.dangerouslyAllowAgents && settings.agentScopeModeRaw == "ask")
+        settings.allowAgentEdits = false
+        #expect(settings.agentsCanEdit && settings.agentActionsAutoApproved)
+        // The switches underneath keep their own values for when it is turned off.
+        #expect(!settings.allowAgentEdits && !settings.autoApprovePrivileged)
+
+        settings.dangerouslyAllowAgents = false
+        #expect(!settings.agentsCanEdit && !settings.agentActionsAutoApproved)
+        #expect(!SettingsModel(defaults: defaults).dangerouslyAllowAgents)
+
+        settings.dangerouslyAllowAgents = true
+        #expect(SettingsModel(defaults: defaults).dangerouslyAllowAgents)
+    }
+
+    @Test("Plugins are trusted automatically by default, and the switch is stored")
+    func trustPluginsAutomatically() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(settings.trustPluginsAutomatically)
+        settings.trustPluginsAutomatically = false
+        #expect(!SettingsModel(defaults: defaults).trustPluginsAutomatically)
+    }
+
+    @Test("New projects go to ~/Movies/VibeEdit until another folder is remembered")
+    func projectsFolder() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        let standard = SettingsModel.standardProjectsFolder
+        #expect(standard.lastPathComponent == "VibeEdit")
+        #expect(standard.deletingLastPathComponent().lastPathComponent == "Movies")
+        #expect(settings.projectsFolder == nil && settings.defaultProjectsFolder == standard)
+
+        settings.rememberProjectsFolder(URL(fileURLWithPath: "/tmp/films/./cuts"))
+        #expect(defaults.string(forKey: "projectsFolder") == "/tmp/films/cuts")
+        #expect(SettingsModel(defaults: defaults).defaultProjectsFolder.path == "/tmp/films/cuts")
+
+        settings.rememberProjectsFolder(standard)
+        #expect(settings.projectsFolder == nil)
+        #expect(defaults.string(forKey: "projectsFolder") == nil)
+    }
+
+    @Test("Recent projects keep the newest first, without duplicates, up to the limit")
+    func recentProjects() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        for index in 0..<10 { settings.rememberRecentProject(URL(fileURLWithPath: "/p/\(index)/project.vibeedit.json")) }
+        #expect(settings.recentProjects.count == SettingsModel.recentProjectLimit)
+        #expect(settings.recentProjects.first?.path == "/p/9/project.vibeedit.json")
+        settings.rememberRecentProject(URL(fileURLWithPath: "/p/5/./project.vibeedit.json"))
+        #expect(settings.recentProjects.first?.path == "/p/5/project.vibeedit.json")
+        #expect(settings.recentProjects.count == SettingsModel.recentProjectLimit)
+        settings.forgetRecentProject(URL(fileURLWithPath: "/p/5/project.vibeedit.json"))
+        #expect(SettingsModel(defaults: defaults).recentHistory.count == 9)
+        #expect(!settings.recentProjects.contains { $0.path == "/p/5/project.vibeedit.json" })
+        settings.clearRecentProjects()
+        #expect(SettingsModel(defaults: defaults).recentProjects.isEmpty)
+    }
+
+    @Test("The history keeps 50 projects with their name and open time; older builds' paths carry over (#529)")
+    func recentHistory() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["/old/a/project.vibeedit.json", "/old/b/project.vibeedit.json"], forKey: "recentProjectPaths")
+        let settings = SettingsModel(defaults: defaults)
+        #expect(settings.recentHistory.map(\.title) == ["a", "b"])
+        #expect(settings.recentHistory.first?.lastOpened == nil)
+
+        let opened = Date(timeIntervalSince1970: 1_800_000_000)
+        for index in 0..<60 {
+            settings.rememberRecentProject(URL(fileURLWithPath: "/p/\(index)/project.vibeedit.json"), name: "Cut \(index)", at: opened)
+        }
+        let reloaded = SettingsModel(defaults: defaults)
+        #expect(reloaded.recentHistory.count == SettingsModel.recentHistoryLimit)
+        #expect(reloaded.recentProjects.count == SettingsModel.recentProjectLimit)
+        #expect(reloaded.recentHistory.first == RecentProject(
+            url: URL(fileURLWithPath: "/p/59/project.vibeedit.json"), name: "Cut 59", lastOpened: opened))
+        // Older builds still find the menu's paths.
+        #expect(defaults.stringArray(forKey: "recentProjectPaths") == reloaded.recentProjects.map(\.path))
+    }
+
+    @Test("Every workflow gate is skipped until the user changes it; modes and the round limit are stored (P1-D4)")
+    func workflowGates() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        #expect(WorkflowGate.builtIns.allSatisfy { settings.gateMode($0) == .skip })
+        #expect(settings.workflowGatesRaw.isEmpty)
+        #expect(settings.maxReviewRounds == 3)
+        settings.setGateMode(.roughCut, .skip)
+        settings.setGateMode(.draft, .notify)
+        settings.setGateMode(.script, .ask)
+        settings.maxReviewRounds = 2
+        let reloaded = SettingsModel(defaults: defaults)
+        #expect(reloaded.gateMode(.roughCut) == .skip && reloaded.gateMode(.draft) == .notify && reloaded.gateMode(.brief) == .skip)
+        #expect(reloaded.gateMode(.script) == .ask && reloaded.gateMode(.strategy) == .skip)
+        #expect(reloaded.maxReviewRounds == 2)
+        #expect(WorkflowGate(id: "g3") == .roughCut && WorkflowGate(id: "script") == .script && WorkflowGate(id: "G9") == nil)
+        #expect(WorkflowGate(id: "music pick") == nil && WorkflowGate(id: String(repeating: "a", count: 41)) == nil)
+        let gates = reloaded.workflowJSON.object["gates"]?.array.map(\.object) ?? []
+        #expect(gates.first { $0["id"] == .string("G3") }?["mode"] == .string("skip"))
+    }
+
+    @Test("A gate by any name is skipped, is listed after the built-ins once seen and keeps its mode (flexibility audit A6)")
+    func namedGates() throws {
+        let defaults = try defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(defaults: defaults)
+        let music = try #require(WorkflowGate(id: "music-pick"))
+        #expect(!music.isBuiltIn && music.name == "music-pick" && settings.gateMode(music) == .skip)
+        #expect(settings.workflowGates == WorkflowGate.builtIns)
+        settings.noteGate(music)
+        #expect(SettingsModel(defaults: defaults).workflowGates == WorkflowGate.builtIns + [music])
+        settings.setGateMode(music, .skip)
+        settings.setGateMode(music, .ask)
+        #expect(SettingsModel(defaults: defaults).workflowGates.last == music)
+        let gates = settings.workflowJSON.object["gates"]?.array.map(\.object) ?? []
+        #expect(gates.last?["id"] == .string("music-pick") && gates.last?["mode"] == .string("ask"))
+    }
+}

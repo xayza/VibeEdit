@@ -1,0 +1,295 @@
+import VibeEditProject
+import Darwin
+import Foundation
+import Testing
+
+@testable import VibeEditAutomation
+
+@MainActor struct AutomationTests {
+    @Test("Roll and slip wire commands preserve frame semantics")
+    func advancedTrims() throws {
+        let data = Data(
+            #"[{"op":"roll","item":"c","edge":"end","toFrame":45},{"op":"slip","item":"c","sourceIn":90}]"#.utf8)
+        let edits = try WireOperations.decode(JSONDecoder().decode(JSONValue.self, from: data))
+        #expect(edits == [.roll(item: "c", edge: .end, toFrame: 45), .slip(item: "c", sourceIn: 90)])
+    }
+
+    @Test("Edit tokens are required, attribute authors, and stop working after revocation")
+    func authorization() async throws {
+        let registry = CommandRegistry()
+        var calls = 0
+        registry.register("timeline.apply") { arguments, author in
+            #expect(author == .codex)
+            #expect(arguments.optionalString("label") == "Agent edit")
+            calls += 1
+            return .integer(1)
+        }
+        let params: [String: JSONValue] = ["baseRev": .integer(0), "ops": .array([])]
+        #expect(await registry.handle(RPCRequest(method: "timeline.apply", params: params)).error?.code == -32001)
+        #expect(calls == 0)
+        let token = registry.issueToken(author: .codex)
+        #expect(
+            await registry.handle(RPCRequest(method: "timeline.apply", params: params, token: token)).result
+                == .integer(1))
+        registry.revoke(token)
+        #expect(
+            await registry.handle(RPCRequest(method: "timeline.apply", params: params, token: token)).error?.code
+                == -32001)
+        #expect(calls == 1)
+    }
+
+    @Test("plan check is a read, but with save it edits: a session token is required (#631)")
+    func planCheckSave() async throws {
+        let registry = CommandRegistry()
+        registry.register("plan.check") { arguments, author in .bool(arguments.bool("save") && author != nil) }
+        #expect(await registry.handle(RPCRequest(method: "plan.check")).result == .bool(false))
+        let save: [String: JSONValue] = ["save": .bool(true), "baseRev": .integer(0)]
+        #expect(await registry.handle(RPCRequest(method: "plan.check", params: save)).error?.code == -32001)
+        let token = registry.issueToken(author: .codex)
+        #expect(await registry.handle(RPCRequest(method: "plan.check", params: save, token: token)).result == .bool(true))
+    }
+
+    @Test("Requests are validated against the spec before the handler runs")
+    func specValidation() async throws {
+        let registry = CommandRegistry()
+        registry.register("ui.seek") { arguments, _ in .integer(try arguments.int("frame")) }
+        let token = registry.issueToken(author: .codex)
+        #expect(await registry.handle(RPCRequest(method: "ui.seek", params: ["frame": .integer(12)], token: token)).result == .integer(12))
+        #expect(await registry.handle(RPCRequest(method: "ui.seek", params: ["frame": .number(12)], token: token)).result == .integer(12))
+        for params: [String: JSONValue] in [
+            [:], ["frame": .integer(-1)], ["frame": .string("12")], ["frame": .integer(1), "extra": .bool(true)],
+        ] {
+            #expect(await registry.handle(RPCRequest(method: "ui.seek", params: params, token: token)).error?.code == -32602)
+        }
+    }
+
+    @Test("Privileged approval decisions are recorded without command arguments")
+    func approvalAudit() {
+        let events = EventBox()
+        let registry = CommandRegistry { events.append($0) }
+        registry.recordApproval(method: "export.start", author: .codex, approved: false)
+        registry.recordApproval(method: "export.start", author: .claude, approved: true)
+        let recorded = events.value
+        #expect(recorded.map(\.method) == ["export.start.denied", "export.start.approved"])
+        #expect(recorded.map(\.succeeded) == [false, true])
+        #expect(recorded.map(\.author) == [.codex, .claude])
+    }
+    @Test("Wire operations preserve frame integers and reject malformed edits")
+    func wire() throws {
+        let data = Data(#"[{"op":"trim","item":"c","edge":"end","toFrame":61,"ripple":true}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [.trim(item: "c", edge: .end, toFrame: 61, ripple: true)])
+        #expect(throws: RPCFailure.self) {
+            try WireOperations.decode(.array([.object(["op": .string("restore")])]))
+        }
+    }
+    @Test("Project audio settings decode through the agent wire format")
+    func projectPropertiesWire() throws {
+        let data = Data(
+            #"[{"op":"setProjectProperties","patch":{"audio":{"targetLUFS":-14,"normalizeEnabled":true}}}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [
+                .setProjectProperties(patch: [
+                    "audio": .object(["targetLUFS": .integer(-14), "normalizeEnabled": .bool(true)])
+                ])
+            ])
+    }
+    @Test("Beat grids decode through the agent wire format")
+    func beatGridWire() throws {
+        let data = Data(
+            #"[{"op":"setBeatGrid","media":"music","bpm":120.5,"frames":[0,15,30]}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [
+                .setBeatGrid(media: "music", bpm: 120.5, frames: [0, 15, 30], provenance: nil)
+            ])
+    }
+    @Test("Section edits decode through the agent wire format")
+    func sectionWire() throws {
+        let data = Data(
+            #"[{"op":"upsertSection","id":"hook","label":"Hook","atFrame":0},{"op":"deleteSection","id":"old"}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [
+                .upsertSection(id: "hook", label: "Hook", atFrame: 0),
+                .deleteSection(id: "old"),
+            ])
+    }
+    @Test("Linked audio can be assigned or removed through the agent wire format")
+    func linkedAudioWire() throws {
+        let data = Data(
+            #"[{"op":"setLinkedAudio","video":"v","audio":"a"},{"op":"setLinkedAudio","video":"v"}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [
+                .setLinkedAudio(video: "v", audio: "a"), .setLinkedAudio(video: "v", audio: nil),
+            ])
+    }
+    @Test("Magnetic reorder decodes an item target or end position")
+    func reorderWire() throws {
+        let data = Data(
+            #"[{"op":"reorder","item":"b","before":"a"},{"op":"reorder","item":"a"}]"#.utf8)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        #expect(
+            try WireOperations.decode(value) == [
+                .reorder(item: "b", before: "a"), .reorder(item: "a", before: nil),
+            ])
+    }
+    @Test("Registered read commands need no token; UI and edits require authentication")
+    func modes() async {
+        let registry = CommandRegistry()
+        for spec in CommandCatalog.specs { registry.register(spec.name) { _, _ in .bool(true) } }
+        #expect(registry.unhandledCommands.isEmpty)
+        for method in [
+            "context.get", "project.get", "timeline.get", "media.list", "review.run", "captions.export", "export.status",
+        ] {
+            #expect(await registry.handle(RPCRequest(method: method)).result == .bool(true))
+        }
+        for method in ["ui.select", "ui.respond", "chat.send", "chat.command", "chat.reset", "chat.attach", "chat.detach",
+                       "timeline.undo", "timeline.redo", "captions.import", "export.start"] {
+            #expect(await registry.handle(RPCRequest(method: method)).error?.code == -32001)
+        }
+        let token = registry.issueToken(author: .claude)
+        let export = RPCRequest(
+            method: "export.start", params: ["preset": .string("tiktok"), "name": .string("draft")], token: token)
+        #expect(await registry.handle(export).result == .bool(true))
+        #expect(await registry.handle(RPCRequest(method: "missing")).error?.code == -32601)
+    }
+    @Test("Unix socket roundtrip uses mode 0600 and removes the socket at shutdown")
+    func socketRoundtrip() async throws {
+        // Keep under Darwin's sockaddr_un path limit even on machines with long TMPDIR values.
+        let directory = URL(fileURLWithPath: "/tmp/vibeedit-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("a.sock").path
+        let server = UnixRPCServer()
+        try await server.start(path: path) { request in
+            RPCResponse(id: request.id, result: .string(request.method))
+        }
+        do {
+            let response = try await Task.detached {
+                try UnixRPCClient.call(RPCRequest(method: "context.get"), path: path)
+            }.value
+            #expect(response.result == .string("context.get"))
+            let permissions = try #require(
+                FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int)
+            #expect(permissions & 0o777 == 0o600)
+        } catch {
+            await server.stop()
+            throw error
+        }
+        await server.stop()
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test("An idle client does not delay other automation clients")
+    func idleClientDoesNotBlock() async throws {
+        let directory = URL(fileURLWithPath: "/tmp/vibeedit-idle-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("a.sock").path
+        let server = UnixRPCServer()
+        try await server.start(path: path) { request in
+            RPCResponse(id: request.id, result: .string(request.method))
+        }
+        let idle = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { Darwin.close(idle) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bytes = Array(path.utf8) + [0]
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(idle, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(connected == 0)
+        // Let the accept thread take the idle client first (it is accepted in connection order in any case).
+        try await Task.sleep(for: .milliseconds(200))
+        let response = try await Task.detached {
+            try UnixRPCClient.call(RPCRequest(method: "context.get"), path: path)
+        }.value
+        #expect(response.result == .string("context.get"))
+        // The other client was answered while the server still waits on the idle one (nothing to read yet, not closed:
+        // a server serving one client at a time would have held the call until the idle client's 10 s read timeout
+        // closed it). No wall-clock bound, so a loaded machine cannot fail it.
+        var byte: UInt8 = 0
+        let peeked = Darwin.recv(idle, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        #expect(peeked < 0 && (errno == EAGAIN || errno == EWOULDBLOCK), "idle client still open and unanswered")
+        await server.stop()
+    }
+
+    @Test("MCP bridge forwards structured arguments and the live session token")
+    func mcpBridge() async throws {
+        let directory = URL(fileURLWithPath: "/tmp/vibeedit-mcp-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("a.sock").path
+        let server = UnixRPCServer()
+        try await server.start(path: path) { request in
+            #expect(request.method == "timeline.get")
+            #expect(request.params["format"] == .string("text"))
+            #expect(request.token == "session-token")
+            return RPCResponse(
+                id: request.id, result: .object(["revision": .integer(7), "ready": .bool(true)]))
+        }
+        do {
+            let response = try await Task.detached {
+                try MCPBridgeClient.call(
+                    method: "timeline.get", arguments: Data(#"{"format":"text"}"#.utf8),
+                    token: "session-token", path: path)
+            }.value
+            let value = try JSONDecoder().decode(JSONValue.self, from: response.data)
+            #expect(value.object["revision"] == .integer(7))
+            #expect(response.text.contains("revision"))
+            #expect(!response.text.contains("\n"), "compact JSON")
+        } catch {
+            await server.stop()
+            throw error
+        }
+        await server.stop()
+    }
+
+    @Test("MCP bridge returns text results as they are and other results as compact JSON")
+    func mcpBridgeNonObjectResults() async throws {
+        let directory = URL(fileURLWithPath: "/tmp/vibeedit-mcp-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("a.sock").path
+        let server = UnixRPCServer()
+        try await server.start(path: path) { request in
+            RPCResponse(
+                id: request.id,
+                result: request.method == "review.run"
+                    ? .array([.object(["id": .string("gap")])]) : .string("project Sample rev 3"))
+        }
+        do {
+            let review = try await Task.detached {
+                try MCPBridgeClient.call(method: "review.run", arguments: Data("{}".utf8), token: nil, path: path)
+            }.value
+            let timeline = try await Task.detached {
+                try MCPBridgeClient.call(method: "timeline.get", arguments: Data("{}".utf8), token: nil, path: path)
+            }.value
+            #expect(review.text == #"[{"id":"gap"}]"#)
+            #expect(timeline.text == "project Sample rev 3")
+        } catch {
+            await server.stop()
+            throw error
+        }
+        await server.stop()
+    }
+}
+
+private final class EventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [AuditEvent] = []
+    func append(_ event: AuditEvent) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+    var value: [AuditEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
