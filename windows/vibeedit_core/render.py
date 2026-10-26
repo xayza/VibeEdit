@@ -77,16 +77,25 @@ def _filter_path(path: str) -> str:
     filter argument (lut3d file, drawtext fontfile, subtitles
     filename, .ass/.cube paths).
 
-    FFmpeg's filter parser treats a backslash as an escape and an
-    unquoted colon as an option separator, so a raw Windows path
-    (backslashes plus a drive-letter colon) is mangled inside a
-    filter graph. Converting to forward slashes and escaping single
-    quotes keeps the path intact inside '...' quoting. On Linux
-    this is a no-op for ordinary paths (no backslashes, no quotes).
+    Phase 7 fix (real Windows export failure): FFmpeg's filter
+    parser splits options on EVERY unescaped colon, even one inside
+    single quotes — proven on FFmpeg 8.1.2, where
+    a font path containing a colon fails with exactly the
+    user's error (``No option name near 'C/font.ttf:text=...'``),
+    while the same path with the colon escaped as ``\\:``
+    renders fine. So a
+    Windows drive-letter font path MUST have its colon escaped
+    as ``\\:`` — converting backslashes to forward slashes
+    alone (the Phase 5 fix) is not enough, and neither is
+    single-quote wrapping. Every colon in the path is escaped,
+    not just the drive colon, because a colon anywhere else in
+    the path splits the same way. On Linux this is a no-op for
+    ordinary colon-free paths.
     Plain ``-i`` input files are NOT passed through here — they are
     subprocess arguments and need no filter escaping.
     """
-    return str(path).replace("\\", "/").replace("'", "\\'")
+    return (str(path).replace("\\", "/").replace("'", "\\'")
+            .replace(":", "\\:"))
 
 
 def find_tool(name: str) -> str:
@@ -173,7 +182,12 @@ def probe_media(path: str) -> dict:
     """ffprobe a file; returns width/height/fps/frames/duration/hasAudio."""
     cmd = [find_tool("ffprobe"), "-v", "quiet", "-print_format", "json",
            "-show_streams", "-show_format", path]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    # Phase 7: decode FFmpeg output as UTF-8 explicitly. The default
+    # text encoding on Windows is the locale codepage (typically
+    # windows-1252), which turns FFmpeg's UTF-8 output into mojibake
+    # (e.g. Vietnamese "chào" displayed as "chÃ o") in error reports.
+    out = subprocess.run(cmd, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", check=True)
     data = json.loads(out.stdout)
     info: dict = {"duration": 0.0, "hasAudio": False}
     for stream in data.get("streams", []):
@@ -571,11 +585,49 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         src_dur_s = local_dur * speed
         label = next_label("vseg")
         if medium.get("kind") == "image":
+            # Phase 7: still-image clips now render their keyframes
+            # too (previously stored, not rendered). The looped still
+            # feeds zoompan exactly like a video clip: zoompan's
+            # ``on`` counter advances once per looped frame, so
+            # x/y/scale keyframes animate over the still, tilt
+            # rotates it per frame, colour filters apply, and
+            # opacity/fades are honoured via the alpha/format steps
+            # below. Without motion keyframes the old static chain
+            # (with its explicit fps filter) is kept.
+            img_filters = [
+                "loop=loop=-1:size=1:start=0",
+                f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase",
+                f"crop={out_w}:{out_h}",
+                "setsar=1",
+            ]
+            motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
+            if motion is not None:
+                # zoompan carries its own fps= option; a trailing
+                # fps filter would duplicate frames (Phase 3 lesson).
+                img_filters.append(motion)
+            else:
+                img_filters.append(f"fps={fps_str}")
+            tilt = _tilt_filter(item, local_start)
+            if tilt is not None:
+                img_filters.append(tilt)
+            img_filters.extend(_color_filters(item, lut_dir))
+            if alpha is not None:
+                img_filters.append("format=yuva420p")
+                img_filters.append(f"colorchannelmixer=aa={_num(alpha)}")
+                img_filters.append("format=yuv420p")
+            else:
+                img_filters.append("format=yuv420p")
+            if fade_in > 0:
+                img_filters.append(
+                    f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
+            if fade_out > 0:
+                img_filters.append(
+                    f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:"
+                    f"d={min(fade_out, dur_s):.3f}")
+            img_filters.append(f"trim=end={dur_s:.3f}")
+            img_filters.append("setpts=PTS-STARTPTS")
             filter_parts.append(
-                f"[{idx}:v]loop=loop=-1:size=1:start=0,"
-                f"trim=end_frame=1,scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-                f"crop={out_w}:{out_h},setsar=1,fps={fps_str},"
-                f"trim=end={dur_s:.3f},setpts=PTS-STARTPTS[{label}]")
+                f"[{idx}:v]{','.join(img_filters)}[{label}]")
             return label, dur_s
         zoom = 1.0
         transform = item.get("transform") or {}
@@ -637,12 +689,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         dur_s = frames_to_seconds(item["dur"], fmt["fps"])
         fade_in = 0.0 if skip_fade_in else float(item.get("fadeIn", 0) or 0)
         fade_out = 0.0 if skip_fade_out else float(item.get("fadeOut", 0) or 0)
-        _medium = next((m for m in project["media"]
-                        if m["id"] == item.get("media")), None)
-        if _medium is not None and _medium.get("kind") == "image" \
-                and item.get("keyframes"):
-            skipped.append(f"main image clip {item['id']} keyframes "
-                           "stored, not rendered")
+        # Phase 7: main-track still-image keyframes now render in
+        # _main_range_segment (zoompan/tilt/colour/opacity), so the
+        # old "stored, not rendered" skipped entry is gone.
         op_pts = keyframe_points(item, "opacity", fmt["fps"])
         if len(op_pts) >= 2:
             bounds = [0.0] + [t for t, _ in op_pts if 0.0 < t < dur_s] + [dur_s]
@@ -1110,7 +1159,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         cmd += ["-map", audio_map, "-c:a", "aac", "-b:a", "160k", "-shortest"]
     cmd += [output]
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # Phase 7: explicit UTF-8 decoding (see probe_media above) — the
+    # Windows locale codepage would otherwise mojibake any
+    # non-ASCII text (e.g. Vietnamese) in FFmpeg's error output.
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(
             f"FFmpeg failed ({proc.returncode}): {proc.stderr[-2000:]}")

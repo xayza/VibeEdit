@@ -215,8 +215,8 @@ class TestPhase5McpAndDock(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count_is_78(self):
-        # Phase 6: 66 Phase 5 tools + 12 Phase 6 tools = 78.
-        self.assertEqual(len(TOOLS), 78)
+        # Phase 7: 78 Phase 6 tools + 12 Phase 7 tools = 90.
+        self.assertEqual(len(TOOLS), 90)
         names = [t["name"] for t in TOOLS]
         for expected in ("vibeedit_clip_color_preset_strength",
                          "vibeedit_tool_status",
@@ -260,9 +260,9 @@ class TestPhase5McpAndDock(unittest.TestCase):
         self.assertIn("vivid", self.server.call(
             "vibeedit_color_preset_list", {})["presets"])
         self.assertEqual(self.server.call(
-            "vibeedit_mcp_tools_list", {})["count"], 78)
+            "vibeedit_mcp_tools_list", {})["count"], 90)
         dock = self.server.call("vibeedit_agent_dock_info", {})
-        self.assertEqual(dock["tool_count"], 78)
+        self.assertEqual(dock["tool_count"], 90)
         self.assertIn("mcp", dock["command"])
         text = self.proj.add_text("t1", "hi", 0, 30)
         listed = self.server.call("vibeedit_text_list", {})
@@ -327,7 +327,7 @@ class TestAgentDockEndpoint(unittest.TestCase):
                 resp = conn.getresponse()
                 self.assertEqual(resp.status, 200)
                 data = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(data["count"], 78)
+                self.assertEqual(data["count"], 90)
                 self.assertTrue(any(
                     t["name"] == "vibeedit_agent_dock_info"
                     for t in data["tools"]))

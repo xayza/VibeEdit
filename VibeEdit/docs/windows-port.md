@@ -442,15 +442,58 @@ is single-project and edits the project file directly).
   workflow (runs-on windows-latest, 7 steps, artifact
   VibeEdit-Windows).
 
-## 8. Phase 7 list (explicitly NOT in Phase 6)
+## 7e. Phase 7 — DONE (Windows export bugfix + UI beautify + finish)
+
+- **drawtext fontfile colon bug (real user failure, fixed):**
+  FFmpeg's filter parser splits on every unescaped colon even
+  inside single quotes, so a Windows drive font path failed
+  with `No option name near '/Windows/Fonts/arial.ttf:...'`.
+  `_filter_path` in `render.py` now escapes every colon as
+  `\:` in all filter-embedded paths (fontfile, lut3d file,
+  subtitles filename). Proven on FFmpeg 8.1.2: a colon path
+  fails unescaped with exactly the user's error and renders
+  fine escaped (drawtext, lut3d and subtitles all verified).
+- **Vietnamese mojibake (fixed):** "xin chào" displayed as
+  "xin chÃ o" in export errors because `render.py` decoded
+  FFmpeg's UTF-8 stderr with the Windows locale codepage.
+  Both FFmpeg subprocess calls (and the beats decoder) now
+  decode explicitly as UTF-8; project/server/browser layers
+  were already UTF-8 throughout. A Vietnamese-text full
+  render is test-covered.
+- **Still-image keyframes render:** main-track still clips
+  with x/y/scale keyframes animate via zoompan on the looped
+  still, tilt via rotate, colour via normal filters, opacity
+  via the alpha steps; the "stored, not rendered" entry is
+  gone. Overlay still images remain skipped entirely.
+- **Eq preset strength in the Inspector UI** (new
+  `inspPresetStrength` input wired to `set_color`'s
+  `preset_strength`); LUT strength already had its input.
+- **UI beautified:** CSS-only redesign of `static/style.css`
+  (logo-gradient accents, sticky top bar, gradient primary
+  buttons, kind-coloured timeline clips, white playhead,
+  focus rings). No `app.js` id was renamed or removed
+  (test-enforced). Verified by code + server smoke test only;
+  a visual check in a real browser on Windows is still a
+  user check.
+- **MCP: 90 real tools** (was 78). New: clip_get,
+  clip_duplicate, clip_keyframe_remove, media_remove (blocked
+  while referenced), project_format_set, track_add,
+  karaoke_remove, adjustment_get, beat_count, text_style_get,
+  export_preview, project_rev.
+- 113 tests OK (91 Phase 1–6 + 22 Phase 7), plus a web-server
+  smoke test and a full draft export smoke (540x960, 3.003 s,
+  H.264/AAC, 1 Vietnamese text overlay, no skips).
+
+## 8. Phase 8 list (explicitly NOT in Phase 7)
 
 - Additional transcription providers behind the `transcribe.py`
   interface; voice providers.
 - Agent dock terminal emulator, knowledge/skills, review panel,
   transition preview stills.
-- The remaining ~171 original MCP tools; a Windows .exe
+- The remaining ~159 original MCP tools; a Windows .exe
   downloaded from a green Actions run and tested on Windows;
   a visual UI check in a real browser on Windows.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
   Swift 6, macOS 14) and a VibeEdit logo/splash replacement
   beyond the web header.
+- Overlay still-image items (currently skipped entirely).

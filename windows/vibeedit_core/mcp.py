@@ -8,7 +8,7 @@ original BashCut MCP tools (``bashcut_<group>_<command>``) with the
 which Phase 1 implements the core timeline/project subset below.
 Phase 2 added 14 more tools, Phase 3 another 15 (38 total),
 Phase 4 another 16 (54 total), Phase 5 another 12 (66 total),
-and Phase 6 another 12 (78 total).
+Phase 6 another 12 (78 total), and Phase 7 another 12 (90 total).
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -188,6 +188,30 @@ TOOLS = [
      "description": "Replace a text item's text."},
     {"name": "vibeedit_media_add",
      "description": "Add a media entry from a file path (ffprobe metadata when the file exists; otherwise stored with a warning)."},
+    {"name": "vibeedit_clip_get",
+     "description": "Read one timeline item by id, with its track."},
+    {"name": "vibeedit_clip_duplicate",
+     "description": "Duplicate a clip onto a track at a frame (same media, keyframes, colour, fades)."},
+    {"name": "vibeedit_clip_keyframe_remove",
+     "description": "Remove keyframes of one property (or all) from a clip."},
+    {"name": "vibeedit_media_remove",
+     "description": "Remove a media entry that no timeline item references."},
+    {"name": "vibeedit_project_format_set",
+     "description": "Set the project output format (width, height, fps)."},
+    {"name": "vibeedit_track_add",
+     "description": "Add a new empty track of a kind (video/text/audio)."},
+    {"name": "vibeedit_karaoke_remove",
+     "description": "Remove karaoke timings from a text item."},
+    {"name": "vibeedit_adjustment_get",
+     "description": "Read one adjustment layer by id."},
+    {"name": "vibeedit_beat_count",
+     "description": "Count detected beats in the project beat grid."},
+    {"name": "vibeedit_text_style_get",
+     "description": "Read a text item's style (size, position, preset)."},
+    {"name": "vibeedit_export_preview",
+     "description": "Export a draft preview (half resolution) and report its output path."},
+    {"name": "vibeedit_project_rev",
+     "description": "Read the project name, revision and format in one call."},
 ]
 
 
@@ -794,6 +818,118 @@ class MCPServer:
             if warning:
                 out["warning"] = warning
             return out
+        if name == "vibeedit_clip_get":
+            proj = self._require()
+            track, item = proj.item(args["item"])
+            return {"track": track["id"], "item": item}
+        if name == "vibeedit_clip_duplicate":
+            proj = self._require()
+            result = proj.duplicate_item(args["item"], args["track"],
+                                         int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_keyframe_remove":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            prop = args.get("property")
+            # Keyframe entries store the property as a key
+            # ({"at": 30, "scale": 2.0}), not as a "property" field.
+            # Removing one property strips just that key; an entry
+            # left with only "at" is dropped.
+            if prop is None:
+                kept = []
+            else:
+                kept = []
+                for kf in item.get("keyframes", []):
+                    rest = {k: v for k, v in kf.items() if k != prop}
+                    if len(rest) > 1:
+                        kept.append(rest)
+            result = proj.set_keyframes(args["item"], kept)
+            self._save()
+            return result
+        if name == "vibeedit_media_remove":
+            proj = self._require()
+            used = [i["id"] for t in proj.data["tracks"]
+                    for i in t["items"] if i.get("media") == args["media"]]
+            if used:
+                raise ValueError(
+                    f"Media {args['media']!r} is still used by items: "
+                    f"{', '.join(used)}")
+            before = len(proj.data["media"])
+            proj.data["media"] = [m for m in proj.data["media"]
+                                  if m["id"] != args["media"]]
+            if len(proj.data["media"]) == before:
+                raise KeyError(f"Media not found: {args['media']}")
+            proj._bump()
+            self._save()
+            return {"removed": args["media"]}
+        if name == "vibeedit_project_format_set":
+            proj = self._require()
+            fmt = proj.data.setdefault("format", {})
+            if args.get("width") is not None:
+                fmt["width"] = int(args["width"])
+            if args.get("height") is not None:
+                fmt["height"] = int(args["height"])
+            if args.get("fps") is not None:
+                fmt["fps"] = args["fps"]
+            if int(fmt.get("width", 0)) <= 0 or int(fmt.get("height", 0)) <= 0:
+                raise ValueError("Format width and height must be positive")
+            proj._bump()
+            self._save()
+            return {"format": fmt}
+        if name == "vibeedit_track_add":
+            proj = self._require()
+            kind = args.get("kind", "video")
+            if kind not in ("video", "text", "audio"):
+                raise ValueError(f"Unknown track kind: {kind!r}")
+            used = {t["id"] for t in proj.data["tracks"]}
+            n = 1
+            while f"t{n}" in used:
+                n += 1
+            track = {"id": f"t{n}", "kind": kind,
+                     "role": args.get("role", ""),
+                     "name": args.get("name", kind), "items": []}
+            proj.data["tracks"].append(track)
+            proj._bump()
+            self._save()
+            return {"track": track}
+        if name == "vibeedit_karaoke_remove":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            if "karaoke" not in item:
+                raise ValueError(f"Item {args['item']!r} has no karaoke data")
+            del item["karaoke"]
+            proj._bump()
+            self._save()
+            return {"removed": args["item"]}
+        if name == "vibeedit_adjustment_get":
+            proj = self._require()
+            for layer in proj.list_adjustments():
+                if layer["id"] == args["item"]:
+                    return {"adjustment": layer}
+            raise KeyError(f"Adjustment layer not found: {args['item']}")
+        if name == "vibeedit_beat_count":
+            proj = self._require()
+            return {"beats": len(proj.beat_list()),
+                    "source": proj.data.get("beatGrid", {}).get("source")}
+        if name == "vibeedit_text_style_get":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            return {"item": args["item"], "text": item.get("text"),
+                    "textStyle": item.get("textStyle") or {}}
+        if name == "vibeedit_export_preview":
+            from .render import render
+            import os
+            proj = self._require()
+            out = os.path.join(proj.folder, "render", "export-draft.mp4")
+            report = render(proj.data, proj.folder, out, preset="draft")
+            self.last_export = report
+            return report
+        if name == "vibeedit_project_rev":
+            proj = self._require()
+            return {"name": proj.data.get("name"), "rev": proj.rev,
+                    "format": proj.data.get("format"),
+                    "path": self.path}
         raise ValueError(f"Unknown tool: {name}")
 
 

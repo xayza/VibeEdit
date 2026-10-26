@@ -158,6 +158,7 @@ function renderInspector() {
   $("inspLut").value = (item.color && item.color.lut) || "";
   $("inspStrength").value = (item.color && item.color.strength !== undefined) ? item.color.strength : "";
   $("inspPreset").value = (item.color && item.color.preset) || "";
+  $("inspPresetStrength").value = (item.color && item.color.preset_strength !== undefined) ? item.color.preset_strength : "";
   renderKeyframes();
 }
 
@@ -215,7 +216,7 @@ $("inspectorForm").addEventListener("submit", async (e) => {
     await api("/api/project", { op: "set_fade", item: $("inspId").value, fadeIn: Number($("inspFadeIn").value), fadeOut: Number($("inspFadeOut").value) });
     if ($("inspText").value) await api("/api/project", { op: "set_text", item: $("inspId").value, text: $("inspText").value });
     await api("/api/project", { op: "set_volume", item: $("inspId").value, volume: Number($("inspVolume").value) });
-    if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "") await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value) });
+    if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "" || $("inspPresetStrength").value !== "") await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value), preset_strength: $("inspPresetStrength").value === "" ? null : Number($("inspPresetStrength").value) });
     setStatus("Clip updated."); await load();
   } catch (err) { setStatus(err.message, true); }
 });

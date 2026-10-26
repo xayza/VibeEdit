@@ -198,3 +198,5 @@ a writable folder or pass `--project` to a writable folder.
 | PowerShell refuses to run a `.ps1` | Use the `.bat` launcher instead — it needs no execution-policy change. |
 | Launcher says `vibeedit.py` is missing | You copied the launcher alone: copy the whole `windows\` folder (step 1). |
 | Export fails with a LUT error | The `.cube` path must exist on your machine and end in `.cube`; a bad LUT is a hard error, never silently skipped. |
+| Export fails: `No option name near '/Windows/Fonts/...'` | **Fixed in Phase 7.** FFmpeg splits filter options on unescaped colons even inside quotes, so a Windows drive path broke drawtext. The app now escapes every colon as `\:` in filter paths. If you still see this on an older checkout, pull the latest code. |
+| Vietnamese text shows as mojibake (e.g. `xin chÃ o`) in export errors | **Fixed in Phase 7.** FFmpeg error output is now decoded as UTF-8 instead of the Windows locale codepage. The project file itself was always UTF-8; only the displayed error was mangled. Pull the latest code. |

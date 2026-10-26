@@ -1,5 +1,40 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 7
+
+- Windows export bugfix (real user failure): FFmpeg's filter
+  parser splits on every unescaped colon even inside single
+  quotes, so a Windows drive font path failed drawtext with
+  `No option name near '/Windows/Fonts/arial.ttf:...'`.
+  `render._filter_path()` now escapes every colon as `\:` in
+  all filter-embedded paths (fontfile, lut3d file, subtitles
+  filename). Proven on FFmpeg 8.1.2: a colon path fails
+  unescaped with exactly the user's error and renders fine
+  escaped (drawtext, lut3d, subtitles all verified).
+- Vietnamese text mojibake fix: "xin chào" displayed as
+  "xin chÃ o" in export errors because `render.py` decoded
+  FFmpeg's UTF-8 stderr with the Windows locale codepage.
+  FFmpeg subprocess output (and the beats decoder) now decode
+  explicitly as UTF-8; project/server/browser layers were
+  already UTF-8 throughout.
+- Still-image main-track keyframes now render (zoompan for
+  x/y/scale on the looped still, rotate for tilt, normal
+  colour filters, alpha steps for opacity); the old "stored,
+  not rendered" entry is gone. Overlay still images remain
+  skipped entirely.
+- Eq preset strength is now exposed in the Inspector UI (new
+  `inspPresetStrength` input wired to `set_color`'s
+  `preset_strength`).
+- UI beautified (CSS only, no `app.js` id renamed or
+  removed): logo-gradient accents, sticky top bar, gradient
+  primary buttons, kind-coloured timeline clips, white
+  playhead, focus-visible rings.
+- MCP expanded from 78 to 90 real tools (clip get/duplicate/
+  keyframe-remove, media remove, project format set, track
+  add, karaoke remove, adjustment get, beat count, text style
+  get, export preview, project rev). 113 tests OK.
+  See `VibeEdit/docs/windows-port.md` §7e–§8.
+
 ## VibeEdit Windows port — Phase 6
 
 - GitHub Actions Windows build (`.github/workflows/build-windows.yml`,

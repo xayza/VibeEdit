@@ -56,11 +56,15 @@ class TestNoHardcodedPaths(unittest.TestCase):
         self.assertIn("subtitles=filename='{_filter_path", src)
 
     def test_filter_path_converts_windows_paths(self):
+        # Phase 7 correction: the drive colon MUST be escaped as
+        # \: — the old expectation (bare C:/...) is exactly the
+        # filter string that failed on Windows with
+        # "No option name near '/Users/test/...'".
         self.assertEqual(
             _filter_path("C:\\Users\\test\\my cube.cube"),
-            "C:/Users/test/my cube.cube")
+            "C\\:/Users/test/my cube.cube")
         self.assertEqual(
-            _filter_path("D:\\luts\\a'b.cube"), "D:/luts/a\\'b.cube")
+            _filter_path("D:\\luts\\a'b.cube"), "D\\:/luts/a\\'b.cube")
         # Linux no-op for ordinary paths.
         self.assertEqual(_filter_path("/usr/share/fonts/a.ttf"),
                          "/usr/share/fonts/a.ttf")

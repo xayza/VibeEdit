@@ -389,8 +389,8 @@ class TestMcpPhase4(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count(self):
-        # Phase 6: 66 Phase 5 tools + 12 Phase 6 tools = 78.
-        self.assertEqual(len(TOOLS), 78)
+        # Phase 7: 78 Phase 6 tools + 12 Phase 7 tools = 90.
+        self.assertEqual(len(TOOLS), 90)
         names = {t["name"] for t in TOOLS}
         for name in ("vibeedit_otio_import", "vibeedit_karaoke_add",
                      "vibeedit_karaoke_get", "vibeedit_karaoke_export_ass",

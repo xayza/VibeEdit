@@ -1,4 +1,59 @@
-# VibeEdit — Windows (Phase 6)
+# VibeEdit — Windows (Phase 7)
+
+## What Phase 7 adds (on top of Phase 6)
+
+- **Windows export bugfix — drawtext fontfile colon (critical,
+  from a real user failure):** FFmpeg's filter parser splits
+  options on every unescaped colon, even inside single quotes,
+  so `fontfile='C:/Windows/Fonts/arial.ttf'` failed on Windows
+  with `No option name near '/Windows/Fonts/arial.ttf:...'`.
+  Phase 5's slash conversion alone was not enough. The fix in
+  `vibeedit_core/render.py` (`_filter_path`) now escapes every
+  colon as `\:` in all filter-embedded paths (drawtext
+  fontfile, lut3d file, subtitles filename), so Windows drive
+  paths and paths with spaces work. Proven on FFmpeg 8.1.2: a
+  colon-containing font path fails unescaped with exactly the
+  user's error and renders fine escaped.
+- **Vietnamese text mojibake fix:** the user's text "xin chào"
+  showed up as "xin chÃ o" in the export error. The project
+  file, server JSON and browser layers are all UTF-8 throughout;
+  the mojibake came from `subprocess.run(..., text=True)` in
+  `render.py`, which on Windows decodes FFmpeg's UTF-8 stderr
+  with the locale codepage (typically windows-1252). Both
+  FFmpeg subprocess calls (and the beats decoder) now decode
+  explicitly as UTF-8 with `errors="replace"`, and a full
+  Vietnamese-text render is test-covered.
+- **Still-image keyframes now render:** main-track still-image
+  clips with x/y/scale keyframes animate via zoompan on the
+  looped still, tilt via rotate, colour via the normal colour
+  filters, and opacity/fades via the alpha steps — the old
+  "stored, not rendered" skipped entry is gone. (Overlay
+  still-image items are still skipped entirely, as before —
+  that is a separate limitation, not a keyframe one.)
+- **Eq preset strength in the Inspector:** the preset-strength
+  control existed in code since Phase 5 but had no UI field;
+  the Inspector now has a "Preset strength (0–1)" input wired
+  to `set_color`'s `preset_strength`, alongside the existing
+  LUT-strength input.
+- **UI beautified (CapCut-style dark editor):** `static/
+  style.css` was redesigned — near-black chrome, logo-gradient
+  accents (pink -> violet -> blue), sticky top bar with the
+  logo, gradient primary buttons, clearer panels, track lanes
+  with kind-coloured left accents, white playhead, and
+  focus-visible rings. CSS only: no element id or class used
+  by `app.js` was renamed or removed (a test asserts every
+  `app.js` id still exists in `index.html`).
+- **MCP expanded from 78 to 90 real tools:** clip get,
+  clip duplicate, clip keyframe remove, media remove (blocked
+  while any item references it), project format set, track
+  add, karaoke remove, adjustment get, beat count, text style
+  get, export preview (draft), project rev. Every tool calls
+  real Project/export code.
+- 113 tests OK (91 Phase 1–6 + 22 Phase 7), plus a web-server
+  smoke test (HTTP 200 for `/`, `/api/project` and the new
+  stylesheet) and a full draft export smoke on the VM
+  (540x960, 3.003 s, H.264/AAC, 1 Vietnamese text overlay,
+  no skips).
 
 ## What Phase 6 adds (on top of Phase 5)
 
