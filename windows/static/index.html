@@ -19,30 +19,41 @@
   </div>
   <div id="status" class="status"></div>
 </header>
-
-<!-- Preview on top, CapCut-style -->
-<section class="preview-wrap">
-  <video id="preview" controls preload="metadata"></video>
-  <div class="preview-meta">
-    <span id="previewLabel">No export yet — export to preview here.</span>
-    <span>Playhead: <b id="playheadLabel">0.00s</b></span>
-    <span>Timeline: <b id="durationLabel">0.00s</b></span>
-  </div>
-</section>
-
-<!-- Editor panel -->
-<section class="editor">
-  <div class="panel">
+<nav class="tool-toolbar" aria-label="Editor tools">
+<button type="button" class="tool-btn active" data-tab="media"><span class="tool-icon">🎬</span><span>Media</span></button>
+<button type="button" class="tool-btn" data-tab="audio"><span class="tool-icon">🎧</span><span>Audio</span></button>
+<button type="button" class="tool-btn" data-tab="text"><span class="tool-icon">T</span><span>Text</span></button>
+<button type="button" class="tool-btn" data-tab="stickers"><span class="tool-icon">✨</span><span>Stickers</span></button>
+<button type="button" class="tool-btn" data-tab="effects"><span class="tool-icon">★</span><span>Effects</span></button>
+<button type="button" class="tool-btn" data-tab="transitions"><span class="tool-icon">⇄</span><span>Transitions</span></button>
+<button type="button" class="tool-btn" data-tab="captions"><span class="tool-icon">📄</span><span>Captions</span></button>
+<button type="button" class="tool-btn" data-tab="filters"><span class="tool-icon">◎</span><span>Filters</span></button>
+<button type="button" class="tool-btn" data-tab="effects"><span class="tool-icon">★</span><span>Adjustment</span></button>
+<button type="button" class="tool-btn" data-tab="templates"><span class="tool-icon">📁</span><span>Templates</span></button>
+<button type="button" class="tool-btn" data-tab="ai"><span class="tool-icon">✦</span><span>AI</span></button>
+</nav>
+<div class="workbench">
+  <div class="tool-col">
+    <nav class="tool-rail" aria-label="Library menu">
+<button type="button" class="rail-btn" data-tab="media">Import</button>
+<button type="button" class="rail-btn" data-tab="media">Media</button>
+<button type="button" class="rail-btn" data-action="timeline">Timeline</button>
+<button type="button" class="rail-btn" data-tab="templates">Subprojects</button>
+<button type="button" class="rail-btn" data-tab="media">Yours</button>
+<button type="button" class="rail-btn" data-tab="ai">Generate</button>
+<button type="button" class="rail-btn" data-tab="templates">Spaces</button>
+<button type="button" class="rail-btn" data-tab="media">Library</button>
+</nav>
+    <div class="tool-panels">
+<section class="panel tool-panel" data-panel="media">
+<div class="import-dropzone" id="importDropzone"><div class="import-dropzone-label">+ Import</div><p>Drag and drop videos, photos, and audio files here</p><div class="panel">
     <h3>Media library</h3>
     <ul id="mediaList"></ul>
     <form id="uploadForm">
       <input type="file" id="uploadFile" required>
       <button type="submit">Upload media</button>
     </form>
-  </div>
-  <div class="panel">
-    <h3>Add clip</h3>
-    <form id="addClipForm">
+  </div></div><form id="addClipForm">
       <label>Media <select id="addMedia" required></select></label>
       <label>Track <select id="addTrack"></select></label>
       <label>Start (frames) <input id="addAt" type="number" value="0" min="0"></label>
@@ -50,19 +61,46 @@
       <label>Duration (frames) <input id="addDur" type="number" placeholder="whole media"></label>
       <label>Speed <input id="addSpeed" type="number" step="0.25" value="1"></label>
       <button type="submit" class="primary">Add clip</button>
+    </form><div class="create-tools"><p class="create-tools-title">No media? Create with these tools</p><div class="create-cards"><button type="button" class="create-card" data-tab="ai">Generate</button><button type="button" class="create-card" data-tab="ai">AI avatars</button><button type="button" class="create-card" disabled title="Recording is not available in VibeEdit yet">Record</button></div></div>
+</section>
+<section class="panel tool-panel" data-panel="audio" hidden>
+<h3>Audio</h3>
+<form id="beatForm">
+      <label>Media <select id="beatMedia" required></select></label>
+      <button type="submit" class="primary">Detect beats (energy-onset)</button>
+    </form><button id="btnBeatsMarkers" class="secondary">Copy beats to markers</button><button id="btnSnap" class="secondary">Snap playhead to nearest beat</button><form id="duckingForm">
+      <label>Duck amount (dB) <input id="duckAmount" type="number" step="1" min="1" max="24" value="6"></label>
+      <label><input type="checkbox" id="duckEnabled" checked> Enable music ducking</label>
+      <button type="submit" class="primary">Save ducking</button>
     </form>
-    <h3>Add text</h3>
-    <form id="addTextForm">
+</section>
+<section class="panel tool-panel" data-panel="text" hidden>
+<h3>Text</h3>
+<form id="addTextForm">
       <label>Text <input id="addText" required></label>
       <label>Start (frames) <input id="addTextAt" type="number" value="0" min="0"></label>
       <label>Duration (frames) <input id="addTextDur" type="number" value="90" min="1"></label>
       <button type="submit" class="primary">Add text</button>
     </form>
-  </div>
-  <div class="panel">
-    <h3>Transition</h3>
-    <p>Pick the clip on the left of a cut; the transition joins it to the next consecutive main-track clip.</p>
-    <form id="transitionForm">
+</section>
+<section class="panel tool-panel" data-panel="stickers" hidden>
+<h3>Stickers</h3>
+<p>Stickers are not in VibeEdit yet. Use text overlays instead.</p>
+<button type="button" class="primary" data-tab="text">Use Text overlays</button>
+</section>
+<section class="panel tool-panel" data-panel="effects" hidden>
+<h3>Effects &amp; Adjustment</h3>
+<form id="adjustmentForm">
+      <label>Start (frames) <input id="adjAt" type="number" value="0" min="0"></label>
+      <label>Duration (frames) <input id="adjDur" type="number" value="90" min="1"></label>
+      <label>Colour preset <select id="adjPreset"><option value="">(none)</option><option value="vivid">vivid</option><option value="warm">warm</option><option value="cool">cool</option><option value="faded">faded</option><option value="mono">mono</option></select></label>
+      <label>LUT file (.cube, full path) <input id="adjLut" placeholder="C:\luts\my.cube"></label>
+      <button type="submit" class="primary">Add adjustment layer</button>
+    </form>
+</section>
+<section class="panel tool-panel" data-panel="transitions" hidden>
+<h3>Transitions</h3>
+<form id="transitionForm">
       <label>Kind <select id="trKind">
         <option value="dissolve">Crossfade (dissolve)</option>
         <option value="wipe-left">Wipe left</option>
@@ -100,21 +138,77 @@
       </select></label>
       <label>Duration (s, 0.1–2.0) <input id="trDur" type="number" step="0.1" min="0.1" max="2" value="0.5"></label>
       <button type="submit" class="primary">Add transition after selected clip</button>
-    </form>
-    <ul id="transitionList"></ul>
-    <button id="btnTransitionPreview" class="secondary">Preview selected transition (still)</button>
-    <div id="transitionPreviewBox" hidden>
+    </form><ul id="transitionList"></ul><button id="btnTransitionPreview" class="secondary">Preview selected transition (still)</button><div id="transitionPreviewBox" hidden>
       <img id="transitionPreviewImg" alt="Transition preview" style="max-width:100%">
       <div id="transitionPreviewLabel"></div>
     </div>
-    <h3>Subtitles (SRT)</h3>
-    <form id="srtImportForm">
+</section>
+<section class="panel tool-panel" data-panel="captions" hidden>
+<h3>Captions</h3>
+<form id="srtImportForm">
       <label>Paste SRT <textarea id="srtText" rows="4" placeholder="1&#10;00:00:01,000 --> 00:00:03,000&#10;Hello"></textarea></label>
       <button type="submit" class="primary">Import SRT to Captions</button>
-    </form>
-    <button id="btnSrtExport" class="secondary">Export Captions as SRT</button>
+    </form><button id="btnSrtExport" class="secondary">Export Captions as SRT</button><form id="karaokeForm">
+      <label>Selected text item is used. Words JSON: [{"text":"Hello","start":0,"end":1}] <textarea id="karaokeWords" rows="2" placeholder='[{"text":"Hello","start":0,"end":1}]'></textarea></label>
+      <button type="submit" class="primary">Add karaoke timings to selected item</button>
+    </form><button id="btnKaraokeAss" class="secondary">Export karaoke as .ass</button>
+</section>
+<section class="panel tool-panel" data-panel="filters" hidden>
+<h3>Filters</h3>
+<p>Colour presets and LUTs live in the Details panel on the right: select a clip on the timeline, then set its colour preset or LUT in the Inspector.</p>
+<button type="button" class="primary" data-action="focus-inspector">Open the Details inspector</button>
+</section>
+<section class="panel tool-panel" data-panel="templates" hidden>
+<h3>Templates, Batch &amp; OTIO</h3>
+<form id="batchForm">
+      <label>Extra project folders (one per line) <textarea id="batchFolders" rows="3" placeholder="D:\projects\video2"></textarea></label>
+      <label><input type="checkbox" id="batchNormalize"> Normalize loudness (loudnorm)</label>
+      <button type="submit" class="primary">Run batch export (full)</button>
+    </form><button id="btnOtio" class="secondary">Export timeline as OTIO</button><label><input type="checkbox" id="exportNormalize"> Normalize loudness on next export</label><div id="batchResult"></div><form id="otioImportForm">
+      <label>OTIO file (full path) <input id="otioImportPath" placeholder="D:\projects\other\timeline.otio" required></label>
+      <label>Destination project folder (full path) <input id="otioImportDest" placeholder="D:\projects\imported" required></label>
+      <label><input type="checkbox" id="otioImportMerge"> Merge into existing project in that folder</label>
+      <button type="submit" class="primary">Import OTIO</button>
+    </form><div id="phase4Result"></div>
+</section>
+<section class="panel tool-panel" data-panel="ai" hidden>
+<h3>AI &amp; Review</h3>
+<div class="panel">
+    <h3>Agent dock (Phase 5)</h3>
+    <p>Point an AI agent at this project's MCP server (from the agent's own terminal — there is no terminal emulator here):</p>
+    <pre id="agentDockCommand">python windows\vibeedit.py mcp &lt;project-folder&gt;</pre>
+    <p>Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout (<code>initialize</code>, <code>ping</code>, <code>tools/list</code>, <code>tools/call</code>). Example agent commands:</p>
+    <ul>
+      <li><code>tools/call vibeedit_project_get</code> — read the whole open project.</li>
+      <li><code>tools/call vibeedit_timeline_apply {"ops": [{"op": "add_text", "track": "t1", "text": "Hello", "at": 0, "dur": 90}]}</code> — add a caption.</li>
+      <li><code>tools/call vibeedit_project_validate</code> — check the project for overlaps and dangling references.</li>
+    </ul>
+    <p>Live tool registry from this server (<span id="mcpToolCount">…</span> tools):</p>
+    <ul id="mcpTools"><li>Loading…</li></ul>
+  </div><div class="panel">
+    <h3>Review (Phase 8)</h3>
+    <p>Validation issues, export history and skipped items — all from the live project and the last export report.</p>
+    <button id="btnReview" class="secondary">Refresh review</button>
+    <div id="reviewResult"></div>
   </div>
-  <div class="panel">
+</section>
+    </div>
+  </div>
+  <main class="centre-col">
+    <div class="player-head"><span class="player-title">Player</span><span class="player-sub">Preview: latest export</span></div>
+<section class="preview-wrap">
+  <video id="preview" controls preload="metadata"></video>
+  <div class="preview-meta">
+    <span id="previewLabel">No export yet — export to preview here.</span>
+    <span>Playhead: <b id="playheadLabel">0.00s</b></span>
+    <span>Timeline: <b id="durationLabel">0.00s</b></span>
+  </div>
+</section>
+  </main>
+  <aside class="details-col">
+    <div class="details-head">Details</div>
+    <p class="details-note">Selected clip and project details. Select a clip on the timeline to edit it here.</p>
+<div class="panel">
     <h3>Inspector</h3>
     <div id="inspectorEmpty">Select a clip on the timeline to edit it.</div>
     <form id="inspectorForm" hidden>
@@ -161,75 +255,11 @@
       <p><small>Position/scale/volume keyframes are rendered linearly. Overlay opacity is rendered stepwise (held at each keyframe). Main-track position/scale keyframes render via zoompan; main-track opacity renders stepwise.</small></p>
     </div>
   </div>
-</section>
-
-  <div class="panel">
-    <h3>Batch &amp; OTIO</h3>
-    <p>Batch exports the open project folder plus any extra project folders (one per line, full paths), sequentially.</p>
-    <form id="batchForm">
-      <label>Extra project folders (one per line) <textarea id="batchFolders" rows="3" placeholder="D:\projects\video2"></textarea></label>
-      <label><input type="checkbox" id="batchNormalize"> Normalize loudness (loudnorm)</label>
-      <button type="submit" class="primary">Run batch export (full)</button>
-    </form>
-    <button id="btnOtio" class="secondary">Export timeline as OTIO</button>
-    <label><input type="checkbox" id="exportNormalize"> Normalize loudness on next export</label>
-    <div id="batchResult"></div>
-  </div>
-
-  <div class="panel">
-    <h3>Phase 4: OTIO import, karaoke, adjustment, beats, ducking</h3>
-    <form id="otioImportForm">
-      <label>OTIO file (full path) <input id="otioImportPath" placeholder="D:\projects\other\timeline.otio" required></label>
-      <label>Destination project folder (full path) <input id="otioImportDest" placeholder="D:\projects\imported" required></label>
-      <label><input type="checkbox" id="otioImportMerge"> Merge into existing project in that folder</label>
-      <button type="submit" class="primary">Import OTIO</button>
-    </form>
-    <form id="karaokeForm">
-      <label>Selected text item is used. Words JSON: [{"text":"Hello","start":0,"end":1}] <textarea id="karaokeWords" rows="2" placeholder='[{"text":"Hello","start":0,"end":1}]'></textarea></label>
-      <button type="submit" class="primary">Add karaoke timings to selected item</button>
-    </form>
-    <button id="btnKaraokeAss" class="secondary">Export karaoke as .ass</button>
-    <form id="adjustmentForm">
-      <label>Start (frames) <input id="adjAt" type="number" value="0" min="0"></label>
-      <label>Duration (frames) <input id="adjDur" type="number" value="90" min="1"></label>
-      <label>Colour preset <select id="adjPreset"><option value="">(none)</option><option value="vivid">vivid</option><option value="warm">warm</option><option value="cool">cool</option><option value="faded">faded</option><option value="mono">mono</option></select></label>
-      <label>LUT file (.cube, full path) <input id="adjLut" placeholder="C:\luts\my.cube"></label>
-      <button type="submit" class="primary">Add adjustment layer</button>
-    </form>
-    <form id="beatForm">
-      <label>Media <select id="beatMedia" required></select></label>
-      <button type="submit" class="primary">Detect beats (energy-onset)</button>
-    </form>
-    <button id="btnBeatsMarkers" class="secondary">Copy beats to markers</button>
-    <button id="btnSnap" class="secondary">Snap playhead to nearest beat</button>
-    <form id="duckingForm">
-      <label>Duck amount (dB) <input id="duckAmount" type="number" step="1" min="1" max="24" value="6"></label>
-      <label><input type="checkbox" id="duckEnabled" checked> Enable music ducking</label>
-      <button type="submit" class="primary">Save ducking</button>
-    </form>
-    <div id="phase4Result"></div>
-  </div>
-  <div class="panel">
-    <h3>Review (Phase 8)</h3>
-    <p>Validation issues, export history and skipped items — all from the live project and the last export report.</p>
-    <button id="btnReview" class="secondary">Refresh review</button>
-    <div id="reviewResult"></div>
-  </div>
-  <div class="panel">
-    <h3>Agent dock (Phase 5)</h3>
-    <p>Point an AI agent at this project's MCP server (from the agent's own terminal — there is no terminal emulator here):</p>
-    <pre id="agentDockCommand">python windows\vibeedit.py mcp &lt;project-folder&gt;</pre>
-    <p>Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout (<code>initialize</code>, <code>ping</code>, <code>tools/list</code>, <code>tools/call</code>). Example agent commands:</p>
-    <ul>
-      <li><code>tools/call vibeedit_project_get</code> — read the whole open project.</li>
-      <li><code>tools/call vibeedit_timeline_apply {"ops": [{"op": "add_text", "track": "t1", "text": "Hello", "at": 0, "dur": 90}]}</code> — add a caption.</li>
-      <li><code>tools/call vibeedit_project_validate</code> — check the project for overlaps and dangling references.</li>
-    </ul>
-    <p>Live tool registry from this server (<span id="mcpToolCount">…</span> tools):</p>
-    <ul id="mcpTools"><li>Loading…</li></ul>
-  </div>
+  </aside>
+</div>
 <!-- Timeline strip at the bottom, CapCut-style -->
 <section class="timeline-wrap">
+  <div class="timeline-toolbar"><button type="button" id="tlAdd" title="Add clip (opens Media tab)" data-tab="media">+ Add</button><button type="button" id="tlUndo" title="Undo">↩ Undo</button><button type="button" id="tlRedo" title="Redo">↪ Redo</button><button type="button" id="tlSplit" title="Split selected clip at playhead">✂ Split</button><button type="button" id="tlDelete" class="danger" title="Delete selected clip">🗑 Delete</button><span class="timeline-toolbar-note">Timeline tools mirror the top-bar actions.</span></div><div class="timeline-empty" id="timelineEmptyHint">Drag material here and start to create</div>
   <div class="timeline-tools">
     <span>Timeline</span>
     <label>Zoom <input id="zoom" type="range" min="10" max="200" value="60"> <span id="zoomLabel">60 px/s</span></label>
@@ -240,7 +270,6 @@
   <div id="tracks"></div>
   <pre id="timelineText"></pre>
 </section>
-
 <script src="/static/app.js"></script>
 </body>
 </html>

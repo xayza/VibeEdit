@@ -1,5 +1,43 @@
 # VibeEdit — Windows (Phase 8, final planned phase)
 
+## CapCut-style shell redesign (after Phase 8)
+
+- **Layout, in the spirit of the user's CapCut desktop reference
+  screenshot (inspiration only — no CapCut assets, icons, or code
+  copied):** brand top bar (logo, project name, Undo/Redo, Export
+  draft / Export video) + a slim tool toolbar (Media, Audio, Text,
+  Stickers, Effects, Transitions, Captions, Filters, Adjustment,
+  Templates, AI, teal accent on the active item) + a workbench of
+  three columns + a full-width timeline at the bottom.
+- **Left column:** a narrow rail (Import, Media, Timeline,
+  Subprojects, Yours, Generate, Spaces, Library) beside tab panels.
+  The Media tab has a centred "+ Import" drop zone ("Drag and drop
+  videos, photos, and audio files here" — dropping files fills the
+  existing upload input and submits the existing upload form) and a
+  "No media? Create with these tools" row (Generate / AI avatars
+  switch to the AI tab; Record is disabled and labelled as not
+  available in VibeEdit yet).
+- **Centre:** a "Player" stage with the preview video centred and
+  aspect-correct, plus its playhead/duration pills.
+- **Right column:** a "Details" panel holding the real Inspector
+  (selected-clip properties, LUT/colour, keyframes) — only real
+  project data, no invented CapCut fields.
+- **Bottom:** a timeline toolbar (+ Add, Undo, Redo, Split, Delete
+  — mirrors of the real actions, not duplicates) + the "Drag
+  material here and start to create" hint + ruler with time and
+  beat ticks + labelled track rows with type-coloured clips.
+- **No feature was lost or faked:** every old panel moved verbatim
+  (same ids, labels, and submit handlers) into its tab — see the
+  mapping in `tests/test_capcut_ui.py`. Stickers and Filters tabs
+  say honestly what VibeEdit lacks (no stickers yet; colour
+  presets/LUT live in the Details inspector) instead of inventing
+  tools. Teal (#00c8d4) replaces the Phase 7 gradient accent.
+- 131 tests OK (122 Phase 1–8 + 9 new shell tests), plus a
+  web-server smoke test (HTTP 200 for `/`, `/api/project`,
+  `/static/style.css`, served HTML containing the new shell
+  markers and the logo data URI).
+
+
 ## What Phase 8 adds (on top of Phase 7) — final planned phase
 
 - **Overlay still images now render:** overlay-track still-image

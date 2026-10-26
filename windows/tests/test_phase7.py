@@ -238,7 +238,8 @@ class TestBeautifiedUI(unittest.TestCase):
         css = open(os.path.join(os.path.dirname(__file__), "..",
                                 "static", "style.css"),
                    encoding="utf-8").read()
-        for token in ("--accent-grad", "linear-gradient",
+        # CapCut redesign: teal accent replaces the Phase 7 gradient.
+        for token in ("--accent: #00c8d4", "linear-gradient",
                       ".brand-text", "box-shadow", ":focus-visible"):
             self.assertIn(token, css)
         # Old flat brown palette must be gone.
@@ -265,7 +266,8 @@ class TestBeautifiedUI(unittest.TestCase):
                 with urllib.request.urlopen(
                         f"http://127.0.0.1:{port}/static/style.css") as resp:
                     css = resp.read().decode("utf-8")
-                    self.assertIn("--accent-grad", css)
+                    # CapCut redesign: teal accent, not the old gradient.
+                    self.assertIn("--accent: #00c8d4", css)
                 with urllib.request.urlopen(
                         f"http://127.0.0.1:{port}/api/project") as resp:
                     self.assertEqual(resp.status, 200)

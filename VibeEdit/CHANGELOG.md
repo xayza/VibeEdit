@@ -1,5 +1,21 @@
 # Changelog
 
+## VibeEdit Windows port — CapCut-style shell redesign (after Phase 8)
+
+- Editor shell rebuilt in the spirit of the user's CapCut desktop
+  reference screenshot (inspiration only): brand top bar, slim
+  tool toolbar, left tool column (rail + tabs), centre Player
+  stage, right Details inspector, full-width timeline with its
+  own toolbar and empty hint, teal #00c8d4 accent on #101014.
+- Every old panel moved verbatim into its tab (ids, labels, and
+  handlers unchanged, test-enforced); Stickers/Filters tabs
+  honestly state what VibeEdit lacks instead of inventing tools.
+- Import drop zone: dropping files fills the existing upload
+  input and submits the existing upload form. Timeline toolbar
+  buttons mirror the real Undo/Redo/Split/Delete actions.
+- 131 tests OK (122 Phase 1–8 + 9 new shell tests); server smoke
+  200 for `/`, `/api/project`, `/static/style.css`.
+
 ## VibeEdit Windows port — Phase 8 (final planned phase)
 
 - Overlay still images now render (looped still, zoompan scale

@@ -429,3 +429,67 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     setStatus("Transition preview ready.");
   } catch (err) { setStatus("Transition preview failed: " + err.message, true); }
 });
+
+/* CapCut-style shell wiring (redesign): tab switching, rail actions,
+   import drop zone, timeline toolbar mirrors, Details focus.
+   Fenced like the agent dock: every lookup is guarded, so a missing
+   element can never break the editor above. */
+(function capcutShell() {
+  function activateTab(name) {
+    document.querySelectorAll("[data-tab]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.tab === name);
+    });
+    document.querySelectorAll(".tool-panel").forEach((p) => {
+      p.hidden = p.dataset.panel !== name;
+    });
+  }
+  document.querySelectorAll("[data-tab]").forEach((b) => {
+    b.addEventListener("click", () => activateTab(b.dataset.tab));
+  });
+  document.querySelectorAll('[data-action="timeline"]').forEach((b) => {
+    b.addEventListener("click", () => {
+      const tl = document.querySelector(".timeline-wrap");
+      if (tl) tl.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  document.querySelectorAll('[data-action="focus-inspector"]').forEach((b) => {
+    b.addEventListener("click", () => {
+      const col = document.querySelector(".details-col");
+      if (!col) return;
+      col.scrollIntoView({ behavior: "smooth", block: "start" });
+      col.classList.add("details-flash");
+      setTimeout(() => col.classList.remove("details-flash"), 1600);
+    });
+  });
+  // Timeline toolbar mirrors: new buttons click the real actions.
+  const mirrors = { tlUndo: "btnUndo", tlRedo: "btnRedo",
+                    tlSplit: "btnSplit", tlDelete: "btnDelete" };
+  for (const [mirror, real] of Object.entries(mirrors)) {
+    const m = document.getElementById(mirror);
+    const r = document.getElementById(real);
+    if (m && r) m.addEventListener("click", () => r.click());
+  }
+  const add = document.getElementById("tlAdd");
+  if (add) add.addEventListener("click", () => activateTab("media"));
+  // Import drop zone: dropping files fills the existing upload input
+  // and submits the existing upload form (no new upload path).
+  const zone = document.getElementById("importDropzone");
+  const input = document.getElementById("uploadFile");
+  const form = document.getElementById("uploadForm");
+  if (zone && input && form) {
+    zone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      zone.classList.add("drag-over");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("drag-over");
+      if (e.dataTransfer && e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        form.requestSubmit();
+      }
+    });
+  }
+  activateTab("media");
+})();

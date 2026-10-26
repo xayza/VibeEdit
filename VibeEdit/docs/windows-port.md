@@ -533,6 +533,34 @@ is single-project and edits the project file directly).
   Project methods (move_marker, clip_at_time).
 - Tests + smoke: see windows/README.md Phase 8 section.
 
+## 7g. CapCut-style shell redesign — DONE (after Phase 8)
+
+- Shell rebuilt in the spirit of the user's CapCut desktop
+  reference screenshot (inspiration only, no CapCut assets, icons,
+  or code copied): brand top bar + slim tool toolbar (Media,
+  Audio, Text, Stickers, Effects, Transitions, Captions, Filters,
+  Adjustment, Templates, AI) + left tool column (narrow rail +
+  tab panels) + centre Player stage + right Details column +
+  full-width timeline with its own toolbar and empty hint.
+- Theme: near-black #101014 background, #1a1a1f panels, thin
+  #23232a borders, single teal #00c8d4 accent (replaces the
+  Phase 7 gradient accent; two Phase 7 theme tests were updated
+  intentionally and commented to assert the teal accent).
+- Panel mapping (all moved verbatim, ids unchanged): Media =
+  media library + upload + add clip; Audio = beats + ducking;
+  Text = add text; Transitions = transition form/list/preview;
+  Captions = SRT + karaoke; Effects & Adjustment = adjustment
+  layers; Templates = batch + OTIO export/import; AI & Review =
+  agent dock + review; Details (right) = inspector + keyframes.
+  Stickers/Filters tabs honestly state what is missing instead
+  of inventing tools. Drag-and-drop onto the Import zone uses
+  the existing upload form/handler. Verified: 131 tests OK
+  (122 + 9 new shell tests), server smoke 200 for `/`,
+  `/api/project`, `/static/style.css`, served HTML contains
+  the new shell markers and the logo data URI. Visual check in
+  a real browser on Windows is still a user check.
+
+
 ## 8. What remains — all of it needs the user's own machine
 
 - A Windows .exe downloaded from a green GitHub Actions run:
