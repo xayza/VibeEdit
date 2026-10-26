@@ -1,0 +1,126 @@
+import VibeEditEngine
+import VibeEditPlugin
+import VibeEditProject
+import VibeEditStorage
+import Foundation
+
+/// What an export produced, with its metrics compared against the previous export of the project.
+public struct ExportReport: Sendable {
+    public let receipt: ExportReceipt
+    public let preset: ExportPreset
+    /// Clips on Main (the stored name predates `cuts`, #508-34).
+    public let cutCount: Int
+    /// The joins between consecutive clips on Main, transitions included: clips − 1.
+    public var cuts: Int { max(0, cutCount - 1) }
+    public let captionCount: Int
+    public let includedSubRip: Bool
+    public let loudness: LoudnessMeasurement?
+    public let loudnessVerified: Bool
+    public let appliedGainDb: Double?
+    public let speechCoverage: Double
+    public let completedAt: Date
+    public let comparison: ExportMetricDelta?
+    /// Review issues the project kept with a reason (`review.accepted`), by issue ID.
+    public var acceptedIssues: [String: String] = [:]
+
+    public init(
+        receipt: ExportReceipt, preset: ExportPreset, cutCount: Int, captionCount: Int,
+        includedSubRip: Bool, loudness: LoudnessMeasurement?, loudnessVerified: Bool,
+        appliedGainDb: Double?, speechCoverage: Double, completedAt: Date,
+        comparison: ExportMetricDelta?
+    ) {
+        self.receipt = receipt
+        self.preset = preset
+        self.cutCount = cutCount
+        self.captionCount = captionCount
+        self.includedSubRip = includedSubRip
+        self.loudness = loudness
+        self.loudnessVerified = loudnessVerified
+        self.appliedGainDb = appliedGainDb
+        self.speechCoverage = speechCoverage
+        self.completedAt = completedAt
+        self.comparison = comparison
+    }
+
+    public var storedMetrics: StoredExportMetrics {
+        var metrics = StoredExportMetrics(
+            path: receipt.url.path, preset: preset.rawValue, duration: receipt.duration,
+            bytes: receipt.bytes, cutCount: cutCount, captionCount: captionCount,
+            includedSubRip: includedSubRip, speechCoverage: speechCoverage,
+            integratedLUFS: loudness?.integratedLUFS,
+            truePeakDbTP: loudness?.truePeakDbTP,
+            loudnessRangeLU: loudness?.loudnessRangeLU,
+            loudnessVerified: loudnessVerified, appliedGainDb: appliedGainDb,
+            completedAt: completedAt)
+        metrics.acceptedIssues = acceptedIssues.isEmpty ? nil : acceptedIssues
+        return metrics
+    }
+
+    public init?(snapshot: ExportHistorySnapshot) {
+        let metrics = snapshot.current
+        guard let preset = ExportPreset(rawValue: metrics.preset) else { return nil }
+        let loudness: LoudnessMeasurement?
+        if let integrated = metrics.integratedLUFS, let peak = metrics.truePeakDbTP {
+            loudness = LoudnessMeasurement(
+                integratedLUFS: integrated, truePeakDbTP: peak,
+                loudnessRangeLU: metrics.loudnessRangeLU)
+        } else {
+            loudness = nil
+        }
+        self.init(
+            receipt: ExportReceipt(
+                url: URL(fileURLWithPath: metrics.path), duration: metrics.duration,
+                bytes: metrics.bytes),
+            preset: preset, cutCount: metrics.cutCount, captionCount: metrics.captionCount,
+            includedSubRip: metrics.includedSubRip, loudness: loudness,
+            loudnessVerified: metrics.loudnessVerified, appliedGainDb: metrics.appliedGainDb,
+            speechCoverage: metrics.speechCoverage, completedAt: metrics.completedAt,
+            comparison: snapshot.comparison)
+        acceptedIssues = metrics.acceptedIssues ?? [:]
+    }
+}
+
+extension ExportReport {
+    /// The `export.status` fields for this report.
+    public var json: [String: JSONValue] {
+            var result: [String: JSONValue] = [
+                "preset": .string(preset.rawValue),
+                "path": .string(receipt.url.path),
+                "duration": .number(receipt.duration),
+                "bytes": .integer(Int(receipt.bytes)),
+                "clips": .integer(cutCount),
+                "cuts": .integer(cuts),
+                "captions": .integer(captionCount),
+                "includedSRT": .bool(includedSubRip),
+                "speechCoverage": .number(speechCoverage),
+                "completedAt": .string(ISO8601DateFormatter().string(from: completedAt)),
+                "acceptedIssues": .object(acceptedIssues.mapValues(JSONValue.string)),
+                // What was written, audio included (P1-F2).
+                "bitrateMbps": receipt.duration > 0
+                    ? .number((Double(receipt.bytes) * 8 / receipt.duration / 10_000).rounded() / 100) : .null,
+            ]
+            if let comparison = comparison {
+                var values: [String: JSONValue] = [
+                    "duration": .number(comparison.duration),
+                    "bytes": .integer(Int(comparison.bytes)),
+                    "clips": .integer(comparison.cutCount),
+                    "cuts": .integer(comparison.cutCount),
+                    "captions": .integer(comparison.captionCount),
+                    "speechCoverage": .number(comparison.speechCoverage),
+                ]
+                values["lufs"] = comparison.integratedLUFS.map(JSONValue.number) ?? .null
+                result["comparison"] = .object(values)
+            } else {
+                result["comparison"] = .null
+            }
+            if let loudness = loudness {
+                result["lufs"] = .number(loudness.integratedLUFS)
+                result["truePeakDbTP"] = .number(loudness.truePeakDbTP)
+                result["loudnessVerified"] = .bool(loudnessVerified)
+                if let gain = appliedGainDb { result["normalizationGainDb"] = .number(gain) }
+            } else {
+                result["lufs"] = .null
+            }
+            return result
+    }
+}

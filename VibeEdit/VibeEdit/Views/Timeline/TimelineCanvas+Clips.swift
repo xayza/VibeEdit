@@ -1,0 +1,277 @@
+import AppKit
+import VibeEditAutomation
+import VibeEditDocument
+import VibeEditEngine
+import VibeEditProject
+
+/// Colors, fonts and icons for clips: the fill says what the clip is (`ClipKind`), a stripe says which layer role.
+@MainActor enum ClipStyle {
+    static func color(track: Track, item: Item, media: Media?) -> NSColor {
+        nsColor(ClipKind(item: item, track: track, media: media).color)
+    }
+
+    static func stripe(track: Track, item: Item) -> NSColor? {
+        ClipKind.roleStripe(track: track, item: item).map(nsColor)
+    }
+
+    private static func nsColor(_ rgb: ClipKind.RGB) -> NSColor {
+        NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+    }
+
+    static let titleText: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor.white,
+    ]
+    static let durationText: [NSAttributedString.Key: Any] = [
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
+        .foregroundColor: NSColor.white.withAlphaComponent(0.75),
+    ]
+    static let sectionText: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor.white,
+    ]
+    static let rulerText: [NSAttributedString.Key: Any] = [
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.gray,
+    ]
+
+    private static var icons: [String: NSImage] = [:]
+
+    /// A white SF Symbol at clip-title size, cached.
+    static func icon(_ name: String, tint: NSColor = .white) -> NSImage? {
+        let key = name + tint.description
+        if let icon = icons[key] { return icon }
+        let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+            .applying(.init(paletteColors: [tint]))
+        let icon = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
+        icons[key] = icon
+        return icon
+    }
+}
+
+extension NSImage {
+    /// Draws right side up in flipped views.
+    func drawFlipped(in rect: NSRect, fraction: Double = 1) {
+        draw(in: rect, from: .zero, operation: .sourceOver, fraction: fraction, respectFlipped: true, hints: nil)
+    }
+}
+
+extension TimelineCanvas {
+    func drawClip(_ item: Item, in rect: CGRect, row: TimelineLayout.Row, dirtyRect: CGRect, root: URL?) {
+        let track = row.track
+        let media = item.mediaID.flatMap { mediaByID[$0] }
+        let base = ClipStyle.color(track: track, item: item, media: media)
+        let fade = track.isHidden ? 0.35 : track.isMuted ? 0.5 : 1
+        let hovered = item.id == hoveredItemID
+        let primary = item.id == selectedID
+        let selected = primary || selectedIDs.contains(item.id)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        base.withAlphaComponent(0.75 * fade).setFill()
+        rect.fill()
+        let filmstrip = track.kind == "video" && row.height >= TimelineLayout.mainRowHeight
+        if filmstrip { drawFilmstrip(item, in: rect, dirtyRect: dirtyRect, root: root, fade: fade) }
+        if track.kind == "audio" {
+            drawWaveform(item: item, in: rect, dirtyRect: dirtyRect)
+        } else if track.role == TrackRole.main, item["linkedAudio"] == nil {
+            drawWaveform(item: item, in: CGRect(x: rect.minX, y: rect.maxY - 12, width: rect.width, height: 12),
+                         dirtyRect: dirtyRect)
+        }
+        if filmstrip {
+            NSColor.black.withAlphaComponent(0.45).setFill()
+            CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 15).fill()
+        }
+        if let stripe = ClipStyle.stripe(track: track, item: item) {
+            // Lightened so it still shows on a clip of the same colour.
+            (stripe.blended(withFraction: 0.3, of: .white) ?? stripe).withAlphaComponent(fade).setFill()
+            CGRect(x: rect.minX, y: rect.maxY - 2, width: rect.width, height: 2).fill()
+        }
+        if track.isLocked { drawLockStripes(rect) }
+        if hovered && !selected {
+            NSColor.white.withAlphaComponent(0.08).setFill()
+            rect.fill()
+        }
+        drawTitle(item, track: track, in: rect, compact: !filmstrip)
+        NSGraphicsContext.restoreGraphicsState()
+
+        if selected {
+            NSColor.white.setStroke()
+            path.lineWidth = 2
+        } else {
+            (hovered ? NSColor.white.withAlphaComponent(0.55) : base.blended(withFraction: 0.35, of: .black) ?? base)
+                .setStroke()
+            path.lineWidth = 1
+        }
+        path.stroke()
+        drawVoiceoverWarning(track: track, item: item, path: path, rect: rect)
+        if hovered || primary, !track.isLocked, rect.width > 16 { drawTrimHandles(rect) }
+        drawKeyframes(item, in: rect, selected: primary, dirtyRect: dirtyRect)
+    }
+
+    private func drawTitle(_ item: Item, track: Track, in rect: CGRect, compact: Bool) {
+        var x = rect.minX + 5
+        let y = compact ? rect.midY - 6 : rect.minY + 2
+        var icons: [String] = []
+        if drawnAgentChanges.contains(item.id) { icons.append("sparkle") }
+        if item.linkedItemID != nil { icons.append("link") }
+        if item.fields["freezeFrame"] != nil { icons.append("snowflake") }
+        if item["muted"] == .bool(true) { icons.append("speaker.slash.fill") }
+        if track.isAdjustment { icons.append("camera.filters") }
+        for name in icons {
+            ClipStyle.icon(name)?.drawFlipped(in: CGRect(x: x, y: y + 1, width: 10, height: 10))
+            x += 12
+        }
+        let duration = Timecode.duration(item.duration, fps: project.fps)
+        let durationWidth = (duration as NSString).size(withAttributes: ClipStyle.durationText).width
+        let showsDuration = rect.width > durationWidth + 60
+        let titleWidth = rect.maxX - x - 4 - (showsDuration && compact ? durationWidth + 6 : 0)
+        if titleWidth > 8 {
+            // Cut in the middle so a file name keeps its ending ("…canvas.mov"); the tooltip has all of it.
+            let name = clipTitle(item, track: track).replacingOccurrences(of: "\n", with: " ")
+            let title = ClipKind.truncatingMiddle(Self.speedBadge(item) + name) {
+                ($0 as NSString).size(withAttributes: ClipStyle.titleText).width <= titleWidth
+            }
+            (title as NSString).draw(at: CGPoint(x: x, y: y), withAttributes: ClipStyle.titleText)
+        }
+        guard showsDuration else { return }
+        let durationY = compact ? rect.midY - 6 : rect.maxY - 13
+        (duration as NSString).draw(
+            at: CGPoint(x: rect.maxX - durationWidth - 5, y: durationY), withAttributes: ClipStyle.durationText)
+    }
+
+    /// The clip's full name: its text, its media's file name or its adjustment's look, else its ID.
+    func clipTitle(_ item: Item, track: Track) -> String {
+        if track.isAdjustment { return String(localized: String.LocalizationValue(item.adjustmentTitle(in: project))) }
+        if !item.text.isEmpty { return item.text }
+        return item.mediaID.flatMap { mediaByID[$0] }.map(\.fileName) ?? item.id
+    }
+
+    /// A diamond near the bottom edge for each frame with a key, like the Inspector's, drawn over the trim handles;
+    /// cyan on the selected clip. Keys outside the clip (left over from a trim) are skipped, and keys closer than a
+    /// diamond are drawn once.
+    private func drawKeyframes(_ item: Item, in rect: CGRect, selected: Bool, dirtyRect: CGRect) {
+        guard rect.width > 12, item["keyframes"] != nil, let frames = item.motion?.keyedFrames else { return }
+        let size = 10.0, y = rect.maxY - 8
+        var lastX = -Double.infinity
+        let diamonds = NSBezierPath()
+        for frame in frames where (0..<item.duration).contains(frame) {
+            let x = min(rect.maxX - size / 2, max(rect.minX + size / 2, rect.minX + (Double(frame) + 0.5) * scale))
+            guard x - lastX >= size, x + size >= dirtyRect.minX, x - size <= dirtyRect.maxX else { continue }
+            lastX = x
+            diamonds.move(to: CGPoint(x: x, y: y - size / 2))
+            diamonds.line(to: CGPoint(x: x + size / 2, y: y))
+            diamonds.line(to: CGPoint(x: x, y: y + size / 2))
+            diamonds.line(to: CGPoint(x: x - size / 2, y: y))
+            diamonds.close()
+        }
+        guard !diamonds.isEmpty else { return }
+        NSColor.black.withAlphaComponent(0.7).setStroke()
+        diamonds.lineWidth = 2.5
+        diamonds.stroke()
+        (selected ? NSColor.systemCyan : NSColor.white).setFill()
+        diamonds.fill()
+    }
+
+    private func drawLockStripes(_ rect: CGRect) {
+        NSColor.black.withAlphaComponent(0.25).setStroke()
+        let stripes = NSBezierPath()
+        for x in stride(from: rect.minX - rect.height, through: rect.maxX, by: 6) {
+            stripes.move(to: CGPoint(x: x, y: rect.maxY))
+            stripes.line(to: CGPoint(x: x + rect.height, y: rect.minY))
+        }
+        stripes.stroke()
+    }
+
+    /// CapCut-style brackets on both ends of the clip under the pointer or selected.
+    private func drawTrimHandles(_ rect: CGRect) {
+        for x in [rect.minX, rect.maxX - 6] {
+            let handle = CGRect(x: x, y: rect.minY, width: 6, height: rect.height)
+            NSColor.white.withAlphaComponent(0.92).setFill()
+            NSBezierPath(roundedRect: handle, xRadius: 2, yRadius: 2).fill()
+            NSColor.black.withAlphaComponent(0.45).setFill()
+            CGRect(x: handle.midX - 0.5, y: handle.midY - 5, width: 1, height: 10).fill()
+        }
+    }
+
+    func drawWaveform(item: Item, in rect: CGRect, dirtyRect: CGRect) {
+        guard let media = item.mediaID.flatMap({ mediaByID[$0] }),
+            let waveform = waveforms[media.id], waveform.hasAudio
+        else { return }
+        let visible = rect.intersection(dirtyRect).intersection(visibleRect)
+        guard !visible.isNull else { return }
+        let path = NSBezierPath()
+        let sourceStart = Double(item.sourceIn) / media.fps.value
+        let secondsPerPoint = item.speed / (project.fps.value * scale)
+        let amplitude = rect.height / 2 - 2
+        // Bars sit on a grid from the clip's start, so repainting part of a clip draws the same bars.
+        let first = rect.minX + ((visible.minX - rect.minX) / 2).rounded(.down) * 2
+        for x in stride(from: first, through: visible.maxX, by: 2) {
+            let start = sourceStart + (x - rect.minX) * secondsPerPoint
+            let peak = waveform.peak(from: start, to: start + 2 * secondsPerPoint)
+            let height = max(0.5, Double(peak) * amplitude)
+            path.move(to: CGPoint(x: x, y: rect.midY - height))
+            path.line(to: CGPoint(x: x, y: rect.midY + height))
+        }
+        NSColor.white.withAlphaComponent(item["muted"] == .bool(true) ? 0.12 : 0.38).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    func drawVoiceoverWarning(track: Track, item: Item, path: NSBezierPath, rect: CGRect) {
+        guard track.role == TrackRole.voiceover, voiceoverWarningIDs.contains(item.id) else { return }
+        NSColor.systemRed.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+        let badge = CGRect(x: max(rect.minX, rect.maxX - 17), y: rect.minY + 2, width: 15, height: 15)
+        NSColor.systemRed.setFill()
+        NSBezierPath(ovalIn: badge).fill()
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        ("!" as NSString).draw(
+            in: badge,
+            withAttributes: [.font: NSFont.boldSystemFont(ofSize: 11), .foregroundColor: NSColor.white, .paragraphStyle: style])
+    }
+
+    func updateReviewWarnings(for project: Project) {
+        guard project.revision != reviewRevision else { return }
+        reviewRevision = project.revision
+        voiceoverWarningIDs = Set(
+            TimelineReview.run(project, fontAvailable: ProjectFonts.isAvailable).compactMap { issue in
+                issue.id.hasPrefix("overlap-") ? String(issue.id.dropFirst("overlap-".count)) : nil
+            })
+    }
+
+    /// Thumbnails along a video clip, one per tile, from the preview proxy when there is one.
+    private func drawFilmstrip(_ item: Item, in rect: CGRect, dirtyRect: CGRect, root: URL?, fade: Double) {
+        guard let root, let media = item.mediaID.flatMap({ mediaByID[$0] }),
+            let url = filmstripURL(media, root: root)
+        else { return }
+        let tileWidth = max(12, rect.height * Double(project.width) / Double(max(1, project.height)))
+        let visible = rect.intersection(dirtyRect).intersection(visibleRect)
+        guard !visible.isNull else { return }
+        let secondsPerPoint = item.speed / (project.fps.value * scale)
+        let sourceStart = Double(item.sourceIn) / media.fps.value
+        let freeze = item["freezeFrame"]?.int.map { Double($0) / media.fps.value }
+        let quantum = FilmstripCache.quantum(for: tileWidth * secondsPerPoint, fps: media.fps.value)
+        let first = Int(((visible.minX - rect.minX) / tileWidth).rounded(.down))
+        let last = Int(((visible.maxX - rect.minX) / tileWidth).rounded(.up))
+        guard first <= last else { return }
+        for index in first...last {
+            let tile = CGRect(x: rect.minX + Double(index) * tileWidth, y: rect.minY, width: tileWidth, height: rect.height)
+            let seconds = freeze ?? (sourceStart + (tile.minX - rect.minX) * secondsPerPoint)
+            if let image = filmstrips.image(url: url, seconds: seconds, quantum: quantum) {
+                image.drawFlipped(in: tile, fraction: 0.9 * fade)
+            }
+        }
+    }
+
+    /// A changed speed reads first, like CapCut's badge: "2× clip.mp4"; a ramp shows 〰 and a reversed clip ◀.
+    static func speedBadge(_ item: Item) -> String {
+        guard item.mediaID != nil, item.fields["freezeFrame"] == nil else { return "" }
+        var badge = item.fields["reversed"] != nil ? "◀ " : ""
+        if item.speedCurve != nil {
+            badge += "〰 "
+        } else if abs(item.speed - 1) > 0.0001 {
+            badge += UIAction.speedLabel(item.speed) + " "
+        }
+        return badge
+    }
+}

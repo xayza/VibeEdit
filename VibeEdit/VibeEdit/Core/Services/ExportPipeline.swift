@@ -1,0 +1,129 @@
+import VibeEditEngine
+import VibeEditPlugin
+import VibeEditPlugins
+import VibeEditProject
+import Foundation
+
+/// Measures integrated loudness through a plugin provider.
+public protocol LoudnessAnalyzing: Sendable {
+    func analyzeLoudness(
+        mediaURL: URL, preferredProvider: String?, projectRoot: URL?
+    ) async throws -> GeneratedLoudnessMeasurement
+}
+
+extension CapabilityService: LoudnessAnalyzing {}
+
+/// What an export produced: the receipt plus loudness results when normalization ran.
+public struct ExportOutcome: Sendable {
+    public let receipt: ExportReceipt
+    public let generated: GeneratedLoudnessMeasurement?
+    public let finalMeasurement: LoudnessMeasurement?
+    public let verified: Bool
+    public let mixGainDb: Double?
+    public let appliedGainDb: Double?
+    /// The report's speech coverage of the exported edit and, when the project asks for them, the rights facts of
+    /// its media (P2-H9). Made with the export, off the main actor, so finishing an export does not stall the UI
+    /// (#350).
+    public var speechCoverage = 0.0
+    public var credits: JSONValue?
+}
+
+/// Renders one `ExportRequest`: build, render, optional two-pass loudness normalization, SubRip.
+/// It never touches the open document; the caller applies results.
+public struct ExportPipeline: Sendable {
+    public let engine: any RenderEngine
+    public let loudness: (any LoudnessAnalyzing)?
+
+    public init(engine: any RenderEngine, loudness: (any LoudnessAnalyzing)?) {
+        self.engine = engine
+        self.loudness = loudness
+    }
+
+    /// `progress` gets 0…1 and an optional step name; it may be called off the main actor.
+    public func run(
+        _ request: ExportRequest, progress: @escaping @Sendable (Double, String?) -> Void
+    ) async throws -> ExportOutcome {
+        var outcome = try await render(request, progress: progress)
+        try Task.checkCancellation()
+        if let text = request.captionText, let subRip = request.subRip {
+            try text.write(to: subRip, atomically: true, encoding: .utf8)
+        }
+        outcome.speechCoverage = TimelineReview.speechCoverage(request.source, transcripts: request.transcripts)
+        if ReviewProfile(request.project).credits { outcome.credits = ProjectCredits.of(request.project).json }
+        progress(1, nil)
+        return outcome
+    }
+
+    private func render(
+        _ request: ExportRequest, progress: @escaping @Sendable (Double, String?) -> Void
+    ) async throws -> ExportOutcome {
+        try FileManager.default.createDirectory(
+            at: request.output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let snapshot = try await engine.build(
+            request.project, root: request.root, workspace: request.workspace, purpose: .export)
+        try Task.checkCancellation()
+        guard request.normalizeAudio else {
+            let receipt = try await export(snapshot, to: request.output, request, 0...1, progress)
+            return ExportOutcome(
+                receipt: receipt, generated: nil, finalMeasurement: nil, verified: false,
+                mixGainDb: nil, appliedGainDb: nil)
+        }
+        guard let loudness else { throw ProjectError.invalid("Install a plugin that provides audio.loudness") }
+        let temporaryDirectory = ProjectCache.url(.loudness, projectRoot: request.root)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let temporary = temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("caf")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        _ = try await engine.exportAudio(snapshot, to: temporary) { value in progress(value * 0.15, nil) }
+        progress(0.15, String(localized: "Measuring loudness…"))
+        let preferred = request.source.preferredProvider(for: "audio.loudness")
+        let measured = try await loudness.analyzeLoudness(
+            mediaURL: temporary, preferredProvider: preferred, projectRoot: request.root)
+        let target = request.source.loudnessTarget(preset: request.preset.argument, platform: request.preset.platform)
+        let correction = try LoudnessNormalizer.correction(
+            measurement: measured.measurement, targetLUFS: target.lufs, peakCeilingDbTP: target.truePeak, limited: true)
+        let currentMixGain = request.project.mixGainDb
+        let mixGain = max(-60, min(24, currentMixGain + correction))
+        let appliedGain = mixGain - currentMixGain
+        var audio = request.project["audio"]?.object ?? [:]
+        audio["mixGainDb"] = .number(mixGain)
+        let normalized = try request.project.applying(.setProjectProperties(patch: ["audio": .object(audio)])).project
+        let normalizedSnapshot = try await engine.build(
+            normalized, root: request.root, workspace: request.workspace, purpose: .export)
+        // The full gain, with a limiter holding sample peaks a margin under the true-peak ceiling (inter-sample
+        // peaks and the AAC encoder add up to about a decibel).
+        let receipt = try await export(
+            normalizedSnapshot, to: request.output, request, 0.20...0.96, progress,
+            limiterCeilingDb: target.truePeak - Self.truePeakMargin)
+        progress(0.96, String(localized: "Verifying loudness…"))
+        let final: LoudnessMeasurement
+        let verified: Bool
+        do {
+            final = try await loudness.analyzeLoudness(
+                mediaURL: request.output, preferredProvider: preferred, projectRoot: request.root
+            ).measurement
+            verified = true
+        } catch {
+            final = LoudnessMeasurement(
+                integratedLUFS: measured.measurement.integratedLUFS + appliedGain,
+                truePeakDbTP: measured.measurement.truePeakDbTP + appliedGain,
+                loudnessRangeLU: measured.measurement.loudnessRangeLU)
+            verified = false
+        }
+        return ExportOutcome(
+            receipt: receipt, generated: measured, finalMeasurement: final, verified: verified,
+            mixGainDb: mixGain, appliedGainDb: appliedGain)
+    }
+
+    static let truePeakMargin = 1.0
+
+    private func export(
+        _ snapshot: CompositionSnapshot, to url: URL, _ request: ExportRequest, _ range: ClosedRange<Double>,
+        _ progress: @escaping @Sendable (Double, String?) -> Void, limiterCeilingDb: Double? = nil
+    ) async throws -> ExportReceipt {
+        let settings = ExportSettings(preset: request.preset, videoBitRate: request.videoBitRate, limiterCeilingDb: limiterCeilingDb)
+        return try await engine.export(snapshot, to: url, settings: settings) { value in
+            progress(range.lowerBound + value * (range.upperBound - range.lowerBound), nil)
+        }
+    }
+}

@@ -1,0 +1,38 @@
+/* VibeEdit Windows MVP — CapCut-style dark layout (2026 polish:
+   rounded cards, larger primary buttons, clear track hierarchy). */
+* { box-sizing: border-box; }
+body { margin: 0; background: #11100f; color: #f2efe9; font-family: "Segoe UI", system-ui, sans-serif; }
+button { background: #292620; color: #f2efe9; border: 1px solid #48423a; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.primary { background: #c4915e; color: #17120d; border-color: #c4915e; font-weight: 600; min-height: 40px; }
+button.danger { background: #3d2421; color: #f2efe9; }
+button:disabled { opacity: .5; cursor: default; }
+input, select { background: #171614; color: #f2efe9; border: 1px solid #48423a; border-radius: 8px; padding: 6px 8px; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #b8b1a6; margin: 6px 0; }
+.topbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: #161513; border-bottom: 1px solid #332f2a; flex-wrap: wrap; }
+.brand { font-size: 20px; font-weight: 700; }
+.tag { font-size: 12px; background: #33271d; color: #e2b47f; padding: 2px 8px; border-radius: 12px; }
+.top-actions { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.status { font-size: 13px; color: #b8b1a6; }
+.preview-wrap { padding: 16px; }
+.preview-wrap video { width: 100%; max-height: 46vh; background: #080706; border-radius: 12px; display: block; }
+.preview-meta { display: flex; gap: 20px; padding: 8px 0; color: #b8b1a6; font-size: 13px; flex-wrap: wrap; }
+.editor { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding: 0 16px 16px; }
+.panel { background: #1b1a18; border: 1px solid #332f2a; border-radius: 12px; padding: 12px; }
+.panel h3 { margin: 8px 0; }
+.panel ul { list-style: none; padding: 0; }
+.panel li { padding: 4px 0; border-bottom: 1px solid #292620; font-size: 13px; word-break: break-all; }
+.timeline-wrap { background: #161513; border-top: 1px solid #332f2a; padding: 12px 16px 20px; }
+.timeline-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.ruler { height: 24px; background: #211f1c; border-radius: 8px; position: relative; cursor: pointer; overflow: hidden; }
+.ruler .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #e2b47f; }
+.track-row { display: flex; gap: 8px; margin-top: 6px; align-items: stretch; }
+.track-label { width: 110px; flex-shrink: 0; font-size: 12px; color: #b8b1a6; padding-top: 8px; }
+.track-lane { position: relative; flex: 1; min-height: 44px; background: #211f1c; border-radius: 8px; overflow: hidden; }
+.track-lane.target { outline: 2px solid #e2b47f; }
+.clip { position: absolute; top: 4px; bottom: 4px; background: #302820; border: 1px solid #7b5b3c; border-radius: 8px; padding: 4px 8px; font-size: 12px; overflow: hidden; cursor: grab; white-space: nowrap; }
+.clip.video { background: #33271d; }
+.clip.text { background: #22352a; border-color: #76a58a; }
+.clip.audio { background: #3b3020; border-color: #c29a57; }
+.clip.selected { outline: 2px solid #e2b47f; }
+#timelineText { white-space: pre-wrap; font-size: 12px; color: #b8b1a6; background: #0d0c0b; border-radius: 8px; padding: 8px; }
+@media (max-width: 900px) { .editor { grid-template-columns: 1fr; } }

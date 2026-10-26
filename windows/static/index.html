@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeEdit — Windows MVP</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">VibeEdit <span class="tag">Windows MVP</span></div>
+  <div class="top-actions">
+    <label>Project <input id="projectName" type="text"></label>
+    <button id="btnUndo">Undo</button>
+    <button id="btnRedo">Redo</button>
+    <button id="btnExportDraft" class="secondary">Export draft</button>
+    <button id="btnExportFull" class="primary">Export video</button>
+  </div>
+  <div id="status" class="status"></div>
+</header>
+
+<!-- Preview on top, CapCut-style -->
+<section class="preview-wrap">
+  <video id="preview" controls preload="metadata"></video>
+  <div class="preview-meta">
+    <span id="previewLabel">No export yet — export to preview here.</span>
+    <span>Playhead: <b id="playheadLabel">0.00s</b></span>
+    <span>Timeline: <b id="durationLabel">0.00s</b></span>
+  </div>
+</section>
+
+<!-- Editor panel -->
+<section class="editor">
+  <div class="panel">
+    <h3>Media library</h3>
+    <ul id="mediaList"></ul>
+    <form id="uploadForm">
+      <input type="file" id="uploadFile" required>
+      <button type="submit">Upload media</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h3>Add clip</h3>
+    <form id="addClipForm">
+      <label>Media <select id="addMedia" required></select></label>
+      <label>Track <select id="addTrack"></select></label>
+      <label>Start (frames) <input id="addAt" type="number" value="0" min="0"></label>
+      <label>Source in (frames) <input id="addIn" type="number" value="0" min="0"></label>
+      <label>Duration (frames) <input id="addDur" type="number" placeholder="whole media"></label>
+      <label>Speed <input id="addSpeed" type="number" step="0.25" value="1"></label>
+      <button type="submit" class="primary">Add clip</button>
+    </form>
+    <h3>Add text</h3>
+    <form id="addTextForm">
+      <label>Text <input id="addText" required></label>
+      <label>Start (frames) <input id="addTextAt" type="number" value="0" min="0"></label>
+      <label>Duration (frames) <input id="addTextDur" type="number" value="90" min="1"></label>
+      <button type="submit" class="primary">Add text</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h3>Inspector</h3>
+    <div id="inspectorEmpty">Select a clip on the timeline to edit it.</div>
+    <form id="inspectorForm" hidden>
+      <label>Item <input id="inspId" readonly></label>
+      <label>Track <select id="inspTrack"></select></label>
+      <label>Start (frames) <input id="inspAt" type="number" min="0"></label>
+      <label>Duration (frames) <input id="inspDur" readonly></label>
+      <label>Speed <input id="inspSpeed" type="number" step="0.25"></label>
+      <label>Fade in (s) <input id="inspFadeIn" type="number" step="0.1" min="0"></label>
+      <label>Fade out (s) <input id="inspFadeOut" type="number" step="0.1" min="0"></label>
+      <label>Volume (dB) <input id="inspVolume" type="number" step="1"></label>
+      <label>Text <input id="inspText"></label>
+      <button type="submit" class="primary">Apply to clip</button>
+      <button type="button" id="btnSplit">Split at playhead</button>
+      <button type="button" id="btnDelete" class="danger">Delete clip</button>
+    </form>
+  </div>
+</section>
+
+<!-- Timeline strip at the bottom, CapCut-style -->
+<section class="timeline-wrap">
+  <div class="timeline-tools">
+    <span>Timeline</span>
+    <label>Zoom <input id="zoom" type="range" min="10" max="200" value="60"> <span id="zoomLabel">60 px/s</span></label>
+    <button id="btnPlayheadSplit">Split selected clip at playhead (S)</button>
+    <span id="timelineHint">Click a clip to select it. Drag a clip to move it. Click the ruler to move the playhead.</span>
+  </div>
+  <div class="ruler" id="ruler"></div>
+  <div id="tracks"></div>
+  <pre id="timelineText"></pre>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

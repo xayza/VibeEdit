@@ -1,0 +1,820 @@
+# Implementation status
+
+What VibeEdit does at HEAD, how it was verified, and what is left. The full scope is the roadmap in
+[09-roadmap.md](../specs/09-roadmap.md); the control-by-control UI audit is in [mockup-parity.md](mockup-parity.md).
+
+## Summary
+
+M0 is accepted on real DJI footage, and the refactor plan (R0–R6) is complete. Most of M1–M3 and M5 is in place,
+with parts of M4 and M6. Agents reach every UI action and dialog through 46 CLI/MCP commands. Milestones M1–M6 are
+not complete: several acceptance runs, bundled providers and the larger M4/M6 features remain.
+
+## Milestones at a glance
+
+| Milestone | Status | Notes |
+|---|---|---|
+| M0 Skeleton and engine spike | Done | Accepted on 20 HEVC DJI clips (table below) |
+| M1 Core editor | Features in place | Hand-rebuild of the 48-cut reference and accessibility QA pending |
+| M2 Agent dock and automation | Mostly done | Claude/Codex/Shell terminals, socket, CLI, MCP; real authenticated agent runs only partly smoke-tested |
+| M3 Text, captions, export | Mostly done | Export queue (E-1) done; no bundled transcription provider; first all-in-app vlog not yet recorded |
+| M4 Audio and voice | Partial | Ducking, loudness, voice takes, beats, framing, music/SFX library done; voice cloning open |
+| M5 Color, transitions, review | Mostly done | LUTs, transitions, review (severity, fixes, loudness, text safe area, hook), resume and handoff done; picture checks open |
+| M6 Extensions | Partial | OTIO export, voiceover recording, constant speed, ramps, keyframes done; effects, Demucs open |
+
+## Implemented
+
+### Project & storage
+
+- Separate Git repository with SwiftPM (single target source) and XcodeGen configuration, committed lockfiles and
+  verification scripts.
+- Lossless project JSON (`vibeedit.project/1`, described by the generated `docs/reference/project.schema.json`) with rational FPS, role-based dynamic
+  tracks, atomic `EditOperation` batches, source/overlap/render validation, revisions and persisted undo/redo.
+  Unknown fields round-trip.
+- New Project wizard: name, aspect ratio, resolution, rational FPS, content language, destination and an
+  optional footage symlink. Publication is exclusive and leaves existing folders and the current document intact
+  on failure. Agents use the same code through `project create`, `project open` and `project save`.
+- Atomic save, autosave every 30 seconds and on deactivation, recovery choice, restored history, and
+  external-change handling with a reload/conflict sheet listing project, media, track and item differences.
+- Project folders are watched with filesystem events, with an activation check as a fallback.
+- Regenerable project caches live in `.vibeedit/cache/` (excluded from Time Machine; older per-cache folders are
+  moved in on open), and `.vibeedit/.gitignore` lists them (written once on create or save); the plugin
+  registry copy lives in `~/Library/Caches/VibeEdit/Registry` and an old Application Support copy is moved there
+  once. The full layout is in [Storage on disk](../reference/project-format.md#storage-on-disk).
+- Open projects from Finder (double-click or **Open With**) or by dropping a `project.vibeedit.json` or its folder
+  on the Dock icon. VibeEdit registers as an alternate app for JSON and folders, never the default.
+- Media picked from the linked `footage` folder is stored as `footage/<file>`; older `../../…` paths into it are
+  rewritten in one undoable edit when a project opens.
+
+### Timeline & editing
+
+- Mockup-based native layout: eight library tabs, media thumbnails and search, viewer with safe area, five
+  Inspector tabs, history and review.
+- Full-screen preview (#530, ⌥⌘F, `ui action viewer.fullscreen`): the program picture alone on a borderless
+  screen-size window (a second screen when there is one), driven by the viewer's own player, with an auto-hiding
+  transport and Space, ←/→, J/K/L and Esc. J/K/L also work on the focused timeline and as `ui action
+  playback.shuttle-back|stop|shuttle-forward`; reverse steps the playhead on a frame clock (AVPlayer rejects negative
+  rates on our compositions), silent, 1×/2×/4×.
+- Dynamic layers: repeated video/image, text and audio layers with explicit stacking order and vertical scrolling.
+  Core validation enforces layer rules (visual above audio, one undeletable main layer, no overlap within a layer,
+  matching media kinds) and repairs older projects on open. Placement spills CapCut-style onto the next free layer.
+- Source viewer with In/Out and insert/overwrite; split, delete, ripple and lift (Shift-Delete); scroll, zoom and
+  clip/beat snapping; drag move and trim.
+- Atomic roll and slip from the Inspector, modifier-key timeline gestures and agent commands.
+- Video with embedded sound creates linked Main/Dialogue items that move, trim, split, slip, roll and delete
+  together in one undo step; the Inspector can unlink them.
+- Dragging within a magnetic track reorders and compacts it; linked Dialogue follows.
+- Automatic Change Framing cycles Wide, Medium, Close and left/right presets through validated `transform` and
+  `reframePreset` properties; manual edits switch the item back to Custom.
+- Freeze Frame, tags, transform and opacity, constant speed with optional pitch preservation.
+- Still images (media kind `image`): import, drag in or `media import` a JPEG, PNG (transparency kept), HEIC or other
+  image; it is placed for 3 s and trims to any length up to an hour. The engine reads it through a one-frame
+  ProRes 4444 movie in `.vibeedit/cache/stills/`, remade when the image changes.
+- Keyframes (item field `keyframes`) animate zoom, pan, tilt, rotation and opacity of clips, images and text, with
+  linear, ease-in/out/in-out and hold keys. Presets: slow zoom in/out and pans (Ken Burns), and fade, pop, slide-up
+  and zoom-punch for text. Inspector › Animation, the diamond key at the playhead, and sliders that set keys once a
+  property is animated; `clip motion` and `clip keyframe`. Split and start trims keep keys on the same picture.
+  Crop sides and the corner radius (`crop.*`) key too; Inspector › Video › Crop.
+- Volume keyframes: the `volume` property (dB, replacing `volumeDb`) on audio items and clips with sound, stacked
+  with fades and ducking. The audio mix gets a point at each key plus steps between keys, so eases and the dB curve
+  hold with AVAudioMix's linear ramps. Inspector › Audio › Keyframe volume at playhead; `clip keyframe --property
+  volume`. Picture keys alone decide whether the compositor animates a layer.
+- Word-by-word captions: `wordStyle` highlight (the word being said), karaoke (words said so far) or reveal (words
+  appear as said), in the highlight colour `textStyle.highlight`. Timings come from the provider's word timings
+  (`wordsPath`, stored as the caption's `words`) or are estimated from word length. Inspector › Text › Word by word,
+  Auto Captions, `captions words`, `captions generate --word-style`.
+- Edit menu (Cut, Copy, Paste, Select All) for text fields and terminals.
+
+### Media & proxies
+
+- Original-media import with probing, offline badges and metadata (a video's frames end at its last picture, not
+  at sound running past it); thumbnails with debounced, quantized
+  hover-scrub and source-time feedback.
+- `@assets/...` media resolves through the configured workspace everywhere (thumbnails, source viewer, plugin
+  inputs, preview, export); validation rejects unknown namespaces and traversal.
+- Cached stereo waveforms read off the UI actor with cancellation and bounded peak data; refresh, progress and
+  errors show in the timeline toolbar.
+- Preview proxies (M-5): `ProxyManager` flags HEVC, larger-than-1920 px or above-20 Mbit/s video and writes
+  `.vibeedit/cache/proxies/<media id>.mov` (H.264, at most 960 px, keyframe every 10 frames, AAC, original frame times).
+  `ProxyQueue` encodes one at a time as `media.proxy` jobs; the preview switches to each proxy as it lands and
+  exports always read originals. `media proxy [--force]` and **Create Preview Proxy** make them by hand.
+- The viewer scrubs with chase-time seeking: one exact seek in flight, newest target next.
+
+### Text & captions
+
+- Six shared Core Text presets (Bold Outline, Cinematic Serif, Keyword Sticker, Place Card, Hook Title, Chapter
+  Card), editable styling, emoji text stickers and Vietnamese captions.
+- SRT add, replace and export from the Text library and the CLI, with Unicode and multiline cues, rational-FPS
+  conversion and one-step undo.
+- Auto Captions resolves a healthy `captions.transcribe` provider, sends the media path and language, validates
+  bounded UTF-8 SRT output and imports it atomically with provider provenance. A whole-file transcription is kept
+  as the media's source transcript (by file content, `.vibeedit/cache/transcripts`) and reused by later Auto Captions
+  and `captions generate` unless `--fresh`; `media transcribe` makes one without placing captions, `media transcript`
+  reads it in source seconds (phrases, words with confidence/speaker/event/noSpeechProb when the provider gives
+  them), and `transcript words --heard` maps its words through the clips playing the media now.
+- `audio measure --curve` / `--timeline` give loudness over time of a file or of the rendered mix (with silent
+  stretches), `audio mix-measure` reads per-role stems against each other and against the words, and `library
+  analyze` stores sound landmarks; the `audio.loudness` contract has an optional `curve`.
+- Speech and voice: `speech rate`, `narration windows`, measured takes from `voice speak` placed by the agent with
+  `voice place` (no pace formula, no automatic pick), `voice speak --replace`, `voice check`, `voice fit`, voices by
+  facts (`capabilities get --voices`) with clone consent,
+  `captions group` and `captions align`. Grouped cues keep the `plan apply` marks, so a later apply keeps them
+  while it would generate the same captions and replaces them all otherwise, never stacking two sets (#628).
+- Review profile (#466, #470): editorial limits only from the project's `review` object (validated), neutral info
+  without them; zones checked against every output with overrides (#469, `platforms get`); loudness per export
+  preset (`output.targets`, P0-K2); no creative constants in fixes (#468).
+- The opening and close are read with `review shots`/`review layout --from/--to`, `review layout --ink` and
+  `transcript words --from/--to`; the review's hook check runs only with a project `review.hookSeconds` and no
+  longer judges what the opening text says.
+- `beats detect` keeps the provider's grid v2 per file (strengths, kick-phase downbeats, confidence, fit,
+  alternates; `beats grid`), and `audio energy` gives the energy curve (picking lifts and drops is the agent's).
+- What is in the picture (P2-H6, P2-H7): `media subjects` (face and person boxes) and `media ocr` (on-screen text
+  lines) sample one picture every `--step` source seconds through the built-in `vibeedit.vision` plugin (Apple
+  Vision); raw boxes, confidence and time, no labels. The boxes are kept per file content
+  (`.vibeedit/cache/subjects/`, merged across runs).
+- Multi-selection follow-ups (#357): Inspector multi-edit of opacity, volume, fill and framing; selection drags on the
+  magnetic layer move a block (`timeline move-items --before`); copy/paste through the macOS pasteboard across
+  projects and windows.
+- Item backdrop (P3-J7): `backdrop {kind blur|color, color, blur, dim}` fills a fitted picture's bars with a blurred,
+  filled copy of its own frame or a colour; `clip backdrop`, Inspector › Video › Backdrop.
+- Two fonts in one title: `textStyle.lines` (per-line font, scale, fill, stroke), `text line-style`, Inspector ›
+  Text › Lines.
+- `clip reframe` (P3-J1) crops a clip or image to its subject from those boxes (measuring missing ones first):
+  `locked`, `cut` (hold keys when the subject drifts) or `follow` (smoothed pan/tilt keys), every limit a
+  parameter (anchor, zoom, confidence, gate, minimum subject share, drift, hold, smoothing). Below the gate it fits
+  the whole picture or refuses, never a blind centre crop; it returns the coverage, the framings and a source/edit
+  preview grid. One undo step.
+- `review layout` gives each text item's `faceOverlap` (the largest share of a face box it covers, with the clip,
+  frame and confidence) from the stored boxes of the clips under it, and an overlay picture's at a frame; null when
+  no boxes are stored. With `review.maxFaceOverlap` set, review reports `text-face` issues.
+- The agent's own fields on a media (P2-H10): op `setMediaData` keeps takes, verdicts and reasons under `data`
+  (`media list` shows them); core never reads them, and there are no take commands.
+- Footage in the library (P2-H5): library kind `clip` (a movie or image, free params) for generated or downloaded
+  B-roll; `library generate --kind clip` asks a provider, `library place` copies it into `clips/` and places it like
+  `media place`; the Media panel's Clips tab. Pixel effects and AI transitions stay render-then-place plugin actions
+  (P2-H11, plugins guide), with no per-frame plugin renderer.
+- `color measure` gives each clip's luma percentiles, saturation, tint per band and clipped/crushed shares from
+  source frames or the edit as graded, the change a grade makes (with mean ΔE) and each clip's distance from the
+  median clip.
+- `ui frame --phone|--width` renders the viewer at viewer size and `ui frames --compare graded|source` makes a
+  before/after grid; `review layout` adds reading speed, speech, caption overlap, template repeats, density, the
+  pictures on screen and measured contrast (`--contrast`); every video/image item has `scale` facts (fit/fill, zoom,
+  pixels per source pixel, `maxZoomNative`, coverage) in `timeline get` and `review shots`.
+- `review shots` reads the edit as a sequence (cut facts with kind and framing on both sides, shares from shot
+  descriptions, rhythm overall and per section, keyframe camera moves; `--from/--to` for a range, `--media` for a
+  source file), `review sync` times cuts, titles and sound effects against beats and words and a render against the
+  timeline, `review window` and `timeline sheet` show the composed edit as pictures without exporting.
+- Flexibility audit, deferred items (2026-10-08): `review cuts` and `review hook` folded into `review shots`,
+  `review layout --from/--to/--ink` and `transcript words`; no runs or low-variance runs (`--run-length`/`--max-cv`
+  gone); `review sync` bins only with `--bins`; `platforms list` → `platforms get [id]`; `project brief`/`set-brief`
+  and `plan get`/`set` → `project data KEY` / `project set-data KEY`; `clip speed*` user-only (ops `setSpeed`,
+  `setSpeedCurve`); `ui open/panel/source/notify` → `ui action open|panel|source|notify TARGET`; `plugins health`/
+  `views` → `plugins list --health/--views`; `voice voices` → `capabilities get --voices`; gates by any name;
+  `review coverage` gives the described shot per clip (the agent joins its plan); `script check --beats/--text`;
+  `voice speak` measures and keeps takes, `voice place` puts one on the timeline. Restyle: one ease type with
+  `cubic-bezier(…)`, transitions as data (`motion`, any kind), keyframes on `color.*` and numeric `textStyle.*`,
+  `textStyle.accentBars`.
+- `media inventory` lists capture facts (time, GPS, device, shown size) read once per file content
+  (`.vibeedit/cache/inventory`), speech seconds and language, and what is measured, transcribed and described, per
+  media, folder and project; `context get` adds `analysis` (running analysis jobs, media not measured, transcribed or
+  described). Content keys are remembered per path, size, date and inode, so these reads cost nothing once known.
+- `media frames` reads exact source frames by index (PNG files, or contact sheets labelled per cell with a map back
+  to media and second, and an optional REF row), `media frame` one frame at source size, and `media strip` a
+  filmstrip with the sound level, speech-map gaps and transcript words; all by source time, in
+  `.vibeedit/cache/media-stills`.
+- `media describe` stores agent-written shot facts on a media (size, angle, move, direction, subjects, people,
+  on-screen text, tags, confidence, best moment, frames looked at) as open labels (the lists are a suggested
+  vocabulary; unknown fields are kept) as one undoable edit;
+  `media description` reads them with coverage of the `media analyze` shots, and `review shots` adds the facts of
+  the source shot each clip plays (`described`).
+- `media speech-map` calibrates sound spans from the `media analyze` levels (Otsu split, separation in dB and eta,
+  `separation: none` when floor and sound do not separate) and compares them with the stored transcript's words.
+
+### Audio & voice
+
+- Volume, mute and fades; automatic music ducking under tagged Dialogue and all Voiceover regions, with level,
+  attack, release and a hold (`duckMinGapFrames`, 2.5 s by default: shorter gaps between lines keep the music down)
+  in integer frames, mixed the same way in preview and export. `clip volume --db` sets clip gain on clips and their
+  linked sound, one or `--items` in one undo step (#628). A `plan.cut` music bed is one fixed level set
+  `underVoiceDb` (16 dB) under the measured voice, with ducking off unless asked for (#630).
+- The Audio panel resolves `audio.beats`, validates BPM and beat times, maps them through trim and speed to
+  timeline frames, and adds undoable beat-grid drawing and snapping.
+- The Voice panel resolves a healthy `voice.synthesize` provider (with an undoable project preference), generates
+  three confined, validated takes, and previews, scores, selects and inserts one with provenance. Discarded
+  request folders are cleaned up.
+- Direct voiceover recording asks for microphone permission, writes 48 kHz mono WAV under the project, shows
+  duration and input level, and inserts at the playhead.
+- Review warns when voiceover comes within 0.3 s of tagged speech on any layer.
+- Review issues carry a severity and a fix (command or hint); `review run --summary` adds counts and a pass flag.
+  Sound checks: loudness from the last normalized export of the revision, a pumping music bed, dead air, music
+  drop-outs. Text checks: vertical safe area (caption bar, side buttons, top bar), title safe, minimum size, caption
+  lines, overlap. Hook check for the first 3 s.
+- Platform targets (#441): `output.presets` names the export presets a project is made for (format menu ›
+  Platform, `project format --outputs`). The first one's platform (TikTok, Reels, Shorts, YouTube) sets the safe
+  zones, smallest text and longest length the review checks, the viewer's safe-area overlay and the Export sheet's
+  preset. `review.hookSeconds` and `review.severities` (check ID or prefix → severity or `off`) tune the review.
+
+### Color & transitions
+
+- Exposure, contrast, saturation and basic looks (Original, Vivid, Muted film, Black & white).
+- Adjustment layers: items with only a `color` grade (and LUT) that apply it to every layer below them while on
+  screen, in preview and export; trimmable, movable, stackable and bypassed by hiding the layer
+  (`adjustment add`, `layers add --kind adjustment`, Add Layer › Adjustment Layer, Filters › Add adjustment).
+- Style kits (Food review, Cinematic): one undoable edit adds a full-length adjustment with the kit's look,
+  replacing an earlier kit's, and sets the kit's caption preset on every caption (`style apply`). They replace
+  the project-wide style setting, which was never read.
+- Project-scoped `.cube` 3D LUTs with a validated catalog, undoable add/delete/apply, adjustable strength and agent
+  operations; preview and export share one Core Image renderer. LUT files stay on disk when their catalog entry is
+  undone.
+- A synchronized vertical Before/After split in the viewer that bypasses color and LUTs only.
+- Undoable transitions (dissolve, whip, blink, zoom, spin, shutter, wipe, swing, glitch, halftone) with adjustable duration; preview and
+  export share the same tweening, and transitions are removed when edits separate their clips.
+
+### Library
+
+- One item model for every library panel (#74): kind, tags, pack, source and license, created by, version
+  history, usage and params, in project (`.vibeedit/library`), user (Application Support), plugin and built-in
+  scopes. `library list|get|stats|add|update|remove|move|save-selection|apply|place|import-pack|export-pack`;
+  agents' user-scope writes need approval.
+- Sticker library (#64): emoji, image (transparency kept), animated (GIF, APNG, WebP) and video-alpha (HEVC with
+  alpha, ProRes 4444) stickers with optional size, safe-area position, motion-preset animation and length.
+  `library place` copies the file into `stickers/` once per content, imports it and places it on the Overlay layer
+  (added when missing) with `--position`/`--size`, as one undo step; emoji stickers place as text as before.
+  `library save-selection --kind sticker` saves an image or alpha-movie overlay with its framing, or an emoji text
+  item. Library files placed from a project library are copied too, and `library remove` keeps files project media
+  still points at. The Stickers panel has thumbnails, kind badges, drops of images and alpha movies, Place at
+  Playhead and an Edit… sheet for size, position and animation. Not yet: animated stickers move (they show their
+  first frame), Lottie, and size/position for emoji stickers.
+- Audio library (#78): audio items with a role (music, sfx, ambience), length, BPM, loudness (LUFS, true peak) and a
+  loop flag, mood and genre as tags. `library add` measures the length; `library analyze` (a job) measures loudness
+  and tempo on the library file with the `audio.loudness` and `audio.beats` providers and saves a new version.
+  `library place` copies the file into `music/` or `sfx/` once per content (`library-<hash>.<ext>`), imports it and
+  places it on the Music or SFX layer (added when missing) as one undo step; `--duration` trims, and a loopable sound
+  repeats as back-to-back copies (the engine has no clip looping). Save selection (`--kind audio`, `--media`) saves
+  project audio; the Audio panel shows library audio with play/stop (`library preview`), badges and Place, Save to
+  Library… on project audio, Analyze, and Edit… for role and loop. Not yet: saving only a clip's trimmed range, and
+  a waveform preview.
+- Transition presets (#77): kind, duration, easing (`linear`, `in`, `out`, `inOut`, stored on the transition and
+  honored by preview and export) and an optional sound (`params.sfx`, an audio item, or the preset's own file),
+  applied as one undo step with the sound on an SFX layer; saved from the selected cut, edited from the Transitions
+  panel (Edit…, easing on the active transition) or `library update --params`.
+- Effect presets as recipes (#76): `params.steps` (`motion`/`focus`, `keyframes` scaled by `t`, `speed`,
+  `speedCurve`, `reverse`, `freeze`, `patch`, `sfx`, `text`) with named `params.parameters`; `library apply` runs
+  them as one undo step with `--set` overrides and a `--from`/`--to` range split off in the same step (a reverse step
+  that needs a new copy renders it in a job first). Save selection builds a recipe (reverse, speed or ramp, framing,
+  keyframes, the SFX at the clip's start) with a still preview; the Effects panel has Apply with… and built-in
+  Motion and Speed packs. Old `params.patch` presets behave as before. Not yet: an animated (GIF) preview, a
+  recipe editor in the UI (edit with `library update --params`), and freeze frames in Save selection.
+- Filter stacks (#79): a look is a grade plus an optional .cube LUT carried as the item's file (`params.color`,
+  `params.lutName`); place (as an adjustment) and apply (to a clip or adjustment) are one undo step that also adds
+  the LUT to the project, reusing one copied from the same file. Save selection keeps the whole stack with its LUT.
+  The Filters panel shows looks, style kits and project looks in the shared library UI, with Edit… for a look's
+  grade and LUT; looks saved before stay valid and behave the same.
+- Plugin library (#81, plugin API 6): `contributes.library` lists pack folders (the `pack.json` format of
+  `library import-pack`) inside the plugin, checked by `plugins validate` and confined after symlinks. Their items
+  list in the read-only `plugin` scope while the plugin is ready, grouped under the plugin's name in the panels; built-in
+  or earlier plugin IDs are left out with a diagnostic. Placing or applying one copies its file into the project
+  first, so removing the plugin never breaks the timeline; `library update --as` saves an editable copy. The
+  `library.search` and `library.generate` capabilities (providers may list the `kinds` they serve) return candidate
+  items with files in a request folder (`~/Library/Caches/VibeEdit/LibraryCandidates`, pruned after a day):
+  `library search|generate` run as jobs, `library add --from-result <job>:<index>` (or `--save`) saves one with its
+  source, license and provenance. Panels show Search…/Generate… when a plugin provides them for their kinds (the
+  `library-search` dialog: preview, play and Save). Not yet: a provider-side paging UI, and a scaffold template in
+  `vibeedit-plugins`.
+- Brand kits (#453): `brand` items (palette, heading/body fonts, logo and mascot poses as sticker references, voice,
+  disclosure). `library apply` sets the project's `brand` and restyles text with `brandRoles` in one undo step; text
+  presets carry `brandRoles`; the Brand panel (kit in use, saved kits, New Brand Kit…, Edit…, Remove), New Project's
+  Brand kit picker and `project create --brand`. Graphics (HyperFrames) and recipes read `project get` › `brand`. Not
+  yet: background removal for mascot images, and built-in text presets tied to roles.
+- Library performance: use counts live in `usage.json` (an older `usage` field in `library.json` is read until the
+  next save moves it), stored files keep their `fileSHA256`, and changes, packs, stats and use counting run on the
+  `LibraryWorker` actor, off the main actor and one at a time.
+- Built-in packs (#75): Text styles (the 6 caption presets), Emoji (8 stickers), Framing (Punch in 1.3×, Reset
+  framing), Transitions (Soft dissolve, Quick whip, Zoom punch) and Looks (Original, Vivid, Muted film, Black &
+  white, Bright & airy, Moody).
+- Shared panel UI (#80): the Audio, Text, Stickers, Effects, Transitions and Filters panels show their library items
+  with a home view (Recent per project, Favorites on this Mac, packs with See all), source chips, search, pack and tag filters (`ui view --library-*`, `library favorite`), agent and scope badges, Add… and drops (files or
+  packs), Save selection as… (text style, framing, transition, look, audio) and a context menu (Duplicate & Edit, Rename,
+  Move to project/this Mac, Show Source & License, Show in Finder, Remove). The item sheet is the `library-item`
+  dialog. Voice stays provider-driven.
+
+### Export
+
+- One AVFoundation custom compositor for preview and export, including captions and the audio mix.
+- Presets: TikTok, YouTube 1080p/4K, Quick Draft and ProRes; AAC 320 kbps; optional companion SRT.
+- Background export queue (E-1): `ExportRequest` snapshots the project and refuses existing or already-queued
+  outputs, `ExportPipeline` renders (with optional two-pass loudness normalization) and writes the SRT, and
+  `ExportQueue` runs one export at a time on the shared `JobCenter`. The status bar shows step, progress and queued
+  count; failed or cancelled output is removed.
+- Receipts: the last 20 exports per project persist and compare duration, size, cuts, captions, tagged speech
+  coverage and LUFS with the previous export.
+- An optional `audio.loudness` provider enables target-LUFS normalization with a −1 dBTP ceiling, final
+  measurement and undoable mix-gain/provenance persistence.
+- OpenTimelineIO export (source/timeline rates, gaps, layers, text generators, speed, markers, VibeEdit metadata)
+  from the Export sheet and the CLI.
+- Legacy `edl.json` import (cuts, source ranges, borrowed picture, linked dialogue, transforms, tags, subtitles,
+  voiceovers, section markers) into a new project, with a cut/voiceover/duration comparison report and warnings.
+  Exporters and importers are listed in `TimelineFormats`.
+
+### Agents & automation
+
+- SwiftTerm Claude, Codex and Shell tabs with workspace/resume input, context and quick-action paste, current-frame
+  attachment, ⌘K Ask, and a detachable, resizable Agent window.
+- Terminals are `AgentProvider` conformances in one registry that drives launch, menus, Settings, bookmarks and
+  discovery. Each terminal gets only an allowlisted environment, never the app's full environment or
+  `ANTHROPIC_API_KEY`.
+- Resume bookmarks persist per project and provider, outside source control; background discovery finds existing
+  sessions and records new ones. Handoff opens the other provider with project, timeline, memo and skill context.
+- Token-scoped local automation socket (mode 0600), the bundled `vibeedit` CLI and the official-SDK `vibeedit-mcp`.
+  Claude and Codex get ephemeral stdio MCP configuration. Agents outside VibeEdit use a 0600 token file read by the
+  CLI and MCP.
+- 48 commands declared once as `CommandSpec`s, which generate validation, the CLI parser, MCP tools and agent
+  instructions. Every button, menu item and shortcut is a `UIAction` (`ui actions`, `ui action <id|shortcut>`);
+  every alert, panel and sheet goes through `ModalCenter` (`ui dialog`, `ui respond`, `ui action open`).
+- Agent edits keep a before/after diff, show ◆ markers and an Undo/Show Changes toast, and restore the latest diff
+  after reopen. Edits are recorded in a metadata-only audit log.
+- Privileged exports need a live token and an in-app approval sheet showing the concrete output; agents can only
+  decline it. A Settings switch (off by default) runs agent exports without confirmation, audited as
+  auto-approved.
+- The model-API tab (Responses, Chat Completions, Anthropic Messages; one script or timeline proposal per request)
+  was removed on 2026-10-04: without tools or the agent kit it could not finish a video. API keys work through the
+  Claude Code and Codex tabs.
+- Agent Knowledge (#100) keeps the project memo and project skills in the open project's folder (skills linked
+  into the project's `.claude/skills` and `.agents/skills`), plus notes for every project in Application Support;
+  never the agent workspace or home folder. A memo older builds left there is offered for migration
+  (`knowledge migrate`); agent writes to the user notes need approval.
+- The Knowledge window (#68) replaced the Agent Knowledge sheet: Lessons (search, scope/status/tag filters, sort,
+  inline edit, approve/reject, enable/disable, delete, source and "New since last visit"), Preferences, Project
+  facts, Notes and Skills. It polls the knowledge files' signature and reloads on change.
+- The Knowledge inbox (#69): proposed lessons (kit changes tagged `kit` show their diff) and agents' preference
+  changes for every project (`proposals.json`, applied on approval, editable first) with Approve / Edit / Reject;
+  `knowledge proposals` lists both, `approve`/`reject` take `l-…` or `p-…` IDs. The dock's book button shows the
+  proposal count, or a dot for entries changed since the last visit.
+- A shared debug log (`~/Library/Logs/VibeEdit/debug.log`) written by the app, CLI and MCP bridge.
+- Batch pipelines (#596, P2-C1): `batch run|status|cancel|presets`. A pipeline (core `BatchPipeline`, JSON) runs its
+  steps over files, folders and projects, one project per input; the app-wide `BatchRunner` opens each item in the
+  editor, runs every step through the CLI's handlers as a job and records per-item, per-step state. Verified by
+  `BatchRunnerTests` (import, test-provider captions, export over 3 generated clips → 3 projects, 3 files) and live
+  in a dev copy with the Whisper plugin. Items run one at a time; the Vietsub preset (P2-C4) is next. No headless
+  runs.
+- Batch-fix actions (#598, P2-C3): `captions replace`, `captions style` and `music replace` (core
+  `CaptionReplace`, `captionStyleOperations`, `musicReplacePlan`), each one undoable edit and a valid batch step;
+  brand kits (`library apply`) and re-export (the `export` step) already were. Core `BatchStepCatalog` lists the
+  built-in steps for the window's Add step. Verified by `BatchFixTests`, `BatchFixCommandTests`, `BatchFixStepTests`
+  and live in a dev copy: a pipeline over 3 projects replaced a caption word and re-exported each.
+- Batch window (#597, P2-C2): File ▸ Batch… and a tool card's Run on › Many projects / files…. Inputs, steps (from
+  `BatchRunner.stepCommands`, the tools, export and plugin actions), the selected step in a `ToolCard`, batch
+  settings, and the queue (step, progress, files, review issues, Open to fix / Reveal / Cancel); presets save and
+  load there. Verified by `BatchStepCatalogTests` and live in a dev copy: a pipeline built, saved, run (3 clips → 3
+  projects, 3 files), a review preset run over the projects with issues and Open to fix in the queue.
+- Batch window automation (#658): `ui respond --dialog sheet:batch` adds catalog steps (`add-step:<action>`),
+  removes and moves steps, and loads presets (`load-preset:<name>`), so the window is driven through MCP/CLI alone;
+  the batch's English messages (pipeline checks, runner failures) show in the app's language through
+  `BatchMessage`. Verified by `BatchWindowAutomationTests` and live in a dev copy (VI UI).
+- Batch reliability for many items: checks before a run (`BatchPreflight`: plugin keys through `options.check`,
+  unreadable inputs, disk space; `batch run` returns them as `warnings`), `batch retry` and Retry / Retry Failed in
+  the queue (an item goes on in its project from the step that did not complete), runs saved to
+  `Application Support/VibeEdit/Batch/Runs.json` (`BatchRunStore`; a quit asks, saves the run interrupted and the next
+  launch offers Resume), elapsed and remaining time, a Dock badge, a notification at the end and no idle sleep.
+  Verified by `BatchRunProgressTests`, `BatchRunnerTests` (retry from the failed step; a saved run comes back
+  interrupted and resumes) and live in a dev copy: a broken input warned and skipped, retried after the fix in its own
+  project; a 12-item run quit at 4/12, resumed from the launch prompt to 12/12 with one file per item.
+
+### Plugins
+
+- Versioned out-of-process `vibeedit.plugin/1` manifests discovered in project, user and bundled roots, with a
+  Plugins installer that shows exact install commands before approval and reports dependency health. Agents can
+  cancel but not approve an install.
+- `CapabilityService` is the single path from a capability request to a validated, provenance-tagged result. Each
+  capability is one `CapabilityAdapter`; calls go through a `PluginTransport`, with `PluginProcessRunner` as the
+  one-shot process transport (one bounded child per request, filtered environment, process-group cancellation).
+- `captions.generate`, `beats.detect` and `voice.speak` run as background jobs with `jobs.status`/`jobs.cancel`
+  and apply one undoable agent-attributed edit; `plugins list` (with `--health`) reports providers,
+  availability and diagnostics. See [plugins.md](../guides/plugins.md).
+- Saved cloned voices (#532): My voices in the user's folder (`VoiceCloneStore`), a reference trimmed to the
+  provider's `clone {minSeconds, maxSeconds}` range by Apple's on-device sound classifier (speech, music; levels as the fallback) and clipping (`VoiceCloneTrimmer`), sent as
+  `voice.synthesize` `reference`; preset/clone labels in the Voice panel picker and `capabilities get --voices`;
+  `voice clone-add|clone-list|clone-remove` (add and remove ask the user) and `voice use`. A second speaker is not detected.
+- Plugin API 2: an API window (`minApiVersion`/`maxApiVersion`), SHA-256 trust pins with user-only Trust and
+  enable switches (states ready, disabled, untrusted, changed, outdated), native `options` per user or project,
+  `contributes.actions` in fixed placements (Plugins menu, toolbar, clip/track/timeline/media context menus,
+  library panels, inspector tabs) with `when` conditions and parameter sheets, and `contributes.hooks` for 19
+  editor events (debounced, rate-limited, notify-only; hook edits wait for review unless Settings applies them).
+  Results propose operations and a per-plugin `pluginData` entry committed as one undoable `plugin` edit.
+  `PluginSessionTransport` (handshake, NDJSON, progress, cancel, idle shutdown, crash restart) runs plugins that
+  ask for it. Commands: `plugins actions|run|hooks|proposal|options|option|set`; plugin actions also go through
+  `ui actions`/`ui action`. Worked example: `Fixtures/plugins/example.toolkit`.
+- Plugin API 6 (#81): `contributes.library` packs, the `library.search` and `library.generate` capabilities and
+  provider `kinds`; manifests that use them need `apiVersion` 6, and older manifests stay valid.
+- Plugin API 7 (#375): `contributes.skills` agent skills (`PluginSkills`: confined after symlinks, front matter
+  `name` = folder and `description`, size limits; a bad skill is a diagnostic, not fatal). Ready plugins' skills are
+  the read-only `plugin` skill scope (`<plugin-id>:<name>`), listed in agent knowledge, linked into the project's
+  `.claude/skills` and `.agents/skills` as `<plugin-id>--<name>` (ledger `.vibeedit/plugin-skills.json`), into the
+  Codex workspace and terminal plugins' `skillsFolder`, and shown in Knowledge › Skills with Copy. Example:
+  `Fixtures/plugins/example.skills`.
+- Plugin API 8 (#390): `contributes.container` (rail icon, panel with Tools/Skills/Requires/Uses drawn from the
+  manifest) and `contributes.views` with `location` panel, dock or sheet (`PluginViewTree`, `PluginViewModel`,
+  `PluginPanelView`): 18 native components, lazy column, rendered only while visible, one request per view with
+  coalesced changes, streamed renders at most every 60 ms, answers parsed off the main actor. View and session
+  action requests get the host channel (`PluginCommandSession`, author `plugin`). `requires` with semver ranges
+  (`needs-plugin`, registry install offers requirements), `uses` + `plugins.invoke`, `features`. Commands
+  `plugins list --views`, `plugins view|view-event|show-view|invoke`. Session lines are read with `JSONValue(parsing:)`. Example:
+  `vibeedit-plugins/samples/views-example`; perf: `PluginViewPerfTests`, `PluginViewSessionPerfTests`.
+- Plugin API 9 (#451): `review.check` (`ReviewCheckCapability`): every ready provider runs on `review.measure`,
+  side by side, 30 s each; failures become info issues with `source`; `review.disabledChecks` per project;
+  `plugins hooks` lists `reviewChecks`. Tests: `ReviewCheckTests`.
+- Plugin API 12 (#634): `contributes.exportSteps` (`PluginExportStepContribution`, `when: media.data.<path>` over
+  media the timeline uses). `ExportStepRunner` (VibeEditDocument) runs matching steps of ready plugins as one
+  `export.steps` job before a final export (`export start` unless `--no-steps`; the Export panel's **Finalise and
+  Export**): `PluginCommandRunner` with the plugin's environment plus a revoked-after `.plugin` token, the socket and
+  `VIBEEDIT_CLI`, `::progress`, timeout and cancel; the project is read again and a still-true `when` fails before
+  exporting. `ExportController.preparing` makes it count as the running export (progress, cancel, `export status`
+  `state: preparing`). Tests: `PluginExportStepsTests`, `PluginCommandRunnerTests`, `ExportStepRunnerTests`.
+- Plugin actions with `confirm` wait in their job for a non-blocking `plugin-confirm` sheet (agents can only cancel)
+  instead of a modal alert that stopped command handling.
+- Catalog refresh performance (#103): discovery keeps manifests in a `PluginCatalogCache` and reads a plugin again
+  only when its `plugin.json` or entrypoint changes (stat identity, mode, size, mtime, ctime). A refresh shows each
+  plugin's availability from the last file check (`PluginTrustStore.knownAvailability`); plugins not checked yet in
+  the session, or whose manifest or entrypoint changed, are checked off the main actor in parallel and show
+  "Checking…" until then. Running a plugin, Reload and `plugins list` for an unchecked plugin still walk every
+  file. Measured in release (`scripts/verify.sh perf`, M1 Max): 1000 plugins × 5 files refresh in ~33 ms
+  (was ~400 ms on the main actor); 100 plugins × 2000 files in ~3 ms (was ~360 ms, and ~11 s after a relaunch).
+
+### Settings & diagnostics
+
+- Settings persist the workspace, default agent, agent edit permission, external-agent token, export auto-approval,
+  default export preset, interface language and recent projects. Turning off edit permission revokes live tokens
+  at once.
+- Doctor reports workspace access, Claude/Codex and optional tool discovery, socket status, agent instructions and
+  skills, project folders, plugin catalog diagnostics and live dependency health (`doctor run`).
+
+### Localization
+
+- English and Vietnamese resources for current controls (`Localizable.xcstrings` plus both `Localizable.strings`),
+  with an interface-language override in Settings.
+
+## M0 engine acceptance on real DJI footage (2026-10-02)
+
+`vibeedit-bench` (`Tools/Bench`) on 20 vertical DJI clips (HEVC Main10 `hvc1`, 1080×1920, 29.97 fps, about 30 Mbit/s;
+30.03 s timeline with reframes and a Vietnamese caption per clip), MacBookPro18,4 (M1 Max), release build:
+
+| Metric | Originals | With proxies (`--proxies`) | Budget |
+|---|---|---|---|
+| Composition build | 37 ms | 14 ms | — |
+| Decode through the compositor | 324 fps | 355 fps | — |
+| AVPlayer playback, 10 s | 300/299 frames, 0 dropped | 300/299, 0 dropped | ≤ 1 % dropped |
+| Scrub p95, AVPlayer exact seek to a decoded frame | 19.6 ms (p50 12.5, max 19.9) | 8.9 ms (p50 7.2, max 9.5) | < 100 ms |
+| Scrub p95, AVAssetImageGenerator (reference) | 34.8 ms | 18.6 ms | — |
+| Export 30 s H.264 (always originals) | 3.33 s (9.0× real time) | 3.33 s | > 1× |
+| Proxy generation, 20 clips | — | 4.3 s | — |
+
+All budgets pass with and without proxies. The earlier failing figure (p95 138 ms) measured AVAssetImageGenerator
+before the compositor rewrite and asset cache; the viewer seeks through AVPlayer, which the bench now measures.
+Re-run it after engine changes:
+
+```bash
+swift build -c release --product vibeedit-bench
+.build/release/vibeedit-bench <footage-dir> --clips 20 [--proxies]
+```
+
+## Agent A/B bench (2026-10-15)
+
+`scripts/bench-agents.py run claude|codex` runs one brief with each agent exactly as the app launches it (the bench app
+opens the agent's tab with `agent open --new`; the script copies that process's command line, environment and folder
+and re-runs it headless: `claude -p --output-format stream-json`, `codex exec --json`), stops at the end of the turn,
+a checkpoint awaiting the user, a question to the user or a time cap, then runs `review run --summary`. `table` prints
+the runs side by side and writes `.local/bench/ab/ab-table.json`. Main 8659aa4, a 20–25 s vertical talking-head cut
+with market and mountain B-roll and captions from three 30 s clips, no export:
+
+| | Claude (opus-5-5) | Codex (gpt-5.6-luna, low) |
+|---|---|---|
+| Wall time | 183 s | 90 s |
+| Tokens (incl. cache reads) | 1.41M ($1.20) | 0.49M |
+| Context first → last | 46k → 88k | 29k → 58k |
+| Tool calls (`context get`) | 23 (1) | 9 (1) |
+| Idle wake-ups, human answers | 0, 0 | 0, 0 |
+| Final review | pass | incomplete, 5 warnings |
+
+Neither agent called an MCP tool; both drove the `vibeedit` CLI from a shell. Largest costs: Claude's 46k floor per
+request (61 listed skills, 248 deferred vibeedit tools) and 6 calls guessing the transcript JSON with `jq`; Codex
+printing five whole SKILL.md files (75k characters) from a stale `~/.agents/skills`, and the user's Codex plugins in its
+28k floor. Bench-only overrides: Claude without `CLAUDE_CONFIG_DIR` (the configured folder's login had expired),
+Codex with vibeedit MCP tools pre-approved (`exec` cannot answer the TUI's approval prompt).
+
+## Feature bench (2026-10-06)
+
+`scripts/bench-features.py [--only groups] [--stress N] [--keep]` against the running app (debug Xcode build, M1
+Max): 219 checks. After the fixes in the same change, nothing fails; open notes:
+
+| Finding | Detail |
+|---|---|
+| Re-importing a file | `media import` of a file already in the project adds a second media entry (no reuse) |
+| Edits that change nothing | still make a revision and an undo step |
+| Slow service commands (UI stays responsive) | `agent status` ~0.9 s, `chat status` ~0.5 s, `storage get` 0.3–0.6 s |
+| Edit cost at scale | one `setProperties` round trip: 27 ms at 100 clips, 78 ms at 1000 (release build; core alone is ~3 ms). About 60% of the main thread is `TimelineCanvas.draw` repainting the whole visible timeline after each edit (clip titles, filmstrips) |
+| Edit cost at scale, fixed (#348) | the real cost was Core Animation rasterizing every visible clip (`CA::CG::Queue`, the main thread waits for it in `CABackingStoreGetFrontTexture`), not the draw calls. The canvas now diffs the drawn project against the new one and repaints only changed clips and gaps (`TimelineCanvas+Invalidation.swift`); the header repaints only when layers change. Release, M1 Max: 1,000 clips 52.5 → 22.9 ms per edit (100 edits 4.3 → 2.2 s, 100 undos 4.3 → 2.0 s); 100 clips 27 → 15.6 ms. Most of what is left is SwiftUI updating other views |
+| Export | once, `context get` waited 0.6 s while an export finished; not reproduced in three reruns |
+| Known gaps | animated stickers (GIF, APNG, WebP) render their first frame only (#64) |
+
+## Agent automation latency (2026-10-03)
+
+`scripts/bench-automation.py --edits 5` against the running app (debug build from `scripts/run.sh`, a 16:9 project
+with 44 items and 18 media, M1 Max). p50 values, before → after the agent-latency fixes:
+
+| Path | Before | After |
+|---|---|---|
+| Socket `context get` / `timeline get` (JSON, 7 KB) | 0.1–0.4 / 1.0 ms | unchanged |
+| MCP `context get` | 11.7–15 ms | 2–3 ms |
+| MCP `timeline get --format text` | 13–23 ms | 3–4 ms |
+| MCP `timeline get` (JSON) | 40–45 ms | 11–14 ms |
+| MCP start + initialize | 95 ms | 9–13 ms |
+| MCP `tools/list` (73 tools with schemas, once per session) | 50–60 ms | 50 ms, then 1.6–1.8 ms (core scaling) |
+| Edit → `ui frame` ready | ~255 ms (first 1.2 s) | ~230 ms, then ~210 ms (core scaling) |
+
+Causes fixed: the MCP SDK's stdio transport polled stdin/stdout every 10 ms (`MCPBridge/BlockingStdioTransport.swift`
+blocks instead); every result was sent twice (pretty text and `structuredContent`) and the SDK re-decodes structured
+results through Codable at about 1 ms per KB (now compact text only, also about a third fewer tokens); preview
+readiness and `ui frame` polled every 100 ms (now 10 ms); the debug log JSON-encoded whole results on the main actor
+before truncating them (now a bounded writer).
+
+Core edit cost on synthetic projects: `swift run -c release vibeedit-core-bench` in `Packages/VibeEditCore` (20
+media; 60% of the items on the main layer with a dissolve at every tenth cut, 20% captions, 20% music). p50 at
+100 / 500 / 1,000 items, before → after the core-scaling fixes:
+
+| Measure | Before | After |
+|---|---|---|
+| One `setProperties` edit | 0.97 / 8.0 / 24 ms | 0.6 / 1.5 / 3.1 ms |
+| Ripple delete | 1.0 / 9.6 / 30 ms | 0.5 / 1.5 / 3.2 ms |
+| Undo | 1.4 / 11 / 34 ms | 0.3 / 1.5 / 3.0 ms |
+| `validate()` of a changed project | 0.5 / 3.2 / 9.2 ms | 0.4 / 1.3 / 2.6 ms |
+| 200-step history journal | 1.9 / 6.9 / 13 MB | 0.02 / 0.1 / 0.1 MB |
+| Journal encode / decode | 0.14 / 0.52 / 0.97 s, 0.77 / 2.9 / 5.5 s | 5 / 21 / 35 ms, 14 / 48 / 66 ms |
+| MCP `tools/list` (bridge alone / with the app's plugin actions) | 35 / 50 ms | 0.1 / 1.7 ms |
+| Edit → `ui frame` ready (running app, 44 items) | ~230 ms | ~210 ms |
+
+What changed:
+- `Project` keeps `tracks` (and each `Track` its `items`) as typed stored arrays. Before, every item mutation
+  rebuilt the layer's and the project's arrays from JSON, so one ripple was O(items²). `fields` is now computed
+  (whole JSON for encoding); single keys are read through the subscript.
+- Validation built a sorted copy of a video layer for every transition (80% of an edit at 1,000 items); `VideoCuts`
+  indexes the cuts once. Media lookups use a dictionary; item properties are checked by walking the item's own keys.
+- A project remembers that it passed `validate()` until it changes, so `applying` validates once per edit, and the
+  preview builder and saves skip it.
+- The history journal stores each step as a `ProjectDelta` against the next newer state (runs of unchanged items
+  are `[start, count]`). Old full-snapshot journals still load.
+- The preview builds the new composition in a fresh `AVPlayer`, waits until it is ready at the playhead and swaps
+  it in; the viewer keeps the previous picture instead of going blank. `ui frame` does not wait for the swap: it grabs
+  from `PreviewController.currentBuild`, the new composition as soon as it is built.
+- Edits that keep what plays where (colour, text, opacity, transform, keyframes, volume, fades) no longer load a
+  new player: the builder hashes the composition's tracks and segments (`CompositionSnapshot.structure`), and when
+  the hash matches what is shown, the shown player item takes the new video composition and audio mix and redraws
+  the playhead frame. With 40 clips, such an edit is on screen about 7 ms after the 50 ms debounce, against about
+  110 ms for a swap.
+- `vibeedit-mcp` answers `tools/list` itself from the catalog encoded once; the SDK encoded the 35 KB list through
+  its `Value` tree on every call.
+
+Render hot paths after keyframes and word captions (2026-10-04): playback and export stay within budget
+(`vibeedit-bench`, 14 DJI clips: 315 fps decode plain, about 255 fps with every clip keyed and karaoke captions; the
+difference is the per-frame transforms and opacity, not text). The text cache key (the whole item JSON-encoded) and
+the keyframe anchor are made once per text layer instead of per frame; the Inspector reads the playhead only in the
+*Keyframe at playhead* buttons; `placedCues` binary-searches the words near each cue.
+
+Still open: timing edits (trim, move, speed, new clips) still build and load a whole new composition (patching the
+shown `AVMutableComposition` in place would need engine work), and the remaining per-edit cost is one full
+`validate()` (about 2.6 µs per item).
+
+### LUT rebuild cache (2026-10-04)
+
+Reproduce with `scripts/verify.sh test --filter LUTBuildTests`. Generated fixture: one 30-frame video item and
+one 64³ LUT; warm the builder, then measure five opacity edits. Debug build on this M1 Max; milliseconds:
+
+| Metric | Before (`04b87fc`) | Persistent parsed-LUT cache |
+|---|---|---|
+| Median `CompositionBuilder.build` | 2165.721 | 0.315 |
+| Parsed LUT loads across warm-up + five edits | 6 | 1 |
+
+This measures rebuild work only, not player readiness or end-to-end display latency. The first parse still has
+its original cost. The cache is bounded to 64 MiB, keyed by resolved URL and freshly read modification time,
+size and inode. Tests cover reuse, replacement, deletion, dimension validation and least-recently-used eviction.
+
+## Verification
+
+### Automated tests
+
+2026-10-04 rework: the Vietnamese caption golden is captured directly from the shared compositor, before
+hardware H.264 encoding. Player readiness and export metadata/non-black picture are separate tests. Full build,
+app/core tests and strict lint pass. A deliberate missing-caption mutation fails the golden comparison.
+
+The latest full runs pass 294 tests: 143 in the app modules (`Tests/`) and 151 in `Packages/VibeEditCore`. The
+Swift 6 build and strict SwiftLint pass.
+
+- **Core:** inverses, revisions and atomic failure; ripple and source timing; linked A/V, magnetic reorder and
+  reframing; transitions; LUT catalog; freeze frame; ducking and audio validation; shared-media traversal and
+  symlink confinement; legacy EDL import; OpenTimelineIO export; unknown fields; render bounds; review rules and
+  voiceover proximity; layer rules and repair; diffs; plugin catalog, provider resolution, process isolation and
+  health; the op-keyed codec and an apply→undo→redo round trip for every operation; history depth capping.
+- **Engine:** golden frames with Vietnamese captions, grayscale and opacity, mute, six caption presets, ducking and
+  `AVAudioMix` ramps, transition tweening, `.cube` rendering, freeze frames, time mapping through one million
+  frames, media sources and proxy detection. Waveform tests use generated stereo audio and test range queries,
+  disk-cache recovery and invalidation.
+- **Storage:** reopen and history, stale saves, autosave recovery, damaged caches, export history; project
+  creation with Vietnamese folder names, footage preservation, invalid input, collisions and staging cleanup.
+- **Automation and agents:** authorization, revocation, wire decoding, 0600 socket round trips and concurrent
+  clients; command-spec consistency (names, MCP schemas, defaults, CLI parsing, agent instructions); UI actions;
+  isolated Claude/Codex MCP and resume launches; session discovery.
+- **Plugins and document:** capability service with fake transports (resolution, health fallback, output
+  confinement, take scoring and cleanup, loudness provenance); export queue, proxy queue, preview, file sync,
+  settings, modal center and automation controllers with fakes.
+
+`scripts/verify.sh perf` repeats the engine test at 20 synthetic clips; it is not a substitute for the real-footage
+bench above. It then times a plugin catalog refresh with 1000 generated plugins (and 100 with 2000 files each)
+and fails above 50 ms.
+
+### Native smoke tests
+
+- **New Project:** name, landscape, destination and creation; the editor showed 1920×1080 at 29.97 fps.
+- **Export:** Quick Draft with captions rendered a 720×1280 H.264/AAC file while the editor stayed usable, then
+  showed a 3.00 s / 3-cut / 1-caption / 542 KB receipt; the SRT and `vibeedit export status` were checked.
+- **Privileged export from the embedded Shell:** the first request was denied and wrote nothing; the second showed
+  author, preset, output and SRT, was approved and rendered. Both decisions were audited.
+- **Shell:** read context, applied a caption edit, saw it in preview and timeline, undid once; an external CLI edit
+  without a token was rejected.
+- **Codex:** started in the embedded terminal, read context and timeline, applied one operation through the socket
+  (revision 21 → 22), surfaced the agent diff and restored the caption with Undo (revision 23).
+- **Source viewer:** inserted source frames 11–33 as exactly 22 timeline frames, undid, then overwrote without
+  extending the timeline.
+- **Earlier:** opened synthetic footage, seeked, split, saved and reloaded external changes.
+
+## Known limitations / remaining work
+
+- **Acceptance:** the M1 hand rebuild of the 48-cut reference, the M3 all-in-app vlog, broader accessibility QA,
+  UI automation tests, and real authenticated Claude/API tasks are not verified. Provider-backed jobs are not yet
+  smoke-tested with a real agent and an installed provider.
+- **Native checks outstanding:** waveforms, the standalone SRT file pickers, modifier-key trim gestures, and live
+  microphone permission and metering.
+- **Xcode:** the generated project builds with signing disabled and package-plugin validation skipped for the
+  locked SwiftTerm build plugin.
+- **Automation:** voice-enrollment approval; analysis and interchange providers still need wiring to their panels.
+- **Plugin platform:** a credential contract ([03-architecture.md](../specs/03-architecture.md) §5). Plugin panels
+  (API 8) have declarative views only; webviews, free drawing, video in views, overlays and inspector tabs are
+  deferred (#390).
+- **M3–M6:** bundled transcription provider and real-engine acceptance, music/SFX library with BPM and license
+  badges, voice cloning, expanded legacy effect/overlay/SFX import, effect recipes, keyframes,
+  Demucs, and more interchange validation. Resolve remains reserved.
+- **Review and loudness:** coverage uses explicit speech tags and voiceover timing; dead air is found from layer
+  coverage, not measured audio, and untagged audio is not transcribed. Picture checks sample the rendered timeline only on `review.measure` (two frames a second, small grey thumbnails), kept for the session; plugin `review.check` providers (API 9) also run only there, each for at most 30 s. Export loudness is measured only when normalization is on (the core `vibeedit.audio-analysis` plugin provides it).
+- **Editing scope:** ripple affects the edited track and its linked counterpart only. Source insert/overwrite
+  targets Main. Unknown future effects round-trip but are not rendered.
+- **History:** full-snapshot undo is capped at 200 steps; `history.jsonl` stores one atomic checkpoint, and an
+  append-only journal with compaction is pending.
+- **Localization:** some dynamic diagnostic messages are still English; full localization QA is pending.
+
+### Repeated-media build lookup (2026-10-04)
+
+`swift test --filter MediaSourceTests/repeatedSource` uses 240 one-frame cuts of generated video, warms the
+builder, then measures five Debug builds on the same M1 Max. Before (070b6c1): median 41.294 ms and 1,440
+source resolutions across six builds. After per-build media/item dictionaries and loaded-media reuse: median
+23.075 ms and six resolutions. The test asserts one resolution per media per build and verifies that a proxy
+created between builds is selected. These timings measure composition construction, not player readiness.
+
+### Caption interval sweep (2026-10-04)
+
+`swift test --filter CaptionBuildTests` constructs 1,000 sequential three-frame captions, verifies every
+instruction's caption ID and measures three Debug builds on the same M1 Max. Before (b4db9bf): median
+390.820 ms. After sweeping start/end events with an active layer set: 16.692 ms (about 23× faster).
+`IntervalSweepTests` compares overlapping, unsorted, empty, skipped and repeated boundaries with the previous
+half-open interval filtering rule, retaining original layer order. This measures construction, not rendering.
+
+### Audio composition lanes (2026-10-04)
+
+`swift test --filter AudioLaneTests/sequential` measures 240 one-frame audio cuts from generated AAC media,
+three Debug builds with a muted AVPlayer on this M1 Max. Before (22cce9d): 240 tracks, median construction
+19.420 ms and build-to-ready 717.611 ms. With shared lanes: one track, construction 18.793 ms and
+build-to-ready 93.591 ms. Separate earlier construction-only runs were 8.912 vs 15.446 ms: fewer tracks do not
+necessarily make construction faster, but the player readiness improvement is substantial in this fixture.
+Tests verify independent overlapping project layers, pitch-mode separation, ramp reset after fades and gaps,
+and decoded PCM RMS retaining a -20 dB step at a shared-track clip boundary. Readiness is polled every 1 ms;
+these timings are local observations, not portable thresholds.
+
+### Bounded caption rasters (2026-10-04)
+
+`CaptionRasterTests` compares cropped and full-canvas reference drawing for six presets at landscape and
+portrait sizes, three vertical positions, Vietnamese accents, emoji and thick outlines. Every RGBA channel
+stays within one 8-bit level (integer-translated CoreText antialias quantization); animated word variants
+also match within one level. The existing pre-encode caption golden remains unchanged. A 3840×2160
+“Xin chào” raster occupies 303,104 bytes versus 33,177,600 bytes for a full canvas, about 109× smaller.
+This is CPU bitmap storage, not a measurement of GPU upload time. The cache retains the positioned CIImage,
+and the compositor reuses it without constructing a wrapper on each frame.
+
+### Prepared picture keyframes (2026-10-04)
+
+`PreparedMotionTests` compares the previous `ItemMotion.value` scan with prepared segments plus binary search
+on the same M1 Max Debug run. For 10,000 picture samples (all five properties plus transform), two keys per
+property take 20.014 → 14.213 ms; 1,000 keys per property take 2,042.708 → 31.427 ms. The checksum includes
+transform and opacity. These are interpolation/transform costs, not total render throughput. Tests cover every
+easing mode, exact hold boundaries, negative/shifted keys, reverse seek order, fractional FPS, static defaults
+and transition holds. The compositor clamps local time once and samples typed channels together.
+
+### Native test isolation (2026-10-04)
+
+`verify.sh test` runs app suites in parallel again, then the two Unix-socket suites (`AutomationTests`,
+`AutomationControllerTests`) in a quiet sequential pass; core model tests remain parallel. The earlier global
+`--no-parallel` hid five `EngineControlsTests` that read generated media without awaiting its generation
+(AVFoundation -11800/-17913 when run first); they now await `TestFixtures.requireMediaRoot()`. The socket
+suites' latency assertions and client timeouts fail only while CPU-bound render suites saturate the machine.
+App suites take ~29 s instead of ~65 s on this host.
+The audio lane benchmark now waits for paused readiness instead of starting/stopping playback between
+samples. On this host, immediate playback left later items at `.unknown`; paused readiness passed all
+three iterations (27.773 ms median build-to-ready in the isolated check). No timeout or correctness
+assertion was loosened. Native ramp playback/export coverage remains separate.
+
+### Long export baseline (2026-10-04)
+
+Run `VIBEEDIT_LONG_EXPORT_BENCH=1 VIBEEDIT_BENCH_SHA="$(git rev-parse HEAD)" scripts/verify.sh test --filter LongExportTests`.
+The opt-in benchmark exports 200 generated-media cuts, 9,000 frames / 300.3 seconds, at 160×90 with AAC,
+then reads the encoded video to verify every frame, the audio track and duration. It prints a JSON report
+with Git SHA, OS, dimensions, duration, bytes, elapsed export seconds and throughput. It is intentionally
+small in pixel dimensions to expose sample-transfer overhead; it is not a 1080p/4K export claim.
+Baseline `e760321` on this M1 Max / macOS 15.7.7 Debug run: 22.811 seconds, 394.545 frames/s,
+43,566,760 bytes. This is the baseline before C1's callback-driven sample pump.
+
+### Readiness-driven export transfer (2026-10-04)
+
+The C1 worktree based on `3cfd5dd` completes the same long-export scenario in 9.651 seconds (932.523 fps),
+versus 22.811 seconds before, about 2.36× faster. Both verify 9,000 encoded frames, audio and timeline duration;
+these low-resolution numbers isolate sample-transfer overhead and do not represent 1080p/4K performance.
+Each reader/writer pair has a dedicated serial queue and drains only while the writer input is ready.
+A 100 ms health check handles terminal native failures that may not trigger another readiness callback;
+it does not pace samples. Cancellation interrupts native reading, then drains every stream queue before
+returning to writer cleanup, so no append can race cleanup. Tests exercise controlled backpressure,
+blocked-read cancellation, cancellation before registration, read errors and failures while all inputs
+are not ready. Native tests cover video-only, audio/video, ProRes, ramped export, compositor failure,
+publication/cancellation cleanup and destination races.
+
+### Audio-only loudness measurement pass (2026-10-04)
+
+`RenderEngine.exportAudio` writes 48 kHz, stereo, float PCM in CAF through the same mixed-audio reader and
+atomic publication path as full export, with no video reader/compositor. The normalization pipeline uses
+this file for its first measurement, applies the gain through `EditOperation`, exports the final movie and
+still verifies that encoded movie. Temporary PCM is removed on success/failure. PCM uses more temporary
+space than AAC (115,319,296 bytes for this five-minute fixture), in exchange for avoiding a lossy first pass.
+The same C1 fixture on the C2 worktree takes 9.886 seconds for the full movie versus 0.264 seconds for PCM.
+This compares **measurement rendering only**, excluding the loudness analyzer and final encode.
+
+Tests deliberately install a failing video compositor: audio-only measurement succeeds without invoking it.
+Native normalization with gain, fades and volume keys reaches −20 LUFS within 0.3 LU using the bundled meter;
+the actual encoded movie is measured again and temporary files are absent afterward. Tests also cover an
+analyzer failure, no-audio projects, stereo PCM format/duration and both pitch modes of ramped audio.
+
+Full verification for this change: SwiftPM build/test/lint passed (114913/114915/115043), and
+`verify.sh xcode test -parallel-testing-enabled NO` passed 243 tests in 76 suites (115043).
+The Xcode test target now explicitly links `VibeEditAudioAnalysis`. CI wiring remains a separate open item.
+
+### Export buffer and codec settings (2026-10-04)
+
+C4 disables `alwaysCopiesSampleData` for video/audio readers, sets H.264 High AutoLevel, expected source
+frame rate and a two-second maximum keyframe interval, and enables MP4 fast-start metadata placement.
+ProRes remains intra-frame and does not receive H.264-only settings. Native tests parse MP4 top-level boxes
+(`moov` before `mdat`), AVC profile metadata, rational frame rate, all 225 encoded frames, sync-picture
+spacing and decoded start coverage. Marker buffers are excluded from sync-picture checks; B-pictures may
+present before the first sync picture. MP4/ProRes, PCM, error and cancellation tests continue to pass.
+
+The five-minute fixture is 9.834 s / 915.231 fps / 42,968,270 bytes, versus C2's 9.886 s / 43,562,566 bytes;
+throughput is effectively unchanged at this scale. No broader speedup is claimed. Full build/test including
+the long benchmark/lint passed 120222/120225/120412. Fast-start creates an encoder sidecar on some failures,
+so each export now owns a private 0700 staging directory and removes that entire directory after publication
+or failure. The final path is still published with an exclusive same-filesystem rename.
+
+### History availability (2026-10-04)
+
+Document action validation now uses `canUndo`/`canRedo` instead of materializing arrays of snapshot entries.
+`HistoryAvailabilityTests` checks 10,000 pairs at 199 undo entries and one redo entry: 28.583 ms for the old
+array path versus 2.753 ms for the direct accessors (M1 Max, Debug). This is a small per-call saving, not an
+overall edit-latency claim. The test also verifies availability and the top label before editing, after undo,
+redo, exhausting the stack and branching after undo.
+
+### Hosted verification (2026-10-04)
+
+The macOS 15 arm64 / Xcode 26.3 workflow runs SwiftPM build, full app/core tests and CLI/MCP subprocess
+tests, strict lint, and Xcode build/test on every pull request. Logs and failed snapshot images are retained.
+[Run 37181160682](https://github.com/dongnguyenvie/BashCut/actions/runs/37181160682) at `1b9e228` passed all
+steps. Its first predecessor exposed device-dependent RGB fixtures and H.264 source variation in a caption
+golden. Explicit sRGB fixtures and a black compositor background fixed those dependencies without relaxing
+image thresholds. Local Xcode verification also passed 245 tests in 77 suites.
+
+
+### Native fixtures and discontinuous audio gain (2026-10-04)
+
+Tests generate a shared, per-process temporary H.264/AAC fixture with AVFoundation: 60 moving 320×180
+frames at 30000/1001 and a 48 kHz mono sine tone. The video input explicitly uses a 30000 timescale;
+default writer rounding otherwise changes fractional frame timestamps. The standalone `vibeedit-fixtures`
+executable uses the same generator. CI needs neither ffmpeg nor a manual fixture step. Tests check every
+frame timestamp, codecs, dimensions, duration, audible PCM, concurrent requests, cancellation before
+publication and preservation of an existing destination.
+
+The new fixture exposed a native audio-mix regression at adjacent clips with different gain. A -20 dB
+cut decoded at a 0.7385 amplitude ratio instead of 0.1, despite correct `getVolumeRamp` metadata. The
+failure also reproduces with generated PCM, so it is not confined to AAC priming. Touching discontinuous
+envelopes now use different composition lanes; a lane becomes reusable after a gap or at a continuous
+gain boundary. Four adjacent 0/-20/-6/-14 dB clips use two lanes and decode within the existing 0.005
+amplitude tolerance on both AAC and PCM, with spectral and varispeed pitch modes. The 240-cut constant-gain
+fixture still uses one lane. No ramp timestamps or correctness thresholds were relaxed.

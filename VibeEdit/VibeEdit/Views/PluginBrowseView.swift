@@ -1,0 +1,196 @@
+import VibeEditPlugin
+import SwiftUI
+
+/// Plugins › Browse and Updates: the registry, searched and filtered, with Install and Update.
+struct PluginBrowseView: View {
+    @Bindable var model: PluginManagerModel
+    let updatesOnly: Bool
+    @State private var query = ""
+
+    private var listings: [PluginListing] {
+        updatesOnly ? model.updates
+            : model.listings(query: query, capability: model.browseCapability, category: model.browseCategory)
+    }
+
+    /// Without a search or a category, the catalog reads as one section per category.
+    private var grouped: Bool { !updatesOnly && query.isEmpty && model.browseCategory == nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if !updatesOnly {
+                    TextField("Search plugins…", text: $query).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                    if let capability = model.browseCapability {
+                        Button {
+                            model.browseCapability = nil
+                        } label: {
+                            Label(capability, systemImage: "xmark.circle.fill").font(.caption.monospaced())
+                        }.buttonStyle(.borderless).help("Show every plugin")
+                    }
+                }
+                Spacer()
+                if model.loadingRegistry { ProgressView().controlSize(.small) }
+                if let fetched = model.registryFetchedAt {
+                    Text("Updated \(fetched, style: .relative) ago").font(.caption2).foregroundStyle(.secondary)
+                }
+                Button {
+                    Task { await model.refreshRegistry(force: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }.disabled(model.loadingRegistry).help("Fetch the plugin registry again")
+            }
+            if let error = model.registryError {
+                Label(model.registry == nil ? error : "Showing the saved catalog: \(error)",
+                      systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            }
+            if !updatesOnly, query.isEmpty, model.browseCapability == nil, model.browseCategory == nil {
+                ForEach(model.offeredBundles) { bundle in PluginBundleCard(model: model, bundle: bundle) }
+            }
+            if !updatesOnly, model.registry?.plugins.isEmpty == false { PluginCategoryBar(model: model, query: query) }
+            if listings.isEmpty {
+                ContentUnavailableView {
+                    Label(emptyTitle, systemImage: updatesOnly ? "checkmark.circle" : "puzzlepiece.extension")
+                } description: {
+                    if let detail = emptyDetail { Text(detail) }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if grouped {
+                List(PluginSection.byCategory(listings, category: \.category)) { group in
+                    Section {
+                        ForEach(group.items) { listing in PluginListingRow(model: model, listing: listing) }
+                    } header: {
+                        Label(group.title, systemImage: group.symbol)
+                    }
+                }
+            } else {
+                List(listings) { listing in PluginListingRow(model: model, listing: listing) }
+            }
+        }
+    }
+}
+
+extension PluginBrowseView {
+    /// Says why the list is empty: loading, nothing published, nothing matching, or nothing to update.
+    fileprivate var emptyTitle: String {
+        if updatesOnly { return String(localized: "Everything is up to date") }
+        guard let registry = model.registry else { return String(localized: "Loading plugins…") }
+        if registry.plugins.isEmpty { return String(localized: "No plugins published yet") }
+        return String(localized: "No plugins match")
+    }
+
+    fileprivate var emptyDetail: String? {
+        guard !updatesOnly, let registry = model.registry else { return nil }
+        if registry.plugins.isEmpty {
+            return String(format: String(localized: "The registry at %@ lists no plugins."),
+                          PluginManagerModel.registryURL.host ?? PluginManagerModel.registryURL.path)
+        }
+        if let capability = model.browseCapability, query.isEmpty {
+            return String(format: String(localized: "No published plugin provides %@ yet."), capability)
+        }
+        if let category = model.browseCategory, query.isEmpty {
+            return String(format: String(localized: "No published plugin is in %@ yet."), category.title)
+        }
+        return String(localized: "Try another search, or clear the filter.")
+    }
+}
+
+/// All plus one chip per category that has plugins, each with how many match the search.
+private struct PluginCategoryBar: View {
+    @Bindable var model: PluginManagerModel
+    let query: String
+
+    var body: some View {
+        let matching = model.listings(query: query, capability: model.browseCapability)
+        let counts = Dictionary(grouping: matching, by: \.category).mapValues(\.count)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chip(nil, title: String(localized: "All"), symbol: "square.grid.2x2", count: matching.count)
+                ForEach(PluginCategory.allCases.filter { counts[$0] != nil || $0 == model.browseCategory }) { category in
+                    chip(category, title: category.title, symbol: category.symbol, count: counts[category] ?? 0)
+                }
+            }
+        }
+    }
+
+    private func chip(_ category: PluginCategory?, title: String, symbol: String, count: Int) -> some View {
+        let selected = model.browseCategory == category
+        return Button {
+            model.browseCategory = category
+        } label: {
+            Label(title + " " + String(count), systemImage: symbol).font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(selected ? Color.accentColor.opacity(0.35) : Color.white.opacity(0.06)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).foregroundStyle(selected ? Color.primary : Color.secondary)
+    }
+}
+
+private struct PluginListingRow: View {
+    @Bindable var model: PluginManagerModel
+    let listing: PluginListing
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(listing.entry.name.text).font(.headline)
+                    if let version = listing.version { Text("v" + version.version).foregroundStyle(.secondary) }
+                    if listing.publisherTrust == .firstParty {
+                        Label("VibeEdit", systemImage: "checkmark.seal.fill").labelStyle(.titleAndIcon)
+                            .font(.caption2).foregroundStyle(.cyan).help("Signed by VibeEdit")
+                    } else if case .verifiedPublisher(let publisher)? = listing.publisherTrust {
+                        Label(publisher, systemImage: "checkmark.seal").labelStyle(.titleAndIcon)
+                            .font(.caption2).foregroundStyle(.green).help("Signed by its publisher")
+                    }
+                }
+                if let summary = listing.entry.summary { Text(summary.text).font(.caption) }
+                if let author = listing.entry.author { PluginAuthorLabel(author: author) }
+                HStack(spacing: 8) {
+                    Text(listing.entry.id).font(.caption2.monospaced())
+                    Label(listing.category.title, systemImage: listing.category.symbol).font(.caption2)
+                    if let size = listing.version?.size {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)).font(.caption2)
+                    }
+                    if let extra = listing.version?.downloadBytes, extra > 0 {
+                        Text(String(format: String(localized: "+ %@ setup"),
+                                    ByteCountFormatter.string(fromByteCount: Int64(extra), countStyle: .file)))
+                            .font(.caption2)
+                    }
+                }.foregroundStyle(.secondary)
+                if case .incompatible(let reason) = listing.status {
+                    Text(reason).font(.caption).foregroundStyle(.orange)
+                }
+                if let reason = listing.installedYanked {
+                    Label(String(format: String(localized: "Your version was withdrawn: %@"), reason),
+                          systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                }
+                if case .shadowed = listing.status {
+                    Text("Installed in this project or the app").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            action
+        }.padding(.vertical, 4)
+    }
+
+    @ViewBuilder private var action: some View {
+        if model.downloading.contains(listing.id) {
+            ProgressView().controlSize(.small)
+        } else {
+            switch listing.status {
+            case .available: Button("Install") { install() }.disabled(model.installing)
+            case .update(let from):
+                Button("Update") { install() }.buttonStyle(.borderedProminent).disabled(model.installing)
+                    .help("Installed: v\(from)")
+            case .installed, .shadowed: Text("Installed").font(.caption).foregroundStyle(.secondary)
+            case .incompatible: EmptyView()
+            }
+        }
+    }
+
+    private func install() {
+        Task {
+            do { try await model.requestInstall(listing.id) } catch { model.message = error.localizedDescription }
+        }
+    }
+}

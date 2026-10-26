@@ -1,0 +1,2477 @@
+{
+  "$defs" : {
+    "audio" : {
+      "description" : "Mix settings and the last loudness measurement",
+      "properties" : {
+        "loudnessRangeLU" : {
+          "description" : "Measured loudness range",
+          "maximum" : 100,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "measuredLUFS" : {
+          "description" : "Measured integrated loudness",
+          "maximum" : 10,
+          "minimum" : -100,
+          "type" : "number"
+        },
+        "measurementVerified" : {
+          "description" : "The final file was re-measured",
+          "type" : "boolean"
+        },
+        "mixGainDb" : {
+          "description" : "Master gain",
+          "maximum" : 24,
+          "minimum" : -60,
+          "type" : "number"
+        },
+        "normalizeEnabled" : {
+          "description" : "Two-pass normalization on export",
+          "type" : "boolean"
+        },
+        "targetLUFS" : {
+          "description" : "Normalization target",
+          "maximum" : -5,
+          "minimum" : -30,
+          "type" : "number"
+        },
+        "truePeakDbTP" : {
+          "description" : "Measured true peak",
+          "maximum" : 20,
+          "minimum" : -100,
+          "type" : "number"
+        }
+      },
+      "type" : "object"
+    },
+    "color" : {
+      "description" : "Color grade; on an adjustment item it applies to every layer below",
+      "properties" : {
+        "contrast" : {
+          "description" : "Contrast multiplier (1 = unchanged)",
+          "maximum" : 4,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "exposure" : {
+          "description" : "Exposure in stops (0 = unchanged)",
+          "maximum" : 10,
+          "minimum" : -10,
+          "type" : "number"
+        },
+        "lut" : {
+          "description" : "LUT ID from luts[]",
+          "type" : [
+            "string",
+            "null"
+          ]
+        },
+        "lutStrength" : {
+          "description" : "LUT mix (0 = off, 1 = full)",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "saturation" : {
+          "description" : "Saturation multiplier (0 = black and white, 1 = unchanged)",
+          "maximum" : 4,
+          "minimum" : 0,
+          "type" : "number"
+        }
+      },
+      "type" : "object"
+    },
+    "describedShot" : {
+      "description" : "One described shot; at least one fact besides start and end",
+      "properties" : {
+        "angle" : {
+          "description" : "Camera angle, e.g. eye, high, low, top, dutch, pov, ots",
+          "maxLength" : 60,
+          "type" : "string"
+        },
+        "bestMoment" : {
+          "description" : "Source seconds of the best moment inside the shot",
+          "maximum" : 10000000,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "confidence" : {
+          "description" : "How sure the describer is",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "direction" : {
+          "description" : "Where the subject moves on screen, e.g. left, right, toward, away, none",
+          "maxLength" : 60,
+          "type" : "string"
+        },
+        "end" : {
+          "description" : "Source seconds",
+          "maximum" : 10000000,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "looked" : {
+          "description" : "Source seconds of the frames looked at",
+          "items" : {
+            "description" : "Seconds",
+            "maximum" : 10000000,
+            "minimum" : 0,
+            "type" : "number"
+          },
+          "maxItems" : 50,
+          "type" : "array"
+        },
+        "move" : {
+          "description" : "Camera move, e.g. static, pan, tilt, push, pull, track, orbit, handheld, zoom, crane",
+          "maxLength" : 60,
+          "type" : "string"
+        },
+        "note" : {
+          "description" : "Free note",
+          "maxLength" : 300,
+          "type" : "string"
+        },
+        "onScreenText" : {
+          "description" : "Readable text in the picture",
+          "type" : "boolean"
+        },
+        "people" : {
+          "description" : "People in frame",
+          "maximum" : 1000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "size" : {
+          "description" : "Shot size, e.g. ECU, CU, MCU, MS, MWS, WS, EWS, insert",
+          "maxLength" : 60,
+          "type" : "string"
+        },
+        "start" : {
+          "description" : "Source seconds",
+          "maximum" : 10000000,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "subjects" : {
+          "description" : "What is in the shot",
+          "items" : {
+            "description" : "Subject",
+            "maxLength" : 60,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "maxItems" : 12,
+          "type" : "array"
+        },
+        "tags" : {
+          "description" : "Free labels",
+          "items" : {
+            "description" : "Label",
+            "maxLength" : 60,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "maxItems" : 50,
+          "type" : "array"
+        }
+      },
+      "required" : [
+        "start",
+        "end"
+      ],
+      "type" : "object"
+    },
+    "item" : {
+      "description" : "A timeline item; see the layer rules for which fields it needs",
+      "properties" : {
+        "at" : {
+          "description" : "Start, in timeline frames",
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "backdrop" : {
+          "description" : "Video picture: what fills the frame around it (fit clips, off-aspect photos) instead of black",
+          "properties" : {
+            "blur" : {
+              "description" : "Blur radius as a share of the frame's short side (kind blur; default 0.05)",
+              "maximum" : 0.5,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "color" : {
+              "description" : "Backdrop colour #RRGGBB (kind color; default black)",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "dim" : {
+              "description" : "Darkens the backdrop: 0 unchanged, 1 black (default 0)",
+              "maximum" : 1,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "kind" : {
+              "description" : "Video picture: what fills the frame around a fitted picture: blur (a blurred, filled copy of itself) or color",
+              "maxLength" : 5,
+              "minLength" : 1,
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "blur" : {
+          "description" : "Video or image picture: Gaussian blur radius as a share of the picture's short side, after the crop (0.02 softens, 0.04 hides text)",
+          "maximum" : 0.2,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "brandRoles" : {
+          "additionalProperties" : {
+            "enum" : [
+              "accent",
+              "background",
+              "text",
+              "secondary",
+              "heading",
+              "body"
+            ],
+            "type" : "string"
+          },
+          "description" : "Text: textStyle path → brand role (#453); applying a brand kit sets these from its palette and fonts. Paths fill, stroke, highlight, background.color, shadow.color, accentBars.color, font; roles accent, background, text, secondary, heading, body",
+          "type" : "object"
+        },
+        "color" : {
+          "$ref" : "#/$defs/color"
+        },
+        "crop" : {
+          "description" : "Video picture: the visible part of the source frame (the picture keeps its place; zoom and pan move it)",
+          "properties" : {
+            "bottom" : {
+              "description" : "Video picture: fraction of the height hidden at the bottom",
+              "maximum" : 0.95,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "left" : {
+              "description" : "Video picture: fraction of the width hidden on the left (left + right at most 0.95)",
+              "maximum" : 0.95,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "radius" : {
+              "description" : "Video picture: corner radius as a fraction of the visible part's shorter side (0.5 = circle or pill)",
+              "maximum" : 0.5,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "right" : {
+              "description" : "Video picture: fraction of the width hidden on the right",
+              "maximum" : 0.95,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "top" : {
+              "description" : "Video picture: fraction of the height hidden at the top (top + bottom at most 0.95)",
+              "maximum" : 0.95,
+              "minimum" : 0,
+              "type" : "number"
+            }
+          },
+          "type" : "object"
+        },
+        "disclosure" : {
+          "description" : "Text: the label that discloses generated pictures under it (image disclose, #550)",
+          "type" : "boolean"
+        },
+        "dur" : {
+          "description" : "Length, in timeline frames",
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "effectSFX" : {
+          "description" : "Audio: the clip whose effect preset placed this sound; applying it again replaces it",
+          "type" : "string"
+        },
+        "effectText" : {
+          "description" : "Text: the clip whose effect preset placed this text; applying it again replaces it",
+          "type" : "string"
+        },
+        "enter" : {
+          "$ref" : "#/$defs/itemTransition"
+        },
+        "exit" : {
+          "$ref" : "#/$defs/itemTransition"
+        },
+        "fadeIn" : {
+          "description" : "Audio fade-in in timeline frames",
+          "maximum" : 2000000000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "fadeOut" : {
+          "description" : "Audio fade-out in timeline frames",
+          "maximum" : 2000000000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "feather" : {
+          "description" : "Video or image picture: its edges fade out over this share of its shorter side (after crop, mosaic and blur)",
+          "maximum" : 0.5,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "fill" : {
+          "description" : "Fill the frame (cropping) instead of fitting inside it; the project's clipFill by default",
+          "type" : "boolean"
+        },
+        "freezeFrame" : {
+          "description" : "Video: source frame held for the whole item",
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "id" : {
+          "description" : "Stable item ID, unique in the project",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "in" : {
+          "description" : "Source in-point, in media frames",
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "keyframes" : {
+          "additionalProperties" : false,
+          "description" : "Animation (video, text and audio layers; audio animates volume only): property → keys sorted by frame, counted from the item's start; values between keys follow each key's ease, and hold before the first and after the last key",
+          "properties" : {
+            "color.contrast" : {
+              "description" : "Like the item's color.contrast; clips and adjustment layers",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 4,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "color.exposure" : {
+              "description" : "Like the item's color.exposure; clips and adjustment layers",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 10,
+                    "minimum" : -10,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "color.lutStrength" : {
+              "description" : "Like the item's color.lutStrength; clips and adjustment layers",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 1,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "color.saturation" : {
+              "description" : "Like the item's color.saturation; clips and adjustment layers",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 4,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "crop.bottom" : {
+              "description" : "Like the item's crop.bottom; video clips and images",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 0.95,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "crop.left" : {
+              "description" : "Like the item's crop.left; video clips and images",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 0.95,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "crop.radius" : {
+              "description" : "Like the item's crop.radius; video clips and images",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 0.5,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "crop.right" : {
+              "description" : "Like the item's crop.right; video clips and images",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 0.95,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "crop.top" : {
+              "description" : "Like the item's crop.top; video clips and images",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 0.95,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "opacity" : {
+              "description" : "Opacity, 0 to 1",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 1,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "pan" : {
+              "description" : "Horizontal offset in output pixels",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 65536,
+                    "minimum" : -65536,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "rotation" : {
+              "description" : "Rotation in degrees, counterclockwise",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 3600,
+                    "minimum" : -3600,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.lineHeight" : {
+              "description" : "Like the item's textStyle.lineHeight; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 4,
+                    "minimum" : 0.5,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.positionX" : {
+              "description" : "Like the item's textStyle.positionX; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 1,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.positionY" : {
+              "description" : "Like the item's textStyle.positionY; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 1,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.size" : {
+              "description" : "Like the item's textStyle.size; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 1,
+                    "minimum" : 0.005,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.strokeWidth" : {
+              "description" : "Like the item's textStyle.strokeWidth; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 50,
+                    "minimum" : 0,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "textStyle.tracking" : {
+              "description" : "Like the item's textStyle.tracking; text",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 2,
+                    "minimum" : -0.5,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "tilt" : {
+              "description" : "Vertical offset in output pixels, up",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 65536,
+                    "minimum" : -65536,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "volume" : {
+              "description" : "Gain in dB (0 = unchanged), like volumeDb; audio and clips with sound",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 24,
+                    "minimum" : -120,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            },
+            "zoom" : {
+              "description" : "Scale over the fitted or filled size (1 = unchanged)",
+              "items" : {
+                "properties" : {
+                  "ease" : {
+                    "description" : "Change to the next key: linear, in, out, inOut, hold or cubic-bezier(x1,y1,x2,y2); default inOut",
+                    "type" : "string"
+                  },
+                  "frame" : {
+                    "type" : "integer"
+                  },
+                  "value" : {
+                    "maximum" : 100,
+                    "minimum" : 0.01,
+                    "type" : "number"
+                  }
+                },
+                "required" : [
+                  "frame",
+                  "value"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 1000,
+              "minItems" : 1,
+              "type" : "array"
+            }
+          },
+          "type" : "object"
+        },
+        "linkedAudio" : {
+          "description" : "Video: ID of its linked sound item",
+          "type" : "string"
+        },
+        "linkedVideo" : {
+          "description" : "Audio: ID of its linked picture item",
+          "type" : "string"
+        },
+        "media" : {
+          "description" : "Media ID (video and audio layers)",
+          "type" : "string"
+        },
+        "muted" : {
+          "description" : "Silences the clip",
+          "type" : "boolean"
+        },
+        "opacity" : {
+          "description" : "Picture opacity",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "pixelate" : {
+          "description" : "Video or image picture: mosaic cell size as a share of the picture's short side, after the crop and before the blur",
+          "maximum" : 0.1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "preservePitch" : {
+          "description" : "Keeps pitch when speed changes (default true)",
+          "type" : "boolean"
+        },
+        "reframePreset" : {
+          "description" : "Framing preset ID, or custom",
+          "type" : "string"
+        },
+        "reversed" : {
+          "description" : "Set by clip reverse: the original media and in-point, restored by reversing again",
+          "properties" : {
+            "in" : {
+              "description" : "Original in-point",
+              "minimum" : 0,
+              "type" : "integer"
+            },
+            "media" : {
+              "description" : "Original media ID",
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "speed" : {
+          "description" : "Source frames per timeline frame; the timeline duration is kept",
+          "maximum" : 100,
+          "minimum" : 0.01,
+          "type" : "number"
+        },
+        "speedCurve" : {
+          "description" : "Speed ramp: points from t 0 (clip start) to t 1 (clip end), speed linear between them; speed then holds the curve's average. Set with setSpeedCurve.",
+          "items" : {
+            "properties" : {
+              "speed" : {
+                "maximum" : 16,
+                "minimum" : 0.1,
+                "type" : "number"
+              },
+              "t" : {
+                "maximum" : 1,
+                "minimum" : 0,
+                "type" : "number"
+              }
+            },
+            "required" : [
+              "t",
+              "speed"
+            ],
+            "type" : "object"
+          },
+          "maxItems" : 16,
+          "minItems" : 2,
+          "type" : "array"
+        },
+        "tag" : {
+          "description" : "Editorial tags",
+          "properties" : {
+            "role" : {
+              "description" : "Speech coverage role",
+              "enum" : [
+                "speech",
+                "broll",
+                "underVO"
+              ],
+              "type" : "string"
+            },
+            "section" : {
+              "description" : "Section name",
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "text" : {
+          "description" : "Caption or title text (text layers)",
+          "type" : "string"
+        },
+        "textPreset" : {
+          "description" : "Text preset (text layers): built-in bold-outline, cinematic-serif, keyword-sticker, place-card, hook-title, chapter-card or any name (the first's defaults); default bold-outline",
+          "maxLength" : 80,
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "textStyle" : {
+          "description" : "Text style overrides",
+          "properties" : {
+            "align" : {
+              "description" : "left, center or right (the preset's by default)",
+              "maxLength" : 6,
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "fill" : {
+              "description" : "Text colour, #RRGGBB (the preset's by default)",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "font" : {
+              "description" : "Font PostScript name (fonts list); missing fonts draw as Helvetica",
+              "maxLength" : 128,
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "highlight" : {
+              "description" : "Word-by-word highlight colour, #RRGGBB (default #FFD400)",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "lineHeight" : {
+              "description" : "Line spacing as a multiple of the font size (default 1.28)",
+              "maximum" : 4,
+              "minimum" : 0.5,
+              "type" : "number"
+            },
+            "lines" : {
+              "description" : "Each line's own look in reading order (two fonts in one title); null keeps the block's",
+              "items" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "fill" : {
+                    "pattern" : "^#[0-9A-Fa-f]{6}$",
+                    "type" : "string"
+                  },
+                  "font" : {
+                    "description" : "Font PostScript name (family and weight)",
+                    "maxLength" : 128,
+                    "minLength" : 1,
+                    "type" : "string"
+                  },
+                  "scale" : {
+                    "description" : "Size × the block's font size",
+                    "maximum" : 5,
+                    "minimum" : 0.2,
+                    "type" : "number"
+                  },
+                  "stroke" : {
+                    "pattern" : "^#[0-9A-Fa-f]{6}$",
+                    "type" : "string"
+                  }
+                },
+                "type" : [
+                  "object",
+                  "null"
+                ]
+              },
+              "maxItems" : 50,
+              "type" : "array"
+            },
+            "positionX" : {
+              "description" : "Horizontal anchor: left edge, centre or right edge by align",
+              "maximum" : 1,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "positionY" : {
+              "description" : "Baseline height from the frame's bottom (fraction): 0.1 low, 0.86 near the top",
+              "maximum" : 1,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "size" : {
+              "description" : "Font size as a fraction of the frame's short side (shrunk to fit 90% of the width)",
+              "maximum" : 1,
+              "minimum" : 0.005,
+              "type" : "number"
+            },
+            "stroke" : {
+              "description" : "Outline colour, #RRGGBB (default black)",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "strokeWidth" : {
+              "description" : "Outline width in points",
+              "maximum" : 50,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "tracking" : {
+              "description" : "Letter spacing as a share of the font size (default 0)",
+              "maximum" : 2,
+              "minimum" : -0.5,
+              "type" : "number"
+            },
+            "uppercase" : {
+              "description" : "Draw the text in capitals",
+              "type" : "boolean"
+            }
+          },
+          "type" : "object"
+        },
+        "transform" : {
+          "description" : "Framing",
+          "properties" : {
+            "pan" : {
+              "description" : "Horizontal offset in output pixels",
+              "maximum" : 65536,
+              "minimum" : -65536,
+              "type" : "number"
+            },
+            "rotation" : {
+              "description" : "Rotation in degrees, counterclockwise, around the frame centre",
+              "maximum" : 3600,
+              "minimum" : -3600,
+              "type" : "number"
+            },
+            "tilt" : {
+              "description" : "Vertical offset in output pixels",
+              "maximum" : 65536,
+              "minimum" : -65536,
+              "type" : "number"
+            },
+            "zoom" : {
+              "description" : "Scale over the fitted or filled size",
+              "maximum" : 100,
+              "minimum" : 0.01,
+              "type" : "number"
+            }
+          },
+          "type" : "object"
+        },
+        "voice" : {
+          "description" : "Voiceover facts set by voice speak and voice check",
+          "properties" : {
+            "language" : {
+              "description" : "Content language",
+              "type" : "string"
+            },
+            "provider" : {
+              "description" : "voice.synthesize provider ID",
+              "type" : "string"
+            },
+            "text" : {
+              "description" : "The text the take was synthesized from",
+              "type" : "string"
+            },
+            "textHash" : {
+              "description" : "Hash of the text the take says (SourceHash.text); review notes when text differs",
+              "type" : "string"
+            },
+            "voice" : {
+              "description" : "provider/voice the rate store uses",
+              "type" : "string"
+            },
+            "words" : {
+              "description" : "Words heard in the take, in its seconds",
+              "items" : {
+                "description" : "A word",
+                "properties" : {
+                  "end" : {
+                    "description" : "Seconds",
+                    "maximum" : 86400,
+                    "minimum" : 0,
+                    "type" : "number"
+                  },
+                  "start" : {
+                    "description" : "Seconds",
+                    "maximum" : 86400,
+                    "minimum" : 0,
+                    "type" : "number"
+                  },
+                  "text" : {
+                    "description" : "Word",
+                    "type" : "string"
+                  }
+                },
+                "required" : [
+                  "text",
+                  "start",
+                  "end"
+                ],
+                "type" : "object"
+              },
+              "maxItems" : 10000,
+              "type" : "array"
+            }
+          },
+          "type" : "object"
+        },
+        "volumeDb" : {
+          "description" : "Clip gain in dB",
+          "maximum" : 24,
+          "minimum" : -120,
+          "type" : "number"
+        },
+        "wordStyle" : {
+          "description" : "Text: show the words as they are spoken: a preset (highlight the current word, karaoke fill, or reveal) or {spoken, upcoming, past} looks of {fill #RRGGBB, opacity 0–1}; timings come from words, or are estimated",
+          "oneOf" : [
+            {
+              "enum" : [
+                "highlight",
+                "karaoke",
+                "reveal"
+              ],
+              "type" : "string"
+            },
+            {
+              "additionalProperties" : {
+                "type" : "object"
+              },
+              "type" : "object"
+            }
+          ]
+        },
+        "words" : {
+          "description" : "Text: timing of each word of the text (split at white space), in frames from the item's start; set by captions generate when the provider returns word timings",
+          "items" : {
+            "properties" : {
+              "at" : {
+                "type" : "integer"
+              },
+              "dur" : {
+                "description" : "Frames",
+                "minimum" : 1,
+                "type" : "integer"
+              },
+              "text" : {
+                "description" : "The word",
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "text",
+              "at",
+              "dur"
+            ],
+            "type" : "object"
+          },
+          "maxItems" : 2000,
+          "type" : "array"
+        }
+      },
+      "required" : [
+        "id",
+        "at",
+        "dur"
+      ],
+      "type" : "object"
+    },
+    "itemTransition" : {
+      "description" : "Video and text items not in a video cut: a transition kind played on the item alone, in its own frame. enter plays the incoming side over the first frames; exit the outgoing side (a wipe or shape runs backwards) over the last; a side that does not hide the item fades it",
+      "properties" : {
+        "duration" : {
+          "description" : "Timeline frames (clamped to the item)",
+          "maximum" : 100000,
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "easing" : {
+          "description" : "How the tween runs: linear, in, out, inOut or cubic-bezier(x1,y1,x2,y2); linear when absent",
+          "type" : "string"
+        },
+        "kind" : {
+          "description" : "Transition kind, as on a transition, or any name with motion",
+          "pattern" : "^[a-z][a-z0-9-]{0,63}$",
+          "type" : "string"
+        },
+        "motion" : {
+          "description" : "The tween as data, as on a transition (enter reads incoming, exit outgoing)",
+          "type" : "object"
+        }
+      },
+      "required" : [
+        "kind",
+        "duration"
+      ],
+      "type" : "object"
+    },
+    "lut" : {
+      "description" : "A .cube file in the project luts folder",
+      "properties" : {
+        "id" : {
+          "description" : "Stable ID",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "libraryItem" : {
+          "description" : "The library look (scope:id) it was copied from",
+          "type" : "string"
+        },
+        "name" : {
+          "description" : "Display name",
+          "maxLength" : 120,
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "path" : {
+          "description" : "luts/<file>.cube",
+          "pattern" : "^luts/.+\\.cube$",
+          "type" : "string"
+        },
+        "sha256" : {
+          "description" : "SHA-256 of the library look's .cube it was copied from",
+          "type" : "string"
+        },
+        "size" : {
+          "description" : "Cube dimension",
+          "maximum" : 64,
+          "minimum" : 2,
+          "type" : "integer"
+        }
+      },
+      "required" : [
+        "id",
+        "name",
+        "path",
+        "size"
+      ],
+      "type" : "object"
+    },
+    "marker" : {
+      "description" : "A marker; kind section starts a named section",
+      "properties" : {
+        "at" : {
+          "description" : "Timeline frame",
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "id" : {
+          "description" : "Stable ID",
+          "type" : "string"
+        },
+        "kind" : {
+          "description" : "Marker kind",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "label" : {
+          "description" : "Label",
+          "maxLength" : 120,
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "at",
+        "kind",
+        "label"
+      ],
+      "type" : "object"
+    },
+    "media" : {
+      "description" : "A source file, referenced by path, never copied",
+      "properties" : {
+        "alpha" : {
+          "description" : "A movie with an alpha channel (a video sticker); previewed without a proxy",
+          "type" : "boolean"
+        },
+        "data" : {
+          "description" : "The agent's own fields (P2-H10: takes, verdicts, reasons); free JSON, set by setMediaData",
+          "type" : "object"
+        },
+        "description" : {
+          "$ref" : "#/$defs/mediaDescription"
+        },
+        "fps" : {
+          "$ref" : "#/$defs/rational"
+        },
+        "frames" : {
+          "description" : "Length in source frames",
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "generated" : {
+          "description" : "Made by an image.generate provider (#550): review asks for the disclosure label",
+          "type" : "boolean"
+        },
+        "hasAudio" : {
+          "description" : "Whether the file has sound",
+          "type" : "boolean"
+        },
+        "height" : {
+          "description" : "Pixels",
+          "maximum" : 16384,
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "id" : {
+          "description" : "Stable media ID",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "kind" : {
+          "description" : "Media kind; an image is held for as long as its items last (frames is the limit)",
+          "enum" : [
+            "video",
+            "audio",
+            "image"
+          ],
+          "type" : "string"
+        },
+        "label" : {
+          "description" : "The name shown instead of the file's (a library item's name)",
+          "type" : "string"
+        },
+        "libraryItem" : {
+          "description" : "The library item (scope:id) it was copied from",
+          "type" : "string"
+        },
+        "license" : {
+          "description" : "Licence (P2-H8): free text, or an object with an open id; facts are the item's own",
+          "oneOf" : [
+            {
+              "maxLength" : 1000,
+              "type" : "string"
+            },
+            {
+              "description" : "Licence",
+              "properties" : {
+                "attribution" : {
+                  "description" : "The credit line it asks for",
+                  "type" : "string"
+                },
+                "attributionRequired" : {
+                  "description" : "Credit required",
+                  "type" : "boolean"
+                },
+                "commercial" : {
+                  "description" : "Commercial use allowed",
+                  "type" : "boolean"
+                },
+                "id" : {
+                  "description" : "Open licence id, such as cc-by, royalty-free, own",
+                  "type" : "string"
+                },
+                "redistribute" : {
+                  "description" : "Redistribution allowed",
+                  "type" : "boolean"
+                },
+                "shareAlike" : {
+                  "description" : "Share-alike",
+                  "type" : "boolean"
+                },
+                "text" : {
+                  "description" : "As written",
+                  "type" : "string"
+                },
+                "url" : {
+                  "description" : "Licence or source page",
+                  "type" : "string"
+                },
+                "version" : {
+                  "description" : "Licence version, such as 4.0",
+                  "type" : "string"
+                }
+              },
+              "type" : "object"
+            }
+          ]
+        },
+        "path" : {
+          "description" : "Relative to the project folder, or @assets/… in the workspace",
+          "minLength" : 1,
+          "pattern" : "^[^/]",
+          "type" : "string"
+        },
+        "provenance" : {
+          "description" : "Where the file came from (P2-H8)",
+          "properties" : {
+            "author" : {
+              "description" : "Who made it",
+              "type" : "string"
+            },
+            "charged" : {
+              "description" : "US dollars the provider reported charging",
+              "maximum" : 1000000,
+              "minimum" : 0,
+              "type" : "number"
+            },
+            "libraryItem" : {
+              "description" : "Library item (scope:id) it was placed from",
+              "type" : "string"
+            },
+            "model" : {
+              "description" : "Model that generated it",
+              "type" : "string"
+            },
+            "origin" : {
+              "description" : "Origin",
+              "enum" : [
+                "stock",
+                "web",
+                "ai",
+                "own",
+                "built-in"
+              ],
+              "type" : "string"
+            },
+            "parentMedia" : {
+              "description" : "Media it was derived from",
+              "type" : "string"
+            },
+            "prompt" : {
+              "description" : "Prompt it was generated from",
+              "type" : "string"
+            },
+            "provider" : {
+              "description" : "Provider that made or found it",
+              "type" : "string"
+            },
+            "requestId" : {
+              "description" : "Stable request ID (P2-G4)",
+              "type" : "string"
+            },
+            "sourceUrl" : {
+              "description" : "Where it was found",
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "width" : {
+          "description" : "Pixels",
+          "maximum" : 16384,
+          "minimum" : 1,
+          "type" : "integer"
+        }
+      },
+      "required" : [
+        "id",
+        "path",
+        "fps",
+        "frames"
+      ],
+      "type" : "object"
+    },
+    "mediaDescription" : {
+      "description" : "Shot facts written by an agent or the user (media.describe); open labels, other fields kept",
+      "properties" : {
+        "describedAt" : {
+          "description" : "ISO 8601 time",
+          "type" : "string"
+        },
+        "describedBy" : {
+          "description" : "Author that wrote it",
+          "type" : "string"
+        },
+        "shots" : {
+          "description" : "Shots in source order; they do not overlap",
+          "items" : {
+            "$ref" : "#/$defs/describedShot"
+          },
+          "maxItems" : 5000,
+          "minItems" : 1,
+          "type" : "array"
+        }
+      },
+      "required" : [
+        "shots"
+      ],
+      "type" : "object"
+    },
+    "rational" : {
+      "description" : "[numerator, denominator]",
+      "maxItems" : 2,
+      "minItems" : 2,
+      "prefixItems" : [
+        {
+          "description" : "Numerator",
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        {
+          "description" : "Denominator",
+          "minimum" : 1,
+          "type" : "integer"
+        }
+      ],
+      "type" : "array"
+    },
+    "track" : {
+      "allOf" : [
+        {
+          "if" : {
+            "properties" : {
+              "kind" : {
+                "enum" : [
+                  "video",
+                  "audio"
+                ]
+              }
+            }
+          },
+          "then" : {
+            "properties" : {
+              "items" : {
+                "items" : {
+                  "required" : [
+                    "media"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if" : {
+            "properties" : {
+              "kind" : {
+                "enum" : [
+                  "text"
+                ]
+              }
+            }
+          },
+          "then" : {
+            "properties" : {
+              "items" : {
+                "items" : {
+                  "required" : [
+                    "text"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if" : {
+            "properties" : {
+              "kind" : {
+                "enum" : [
+                  "adjustment"
+                ]
+              }
+            }
+          },
+          "then" : {
+            "properties" : {
+              "items" : {
+                "items" : {
+                  "not" : {
+                    "anyOf" : [
+                      {
+                        "required" : [
+                          "media"
+                        ]
+                      },
+                      {
+                        "required" : [
+                          "text"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description" : "A layer. Items never overlap on one layer.",
+      "properties" : {
+        "duckAttackFrames" : {
+          "description" : "Music layers: ramp in",
+          "maximum" : 10000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "duckMinGapFrames" : {
+          "description" : "Music layers: shorter speech gaps keep it down (2.5 s)",
+          "maximum" : 10000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "duckReleaseFrames" : {
+          "description" : "Music layers: ramp out",
+          "maximum" : 10000,
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "duckUnderSpeechDb" : {
+          "description" : "Music layers: level under speech",
+          "maximum" : 0,
+          "minimum" : -60,
+          "type" : "number"
+        },
+        "duckingEnabled" : {
+          "description" : "Music layers: suspend ducking without losing the level",
+          "type" : "boolean"
+        },
+        "hidden" : {
+          "description" : "Visual layers only: left out of preview and export",
+          "type" : "boolean"
+        },
+        "id" : {
+          "description" : "Stable layer ID",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "items" : {
+          "description" : "Items, in any order",
+          "items" : {
+            "$ref" : "#/$defs/item"
+          },
+          "type" : "array"
+        },
+        "kind" : {
+          "description" : "Layer kind",
+          "enum" : [
+            "video",
+            "adjustment",
+            "text",
+            "audio"
+          ],
+          "type" : "string"
+        },
+        "locked" : {
+          "description" : "Items cannot change until unlocked",
+          "type" : "boolean"
+        },
+        "magnetic" : {
+          "description" : "Inserts append after the last item; drags reorder and compact",
+          "type" : "boolean"
+        },
+        "muted" : {
+          "description" : "Audio layers only: silent, and its speech stops ducking music",
+          "type" : "boolean"
+        },
+        "name" : {
+          "description" : "Display name",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "role" : {
+          "description" : "Semantic role; any nonempty value, these are assigned by VibeEdit",
+          "examples" : [
+            "main",
+            "overlay",
+            "adjustment",
+            "captions",
+            "titles",
+            "dialogue",
+            "voiceover",
+            "music",
+            "sfx"
+          ],
+          "minLength" : 1,
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "id",
+        "kind",
+        "role",
+        "name",
+        "items"
+      ],
+      "type" : "object"
+    },
+    "transition" : {
+      "description" : "A transition between two adjacent clips on a video layer",
+      "properties" : {
+        "duration" : {
+          "description" : "Timeline frames",
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "easing" : {
+          "description" : "How the tween runs: linear, in, out, inOut or cubic-bezier(x1,y1,x2,y2); linear when absent",
+          "type" : "string"
+        },
+        "from" : {
+          "description" : "Outgoing item ID",
+          "type" : "string"
+        },
+        "id" : {
+          "description" : "Stable ID",
+          "minLength" : 1,
+          "type" : "string"
+        },
+        "kind" : {
+          "description" : "Transition kind: dissolve, blink, flash, dip-black, double-exposure, whip, whip-right, whip-up, whip-down, wipe, wipe-right, wipe-up, wipe-down, barn-door, shutter, slide, slide-up, iris, diamond, zoom, crash-zoom, crash-out, spin, roll, roll-right, swing, arc, arc-right, infinite-zoom, infinite-out, screen-in, screen-out, blur, seamless-zoom, glitch, halftone, flicker, color-shift, kaleidoscope, or any name with motion",
+          "pattern" : "^[a-z][a-z0-9-]{0,63}$",
+          "type" : "string"
+        },
+        "motion" : {
+          "description" : "The tween as data: outgoing and incoming {property: [values]} over the tween; properties blur, blurX, blurY, diamond, exposure, halftone, hue, iris, kaleidoscope, opacity, panX, panY, reveal, revealCenter, revealFromBottom, revealFromRight, revealFromTop, rgbSplit, rotation, saturation, scaleX, swing, zoom, zoomBlur",
+          "type" : "object"
+        },
+        "to" : {
+          "description" : "Incoming item ID",
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "id",
+        "kind",
+        "from",
+        "to",
+        "duration"
+      ],
+      "type" : "object"
+    }
+  },
+  "$id" : "https://vibeedit.app/schema/vibeedit.project/1.json",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "description" : "A VibeEdit project (project.vibeedit.json).",
+  "properties" : {
+    "audio" : {
+      "$ref" : "#/$defs/audio"
+    },
+    "beatGrid" : {
+      "description" : "Beat grid of one audio media",
+      "properties" : {
+        "bpm" : {
+          "description" : "Beats per minute",
+          "maximum" : 400,
+          "minimum" : 20,
+          "type" : "number"
+        },
+        "frames" : {
+          "description" : "Sorted unique timeline frames",
+          "items" : {
+            "description" : "Frame",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "maxItems" : 100000,
+          "type" : "array"
+        },
+        "media" : {
+          "description" : "Media ID",
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "media",
+        "bpm",
+        "frames"
+      ],
+      "type" : "object"
+    },
+    "brand" : {
+      "description" : "The brand kit in use (#453), set by library apply of a brand item: recipes, graphics and voice read it; text items with brandRoles take its colours and fonts",
+      "properties" : {
+        "disclosure" : {
+          "description" : "Disclosure label shown on generated or illustrative content",
+          "maxLength" : 200,
+          "type" : "string"
+        },
+        "fonts" : {
+          "description" : "Font names by role",
+          "properties" : {
+            "body" : {
+              "description" : "Body font",
+              "maxLength" : 128,
+              "type" : "string"
+            },
+            "heading" : {
+              "description" : "Heading font",
+              "maxLength" : 128,
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "illustration" : {
+          "description" : "Style lock of image generate (#550): every call reuses it; the project's wins over the brand's",
+          "properties" : {
+            "disclosure" : {
+              "description" : "Label shown over generated pictures (the brand's disclosure otherwise)",
+              "maxLength" : 200,
+              "type" : "string"
+            },
+            "references" : {
+              "description" : "Reference pictures (a character, a style sample): project-relative or absolute paths, or sticker library ids",
+              "items" : {
+                "description" : "Path or library id",
+                "maxLength" : 1024,
+                "type" : "string"
+              },
+              "maxItems" : 8,
+              "type" : "array"
+            },
+            "seed" : {
+              "description" : "Seed, for providers that take one",
+              "minimum" : 0,
+              "type" : "integer"
+            },
+            "style" : {
+              "description" : "Style prompt sent with every picture",
+              "maxLength" : 4000,
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "library" : {
+          "description" : "The brand library item (scope:id) it came from",
+          "type" : "string"
+        },
+        "logo" : {
+          "description" : "Sticker library id of the logo",
+          "type" : "string"
+        },
+        "mascot" : {
+          "additionalProperties" : {
+            "type" : "string"
+          },
+          "description" : "Pose name → sticker library id",
+          "type" : "object"
+        },
+        "name" : {
+          "description" : "The kit's name",
+          "type" : "string"
+        },
+        "palette" : {
+          "description" : "Colours by role",
+          "properties" : {
+            "accent" : {
+              "description" : "#RRGGBB",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "background" : {
+              "description" : "#RRGGBB",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "secondary" : {
+              "description" : "#RRGGBB",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            },
+            "text" : {
+              "description" : "#RRGGBB",
+              "pattern" : "^#[0-9A-Fa-f]{6}$",
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        },
+        "voice" : {
+          "description" : "Default voice",
+          "properties" : {
+            "provider" : {
+              "description" : "voice.synthesize provider ID",
+              "type" : "string"
+            },
+            "voice" : {
+              "description" : "The provider's voice ID",
+              "type" : "string"
+            }
+          },
+          "type" : "object"
+        }
+      },
+      "type" : "object"
+    },
+    "brief" : {
+      "description" : "What the edit is for (P1-D1); free JSON",
+      "type" : "object"
+    },
+    "canvasFromFirstClip" : {
+      "description" : "The first video or image clip placed on the timeline sets the canvas shape (portrait, landscape or square, keeping the short side). Cleared by any canvas change, so a canvas set on purpose stays; absent in projects made before it existed",
+      "type" : "boolean"
+    },
+    "clipFill" : {
+      "description" : "Clips fill the frame, cropping what does not fit, instead of fitting inside it. New projects fit (false); a project without it fills, as projects did before it existed",
+      "type" : "boolean"
+    },
+    "contentLanguage" : {
+      "description" : "BCP 47 language of speech and captions",
+      "pattern" : "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$",
+      "type" : "string"
+    },
+    "format" : {
+      "description" : "Output format",
+      "properties" : {
+        "fps" : {
+          "$ref" : "#/$defs/rational"
+        },
+        "height" : {
+          "description" : "Pixels",
+          "maximum" : 16384,
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "sampleRate" : {
+          "description" : "Hz",
+          "minimum" : 1,
+          "type" : "integer"
+        },
+        "width" : {
+          "description" : "Pixels",
+          "maximum" : 16384,
+          "minimum" : 1,
+          "type" : "integer"
+        }
+      },
+      "required" : [
+        "width",
+        "height",
+        "fps"
+      ],
+      "type" : "object"
+    },
+    "id" : {
+      "description" : "Stable project ID",
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "illustration" : {
+      "description" : "Style lock of image generate (#550): every call reuses it; the project's wins over the brand's",
+      "properties" : {
+        "disclosure" : {
+          "description" : "Label shown over generated pictures (the brand's disclosure otherwise)",
+          "maxLength" : 200,
+          "type" : "string"
+        },
+        "references" : {
+          "description" : "Reference pictures (a character, a style sample): project-relative or absolute paths, or sticker library ids",
+          "items" : {
+            "description" : "Path or library id",
+            "maxLength" : 1024,
+            "type" : "string"
+          },
+          "maxItems" : 8,
+          "type" : "array"
+        },
+        "seed" : {
+          "description" : "Seed, for providers that take one",
+          "minimum" : 0,
+          "type" : "integer"
+        },
+        "style" : {
+          "description" : "Style prompt sent with every picture",
+          "maxLength" : 4000,
+          "type" : "string"
+        }
+      },
+      "type" : "object"
+    },
+    "luts" : {
+      "description" : "Project .cube LUT catalog",
+      "items" : {
+        "$ref" : "#/$defs/lut"
+      },
+      "maxItems" : 1000,
+      "type" : "array"
+    },
+    "markers" : {
+      "description" : "Timeline markers",
+      "items" : {
+        "$ref" : "#/$defs/marker"
+      },
+      "maxItems" : 10000,
+      "type" : "array"
+    },
+    "media" : {
+      "description" : "Source files",
+      "items" : {
+        "$ref" : "#/$defs/media"
+      },
+      "type" : "array"
+    },
+    "name" : {
+      "description" : "Display name",
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "output" : {
+      "description" : "What the project is made for (#441)",
+      "properties" : {
+        "captions" : {
+          "additionalProperties" : {
+            "description" : "Captions of one output",
+            "properties" : {
+              "format" : {
+                "description" : "Sidecar format",
+                "enum" : [
+                  "srt",
+                  "vtt"
+                ],
+                "type" : "string"
+              },
+              "mode" : {
+                "description" : "Burned in, a sidecar file, both or none",
+                "enum" : [
+                  "burn",
+                  "sidecar",
+                  "both",
+                  "none"
+                ],
+                "type" : "string"
+              },
+              "track" : {
+                "description" : "Caption layer ID; default the first caption layer",
+                "type" : "string"
+              }
+            },
+            "type" : "object"
+          },
+          "description" : "Export preset → how that output carries captions (P1-F4)",
+          "type" : "object"
+        },
+        "presets" : {
+          "description" : "Export presets, first one primary: review checks every output's platform and the Export sheet starts with the first",
+          "items" : {
+            "description" : "Export preset",
+            "enum" : [
+              "tiktok",
+              "reels",
+              "shorts",
+              "feed-4x5",
+              "square",
+              "portrait-3x4",
+              "youtube-1080",
+              "youtube-4k",
+              "quick-draft",
+              "prores"
+            ],
+            "type" : "string"
+          },
+          "maxItems" : 8,
+          "type" : "array"
+        },
+        "targets" : {
+          "additionalProperties" : {
+            "description" : "Loudness target",
+            "properties" : {
+              "integratedLUFS" : {
+                "description" : "LUFS",
+                "maximum" : -5,
+                "minimum" : -30,
+                "type" : "number"
+              },
+              "truePeakDbTP" : {
+                "description" : "dBTP",
+                "maximum" : 0,
+                "minimum" : -12,
+                "type" : "number"
+              }
+            },
+            "type" : "object"
+          },
+          "description" : "Export preset → {integratedLUFS, truePeakDbTP}: that export's loudness target instead of the platform's (P0-K2)",
+          "type" : "object"
+        }
+      },
+      "type" : "object"
+    },
+    "plan" : {
+      "description" : "How the agent means to make it (P1-D2); free JSON",
+      "type" : "object"
+    },
+    "providers" : {
+      "additionalProperties" : {
+        "type" : "string"
+      },
+      "description" : "Preferred provider ID per capability",
+      "type" : "object"
+    },
+    "rev" : {
+      "description" : "Revision, +1 on every applied edit",
+      "minimum" : 0,
+      "type" : "integer"
+    },
+    "review" : {
+      "description" : "Review profile (#466): every editorial limit is the project's (a recipe skill sets them); core has none",
+      "properties" : {
+        "accepted" : {
+          "additionalProperties" : {
+            "description" : "Accepted issue",
+            "properties" : {
+              "author" : {
+                "description" : "Author",
+                "type" : "string"
+              },
+              "reason" : {
+                "description" : "Why it stays",
+                "type" : "string"
+              },
+              "rev" : {
+                "description" : "Revision",
+                "minimum" : 0,
+                "type" : "integer"
+              }
+            },
+            "required" : [
+              "reason"
+            ],
+            "type" : "object"
+          },
+          "description" : "Issue ID → {reason, rev, author, severity}: issues kept on purpose (P1-E2); an error only when no fix exists (counted as acceptedErrors)",
+          "type" : "object"
+        },
+        "blackMinSeconds" : {
+          "description" : "Black picture at least this long is flagged; unset: no check, or the measured value as info",
+          "maximum" : 600,
+          "minimum" : 0.01,
+          "type" : "number"
+        },
+        "blockExport" : {
+          "description" : "Issue ID prefixes (such as font, glyph, cut-in-word) that stop an export while open (P1-E1)",
+          "items" : {
+            "description" : "Prefix",
+            "type" : "string"
+          },
+          "type" : "array"
+        },
+        "captionLineChars" : {
+          "description" : "Caption lines longer than this many characters are flagged; unset: no check, or the measured value as info",
+          "maximum" : 500,
+          "minimum" : 1,
+          "type" : "number"
+        },
+        "captionMaxLines" : {
+          "description" : "Captions with more lines than this are flagged; unset: no check, or the measured value as info",
+          "maximum" : 20,
+          "minimum" : 1,
+          "type" : "number"
+        },
+        "credits" : {
+          "description" : "Report credit lines, AI disclosure and licence flags in review and export results (P2-H9); off by default",
+          "type" : "boolean"
+        },
+        "disabledChecks" : {
+          "description" : "Plugin or provider IDs whose review checks do not run",
+          "items" : {
+            "description" : "ID",
+            "type" : "string"
+          },
+          "type" : "array"
+        },
+        "hookSeconds" : {
+          "description" : "Text or speech must start within this many seconds; unset: no check, or the measured value as info",
+          "maximum" : 60,
+          "minimum" : 0.1,
+          "type" : "number"
+        },
+        "jumpCutChange" : {
+          "description" : "Picture change across a hard cut under which it counts as a jump cut (0–1); unset: no check, or the measured value as info",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "loudnessToleranceLU" : {
+          "description" : "Loudness further than this from the export's target is flagged; unset: no check, or the measured value as info",
+          "maximum" : 20,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "maxFaceOverlap" : {
+          "description" : "maxFaceOverlap; unset: no check, or the measured value as info",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "maxMusicGapSeconds" : {
+          "description" : "A music bed stopping for longer than this is flagged; unset: no check, or the measured value as info",
+          "maximum" : 600,
+          "minimum" : 0.1,
+          "type" : "number"
+        },
+        "maxShotSeconds" : {
+          "description" : "Shots on Main longer than this are flagged (with stillMotion, only those that barely move); unset: no check, or the measured value as info",
+          "maximum" : 3600,
+          "minimum" : 0.1,
+          "type" : "number"
+        },
+        "maxSilenceSeconds" : {
+          "description" : "Dead air longer than this is flagged; unset: no check, or the measured value as info",
+          "maximum" : 600,
+          "minimum" : 0.1,
+          "type" : "number"
+        },
+        "maxStillSeconds" : {
+          "description" : "Frozen picture longer than this is flagged; unset: no check, or the measured value as info",
+          "maximum" : 3600,
+          "minimum" : 0.1,
+          "type" : "number"
+        },
+        "minShotSeconds" : {
+          "description" : "Shots on Main shorter than this are flagged; unset: no check, or the measured value as info",
+          "maximum" : 60,
+          "minimum" : 0.01,
+          "type" : "number"
+        },
+        "minSpeechCoverage" : {
+          "description" : "Tagged speech covering less than this share of the edit is flagged; unset: no check, or the measured value as info",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "minTextContrast" : {
+          "description" : "minTextContrast; unset: no check, or the measured value as info",
+          "maximum" : 21,
+          "minimum" : 1,
+          "type" : "number"
+        },
+        "minTextSize" : {
+          "description" : "Text smaller than this share of the frame's short side is flagged; unset: no check, or the measured value as info",
+          "maximum" : 0.5,
+          "minimum" : 0.001,
+          "type" : "number"
+        },
+        "platform" : {
+          "description" : "Overrides of platform facts when an app changes its interface (#469)",
+          "properties" : {
+            "maxSeconds" : {
+              "description" : "Longest upload",
+              "maximum" : 86400,
+              "minimum" : 1,
+              "type" : "number"
+            },
+            "safeArea" : {
+              "description" : "Covered zones as fractions of the frame",
+              "properties" : {
+                "bottom" : {
+                  "description" : "Fraction",
+                  "maximum" : 1,
+                  "minimum" : 0,
+                  "type" : "number"
+                },
+                "margin" : {
+                  "description" : "Fraction",
+                  "maximum" : 1,
+                  "minimum" : 0,
+                  "type" : "number"
+                },
+                "sideHeight" : {
+                  "description" : "Fraction",
+                  "maximum" : 1,
+                  "minimum" : 0,
+                  "type" : "number"
+                },
+                "sideWidth" : {
+                  "description" : "Fraction",
+                  "maximum" : 1,
+                  "minimum" : 0,
+                  "type" : "number"
+                },
+                "top" : {
+                  "description" : "Fraction",
+                  "maximum" : 1,
+                  "minimum" : 0,
+                  "type" : "number"
+                }
+              },
+              "type" : "object"
+            }
+          },
+          "type" : "object"
+        },
+        "severities" : {
+          "additionalProperties" : {
+            "oneOf" : [
+              {
+                "description" : "Severity",
+                "enum" : [
+                  "error",
+                  "warning",
+                  "info",
+                  "off"
+                ],
+                "type" : "string"
+              },
+              {
+                "description" : "Severity with the reason for the change",
+                "properties" : {
+                  "reason" : {
+                    "description" : "Why this check's severity differs for this project",
+                    "type" : "string"
+                  },
+                  "severity" : {
+                    "description" : "Severity",
+                    "enum" : [
+                      "error",
+                      "warning",
+                      "info",
+                      "off"
+                    ],
+                    "type" : "string"
+                  }
+                },
+                "required" : [
+                  "severity"
+                ],
+                "type" : "object"
+              }
+            ]
+          },
+          "description" : "Check ID (or prefix before a hyphen, such as safe or shot-long; or a plugin provider ID ending in ':') → error, warning, info or off, or {severity, reason}; review shows the reason as severityReason",
+          "type" : "object"
+        },
+        "stillMotion" : {
+          "description" : "Mean picture change under which a long shot counts as still (0–1); unset: no check, or the measured value as info",
+          "maximum" : 1,
+          "minimum" : 0,
+          "type" : "number"
+        },
+        "voiceoverMarginSeconds" : {
+          "description" : "Voiceover closer than this to tagged speech is flagged; unset: no check, or the measured value as info",
+          "maximum" : 10,
+          "minimum" : 0,
+          "type" : "number"
+        }
+      },
+      "type" : "object"
+    },
+    "schema" : {
+      "const" : "vibeedit.project/1"
+    },
+    "tracks" : {
+      "description" : "Layers: visual kinds back to front, then audio",
+      "items" : {
+        "$ref" : "#/$defs/track"
+      },
+      "maxItems" : 256,
+      "minItems" : 1,
+      "type" : "array"
+    },
+    "transitions" : {
+      "description" : "Transitions on adjacent video cuts",
+      "items" : {
+        "$ref" : "#/$defs/transition"
+      },
+      "maxItems" : 10000,
+      "type" : "array"
+    }
+  },
+  "required" : [
+    "schema",
+    "id",
+    "name",
+    "rev",
+    "format",
+    "tracks"
+  ],
+  "title" : "VibeEdit project",
+  "type" : "object"
+}

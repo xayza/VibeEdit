@@ -1,0 +1,1208 @@
+# Automation: CLI and MCP
+
+VibeEdit can be driven by agents, scripts and the built-in terminal dock. This guide covers how they connect,
+and every command they can run. The design rationale is in
+[05 — Agent integration](../specs/05-agent-integration.md).
+
+## Overview
+
+The app runs one local JSON-RPC server on a Unix socket. Two thin clients talk to it:
+
+- `vibeedit`, a command-line tool bundled with the app.
+- `vibeedit-mcp`, a stdio MCP server built with the official MCP Swift SDK. It exposes each command as a
+  tool named `vibeedit_<group>_<command>` (for example `vibeedit_timeline_get`).
+  Every result is the tool's text: string results as they are, everything else as compact JSON. There is no
+  `structuredContent` (the SDK re-decodes it slowly, and compact text is also fewer tokens for the agent).
+  While VibeEdit runs, the tool list also has one `vibeedit_action_<action id>` tool per installed plugin action,
+  with the action's parameters as its input schema; calling it is `plugins run <action> --params …`. At most 40
+  are listed, so hundreds of plugins do not crowd out the built-in tools: actions available with the current
+  selection come first, then the most recently run. Every other action is still found with
+  `plugins actions <text>` and run with `vibeedit_plugins_run`, and its `vibeedit_action_…` name still works.
+
+Both clients forward to the same handlers the UI uses. Edits go through the validated `EditOperation` and
+history path, so permissions, revision checks, audit records and undo behave the same whether a change comes
+from a click, the CLI or MCP.
+
+### Socket protocol
+
+- The socket is `~/Library/Application Support/VibeEdit/automation.sock`; set `VIBEEDIT_SOCKET` to use
+  another path. The folder is `0700` and the socket `0600`. Run one VibeEdit instance per socket.
+- Each connection carries one newline-delimited JSON-RPC 2.0 request with `id`, `method`, `params` and an
+  optional `token`. Messages are limited to 8 MiB. The client waits 30 s for an answer (longer for calls that
+  wait on their own work: `jobs.wait`, `review.run --measure`, `review.verify`, `export.start --wait`,
+  `project.create --import`, `color.measure`, `agent.ask`); a late answer is reported as a retryable failure.
+- Metadata-only audit records go to `~/Library/Application Support/VibeEdit/audit.jsonl`. Request contents and
+  credentials are never recorded.
+- This is a local automation service, not a security boundary against other software already running as the
+  same user.
+
+Common error codes:
+
+| Code | Meaning |
+|---|---|
+| `-32001` | The command needs a live session token |
+| `-32002` | Stale revision: re-read the timeline and retry |
+| `-32003` | Busy: a dialog is open, another approval is pending, or the action is not available now |
+| `-32004` | The edit is outside the attached scope, and the user rejected it or the scope guard blocks it |
+| `-32601` | Unknown command |
+| `-32602` | Invalid or missing parameters, or a rejected edit |
+
+Every error's `data` also carries `category`, `retryable` and, where a factual next step exists, `remediation`
+(`{command?, hint}`); fields a command sets itself (such as a stale revision's `expected` and `actual`) stay.
+Categories: `malformed`, `invalid_request`, `unknown_command`, `invalid_arguments`, `permission`,
+`stale_revision`, `out_of_scope`, `unavailable`, `capability_missing` (no plugin provider can serve; `data.reason`
+is `missing`, `not_configured` or `unhealthy` and `data.providers` lists each provider's state, as `capabilities get`
+does), `unsupported_media` (this Mac cannot
+decode a media's video; `data.media` lists it with its codec and timeline frames), `internal`, and for `-32003`:
+`busy_dialog` (answer or close the open dialog: `ui dialog`), `busy_approval` (an earlier request waits for the
+user), `busy_running` (the same work is running), `file_conflict`, `not_available_now`, and the workflow guards for
+agents (never the user): `audit_missing` (a final export without a passing draft audit of the current timeline
+or the user's G5 approval, or G2 without a strategy audit), `recipe_unread` (G2 before the plan's recipe skill
+was read) and `graphics_draft` (a final export over graphics a plugin rendered as drafts, `data.graphics.draft`;
+`data.drafts` lists each media, its name and the items that use it) and `stage_pending` (review done, G5 or a
+final export while a stage the plan marks required before review is pending or started; `data.stages`), each with `remediation.command` such as
+`review packet --point draft` or `bin/graphic plan --final`. `context get` ›
+`recentFailures` lists your session's failures of the last 15 minutes and how many in a row repeat.
+
+## Terminal dock
+
+Open a terminal with **Agent → + → Claude terminal / Codex terminal / Shell terminal**. Each tab is a real
+SwiftTerm terminal. Claude and Codex use your installed CLI and its existing login.
+
+- **Workspace.** Choose a workspace before opening a tab. Claude runs in the workspace folder. Codex runs in
+  `~/Library/Application Support/VibeEdit/agent-workspace`; the project path and project knowledge reach it
+  through the session context.
+- **Knowledge.** The book button opens the **Knowledge** window, which can stay open while agents work and shows
+  their changes as they happen. Its sections are Lessons, Preferences, Project facts, Notes (the memos) and Skills;
+  `ui view --knowledge-section <section>` switches between them. The project memo and project skills live in the
+  project folder (`.vibeedit/agent-memory.md`, `.vibeedit/skills`, linked into the project's `.claude/skills` and
+  `.agents/skills`), never in the workspace or home folder, so each project keeps its own. **Notes for every
+  project** (`~/Library/Application Support/VibeEdit/Knowledge/agent-memory.md`) hold your taste and rules that
+  every project reads. Without a saved project only those notes are available. A memo that older versions kept in
+  the workspace or home folder is offered once: move it to the notes for every project (`knowledge migrate`) or to
+  this project (`knowledge migrate --to project`). Agents write the notes with `knowledge memo FILE --scope user`,
+  which asks for your approval. A memo with text is offered once for a split into lessons, preferences and facts:
+  **Ask the agent to split it** puts the request in the open agent's input, and the agent runs `knowledge
+  split-memo ENTRIES.json [--scope user]` (`{"lessons": [{"title", "symptom", "cause", "fix", "tags"}], "prefs":
+  [{"key", "value"}], "facts": [{"key", "value"}]}`). What it finds waits in the **Inbox**; the memo stays as notes.
+  **Keep as notes** (`knowledge split-memo --keep`) stops the offer.
+- **Lessons, preferences and facts.** Next to the memos, agents keep structured knowledge as JSON files in the
+  same two places (`.vibeedit/knowledge/` in the project, `Knowledge/` for every project):
+  - **Lessons** (`knowledge lessons`, `add-lesson`, `update-lesson`, `remove-lesson`): a title, the symptom, its
+    cause, what to do next time, evidence and tags. Each has a status: `active` lessons are followed, `proposed`
+    ones wait for your review, `disabled` ones are kept for the record. The source records which agent wrote it,
+    in which session and when. Each lesson also counts its sightings: `occurrences` (1 when recorded),
+    `lastSeen` and `sources` (the projects it was seen in); `update-lesson ID --seen` counts one more, without
+    approval even for a lesson for every project, since it changes no rule.
+  - **Preferences** (`knowledge prefs`, `set-pref`): your taste as key/value pairs, for every project by default. A
+    value set for one project wins over the one for every project. `confirmedBy` says whether you said or approved
+    it (`user`) or an agent inferred it (`inferred`, the default for agents; `set-pref --confirmed-by user` when you
+    said it in the chat). Approving an agent's proposal makes it `user`.
+  - **Facts** (`knowledge facts`, `set-fact`): people, places, footage notes and what was approved, for this project,
+    with optional `evidence` {`source` (URL, file, frame, user), `measure` (the command or result path), `n` (sample
+    size), `status` measured, estimated or user}: `set-fact KEY VALUE --status measured --measure "review measure
+    shots.median" --n 48`. Plans and skills refer to a fact by its key.
+  - **Proposals** (`knowledge proposals`, `approve`, `reject`): what waits in the Knowledge window's **Inbox**. A
+    lesson an agent records for every project always starts as a proposal (ID `l-…`); approving makes it active,
+    rejecting removes it. An agent's preference change for every project (`set-pref`) is not applied at once: it
+    waits as a value proposal (ID `p-…`, kept in that scope's `proposals.json`) and `set-pref` returns
+    `{"approval": "proposed", "proposal": …}`. A newer proposal for the same key replaces the older one. `approve
+    p-… --value TEXT` applies your edited value instead. Kit change proposals (lessons tagged `kit`, written by the
+    `bc:self-learn` skill) show their diff. When Settings lets agents act without confirmation, preferences are
+    applied at once as before.
+  - **History** (`knowledge history [--kind] [--target]`, `revert`): every change to lessons, preferences, facts,
+    memos and project skills, newest first, with who made it, the entry before and after and a line `diff`
+    (`history.jsonl`). The Knowledge window's **History** section shows the diff; **Revert…** or `knowledge revert
+    <change-id>` puts the entry back to how it was before that change, undoing later changes to it too, and is
+    recorded as a change of its own. Rejecting a preference proposal changed nothing, so it has nothing to revert.
+  - **Claims** (`knowledge claims`, `set-claim KEY --text "528 ha" --source URL|MEDIA@SECONDS|user [--remove]`): the
+    numbers, prices, superlatives and names the video states, each with its source (`.vibeedit/knowledge/claims.json`).
+    Review lists those in titles (not captions) and in `plan.cut.voiceover` lines that no claim's text covers, as
+    `unsourced-claim` at info severity, with the words found by type. Any `plan.cut` entry may cite what it rests on
+    with `facts: [key]`; `plan check` warns `unknown-fact` for a key that is neither a project fact (`set-fact`) nor
+    a claim, so a typo or a fact never recorded shows before the build.
+  - **Creator profile**: preferences under `creator.` (`name`, `handle`, `channel`, `platforms`, `language`, `niche`,
+    `audience`, `tone`, `cta`, `voiceSamples` as media IDs of the open project, `disclosure`; lists comma-separated)
+    are checked by `set-pref` and shown as one `creator` object in the session summary. An agent's change to them for
+    every project always waits in the Inbox, even when agents may act without confirmation.
+  - **Verdicts** (`knowledge verdicts [--verdict] [--subject] [--limit]`): what you did with agents' changes in
+    this project, as VibeEdit saw it, in `.vibeedit/knowledge/verdicts.jsonl`: `keep` (you dismissed the change
+    notice, or your next edit left the agent's items alone), `undo` (you undid the agent's step, also an older one),
+    `edit` (your next edit changed the same items) and `reject` (Reject on an edit the scope guard held; Allow is a
+    `keep`). Each row names the command that made the change (`timeline.apply`, `library.apply`, `library.place`,
+    `plan.apply`…, or `edit`), its label, the agent, the revision and the items; counts are per command and
+    verdict. Facts only: `bc:self-learn` decides what they mean.
+  - **Skills** (`skills list [--scope project|user|plugin|kit]`, `get`, `save`, `enable`, `disable`, `remove`,
+    `propose`): the agent kit's skills are read-only; `skills propose <name> <file> --summary TEXT` sends the line diff against
+    the kit's SKILL.md to the Inbox as a lesson for every project tagged `kit`. Skills you or agents write live in the
+    project (`.vibeedit/skills/<name>`, linked into the project's `.claude/skills` and `.agents/skills`) or, with
+    `--scope user`, for every project (`Application Support/VibeEdit/Knowledge/skills/<name>`, listed with its path in
+    VibeEdit agents' knowledge). `disable` turns one off without deleting it: a project skill is unlinked, a skill for
+    every project gets a `.disabled` marker and is left out of the agents' knowledge. Saves and removals are in
+    History, so `knowledge revert` brings a deleted skill back. Skills that trusted, enabled plugins ship (API 7) are
+    in the read-only `plugin` scope as `<plugin-id>:<name>`: listed in VibeEdit agents' knowledge with their paths and
+    linked into the project's agent folders as `<plugin-id>--<name>` while the plugin is ready (see
+    [Agent skills](plugins.md#agent-skills)); copy one with `skills get` and `skills save` to change it. Without a
+    scope, `skills get` looks in the project, then every project, then plugins, then the kit. The Knowledge window's
+    **Skills** section lists every group with an editor and Markdown preview.
+
+  An agent's request that otherwise changes knowledge for every project (memo, lesson edits and removals, skills for
+  every project, reverts),
+  or approves or rejects a proposal, asks for your approval. Changes to this project's lessons and facts do not.
+
+  The book button in the agent dock shows an orange count while proposals wait (clicking it opens the Inbox) and a
+  dot when agents changed knowledge since you last closed the window.
+
+  In the Knowledge window, Lessons can be searched, filtered by scope, status and tag, and sorted newest or oldest
+  first (`knowledge lessons --query --scope --status --tag --sort`). Select a lesson to edit its fields, approve or
+  reject a proposal, enable or disable it, or delete it (history keeps it). Preferences and facts are edited in
+  place. Each entry shows which agent and session added it and when, and entries changed since you last opened the
+  window carry a **New** badge. Your changes are recorded with the source `user`.
+
+  Every agent session starts with a short summary: the active lessons (at most 20, this project's first, with
+  their sightings), the preferences (marked when inferred) and the project facts (with status and n), and how many
+  proposals wait for you. Proposed and disabled
+  lessons are not in it. `context get` returns the same summary as `knowledge`, so an agent outside VibeEdit's
+  terminals sees it too.
+- **Resuming.** When VibeEdit has found the last Claude or Codex conversation for the project, the dock offers
+  **Continue Claude/Codex** or **New conversation**. You never see or type session IDs.
+- **Codex defaults.** Codex starts idle on `gpt-5.6-luna` with low reasoning effort, under a named permission
+  profile that extends its workspace profile with the VibeEdit folder and the exact VibeEdit socket. It does not
+  get a broad socket allowlist.
+- **Requests.** The quick actions under the agent (Survey footage, Rough cut, Write VO… depending on the project)
+  and the quick-start cards paste a short request into the terminal for you to review before pressing Enter; agents
+  read the selection and playhead themselves with `context get`. **New brief** (⌘K, or the "Tell Claude Code what
+  to make…" bar under a terminal tab) opens a sheet with 25 request templates, your recent and saved briefs, and
+  Send, which pastes the request and presses Enter. It can attach the current viewer frame: VibeEdit renders a
+  bounded PNG into `.vibeedit/cache/agent-context`, keeps the ten newest frames and passes the absolute path to the
+  terminal.
+  - **Footage.** The **Footage** row shows **Project media · N** and takes files and folders (**Add files or
+    folder…**, or drop them on the sheet). They are sent as a last line, `Footage to import: …`, for the agent to
+    import. Templates made from what was shot ask for footage in orange while there is none.
+  - **To.** The menu next to Send picks the agent: an open agent tab or chat agent, or **Start new** for Claude
+    Code, Codex or a terminal plugin. Without a pick the brief goes to the agent tab or chat on show, else the
+    default agent's tab, else it starts the default agent (**Start & send**); never to a Shell tab. **Settings →
+    Agents → Default agent** is **Last used** by default: the agent you last opened or sent a brief to, else
+    Claude Code.
+  - **Waiting.** A starting or busy agent gets the brief only once it takes input (it printed, stayed quiet for
+    0.8 s and shows no menu). When the CLI shows a menu, the sheet closes so you can answer it in the dock, and the
+    brief follows. Cancel stops a waiting Send; a failure stays in the sheet with the brief.
+- **Folder trust.** Before Claude Code or Codex starts in a folder it does not trust yet, VibeEdit asks in its own
+  sheet, and for Claude Code also accepts Bypass Permissions mode, so the CLIs' own menus do not show (see
+  [Dialogs and UI actions](#dialogs-and-ui-actions)).
+- **Switching projects.** Tabs stay open when the project changes, also when their own agent creates or opens
+  one (before, the switch closed the tab mid-task). Every token, in-app or external, must then read the new
+  project (`context get`, `timeline get` or `project get`) before its next edit; until then edits fail with
+  "The open project changed to …", so an agent cannot apply what it remembers of the old project. Open
+  conversations are bookmarked for the new project too, so **Continue** there resumes them.
+
+Each child process gets a filtered environment plus:
+
+- `VIBEEDIT_SOCKET`, `VIBEEDIT_PROJECT` and an in-memory `VIBEEDIT_SESSION_TOKEN`;
+- a `PATH` that includes the bundled `vibeedit` and `vibeedit-mcp`;
+- for Claude and Codex, a temporary MCP server definition on the command line. No MCP config or token is
+  written into the project.
+
+Claude does not inherit `ANTHROPIC_API_KEY`, so it uses your CLI login. Shell tabs edit as the user; Claude and
+Codex tabs have their own authors. Closing a tab revokes its token. Keep tokens out of scripts, logs and
+project files.
+
+**Settings → Agents → Agent permissions → Allow agent timeline edits** is on by default. When it is off, Claude
+and Codex tabs get no token, so they can read and point at things but cannot edit.
+
+**Settings → Agents → Agent permissions → Dangerously allow all agent actions** (on by default; it asks once when
+turned back on, and no command can change it) overrides the switches above it: agents get edit tokens, privileged
+requests are approved at once, the scope guard is off, and plugin actions that declare `confirm` run without the
+dialog when an agent starts them (audited as `plugin.action.<id>.auto-approved`). Installing and trusting plugins
+still needs the user. `context get` reports what agents may do as `agentPermissions`
+(`{edits, autoApprove, scopeGuard, allowAll}`).
+
+## Agent kit
+
+The [agent kit](https://github.com/dongnguyenvie/bashcut-agent-kit) is a set of editing skills (footage survey,
+beat cuts, audio mix, captions, colour, effects, voiceover…) for Claude Code and Codex. VibeEdit ships a copy in
+`Contents/Resources/AgentKit` (`scripts/bundle-agent-kit.sh`, run by `scripts/run.sh` and the Xcode build, copies
+the tracked files of a `bashcut-agent-kit` checkout next to the repo, or `$VIBEEDIT_AGENT_KIT`). **Settings → Agents**
+and `agent status` / `agent setup` manage it. The kit is the plugin `bc`, so Claude Code and Codex show its skills
+as `bc:audio-mix`, `bc:edit-workflow`, … (kits before 0.1.0 were the `vibeedit` plugin, `vibeedit:vibeedit-<skill>`).
+
+- **Finding it.** The agent dock shows a setup card, "Set up VibeEdit for Claude Code · 1 of 2 done", the first
+  time it sees a kit version: ① **VibeEdit skills**, with **Install skills** or **Update** (what `agent setup` does);
+  an agent tab that was already running gets **Restart … tab**, which starts it again on the same conversation so
+  the CLI loads the new skills. ② **Editing tools** (captions, Vietnamese voice, motion graphics, stock search),
+  with **Install…**, which opens Plugins › Browse with the Recommended bundle, like `/bc:setup` without the agent.
+  Steps that do not apply are left out of the count. **What's this?** opens Settings → Agents (`ui action
+  show.agent-kit`; also Agent › Agent Skills… and ☰), and **Later** (`ui action agent.kit-later`) folds the card
+  into a **Setup 1/2** chip in the dock header until VibeEdit has a newer kit. The UI actions are
+  `agent.setup-show`, `agent.kit-install`, `agent.tools-install` and `agent.restart-tab`; `ui view` reports the
+  card as `agentSetup`.
+
+- **Kit updates.** Settings → Agents checks the kit's signed releases (`releases.json` on bashcut-agent-kit's
+  `main`) and offers **Download & Update** (`agent kit-check`, `agent kit-update`; the update asks for approval).
+  VibeEdit installs a release only over HTTPS from GitHub, with a first-party ed25519 signature checked before the
+  download and the SHA-256 after it, into `~/Library/Application Support/VibeEdit/agent-kits/<version>`. The newer
+  of that download and the built-in kit is used; a chosen folder is never updated. After installing, Claude Code
+  and Codex are refreshed where the kit is set up. Claude Code caches the plugin per version, so its row shows
+  "Older kit set up" until **Update** runs.
+
+- **VibeEdit's tabs** load it by default (`agent setup in-app`, `--remove` to stop). The built-in kit is copied to
+  `~/Library/Application Support/VibeEdit/agent-kit`. Claude tabs get a skills-only plugin
+  (`agent-kit-claude`, passed with `--plugin-dir`; the tab already has the VibeEdit MCP server). Codex tabs see
+  the skills as links (`bc-<skill>`) in `agent-workspace/.agents/skills`, which holds only the kit's skills.
+- **Another kit folder** (a checkout being worked on): **Choose…** in Settings or `agent setup in-app --kit
+  /abs/path` (`--kit built-in` to go back). It is used in place, so edits show up in the next tab.
+- **Claude Code and Codex outside VibeEdit**: `agent setup claude` adds the kit as the `bashcut-agent-kit`
+  marketplace and installs the `bc` plugin (skills and MCP server), uninstalling the old `vibeedit` plugin;
+  `agent setup codex` links the skills into `~/.agents/skills` as `bc-<skill>` (never over a folder that is not a
+  link), removes the old kit's `vibeedit-<skill>` links, and runs `codex mcp add vibeedit`. An old `vibeedit` plugin
+  shows as an older kit until **Update** runs. `--remove`
+  undoes either. From the CLI this asks for approval like an export, because it changes the agents' own
+  configuration.
+- **Configuration folders.** Claude Code and Codex may keep their login and settings elsewhere
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), often set in a shell profile that VibeEdit does not see when it starts
+  from Finder. Each folder comes from Settings (`--claude-config-dir`, `--codex-home`; `default` detects
+  again), else VibeEdit's environment, else the login shell (`$SHELL -ilc`, read once at launch), else
+  `~/.claude` / `~/.codex`. The result is used for setup, for the tabs' environment and for finding their
+  sessions to resume. `agent status` shows each folder and where it came from.
+
+## Agents outside VibeEdit
+
+Claude Code in another terminal, scripts and other MCP clients need no copied token. While VibeEdit runs, it
+writes a fresh token to `~/Library/Application Support/VibeEdit/automation-token` with mode `0600`, next to the
+`0600` socket, so the file grants nothing beyond what can already open the socket. The CLI and `vibeedit-mcp`
+read it whenever `VIBEEDIT_SESSION_TOKEN` is not set.
+
+- Edits are attributed to `agent` and get the same change markers and Undo toast as Claude and Codex.
+- Unlike in-app terminal tokens, this token survives project switches.
+- VibeEdit deletes the file when it quits. **Settings → Agents outside VibeEdit** turns it off or issues a new
+  token.
+- Exports still wait for your approval in the app.
+
+## Version and updates
+
+`app version` returns this copy's version, build, plugin API and how it was installed: `homebrew`, `direct` (a zip
+or dmg), `app-store` (App Store or TestFlight) or `development` (`scripts/run.sh`). `app update-check` asks GitHub
+for the latest release (`api.github.com/repos/<owner>/<repo>/releases/latest`, from `BCRepositoryURL`) and returns
+`updateAvailable`, the `latest` release, `update` (the Homebrew command or the release page) and `canUpdateNow`. It
+never installs anything, and App Store copies are not checked.
+
+`app update` installs that release on a Homebrew copy, like **Update Now** in Software Update (also `ui respond
+update` while the `updates` sheet is open); the user approves it first. Homebrew updates its taps and downloads the
+release (`brew update`, `brew fetch --cask vibeedit`) while VibeEdit runs, then VibeEdit saves the project, quits, and a
+helper runs `brew upgrade --cask vibeedit` and opens the new version (log: `~/Library/Logs/VibeEdit/update.log`). A
+failure before quitting keeps VibeEdit running and `app update-check` reports `installError`; a failed upgrade is
+reported the same way on the next launch. Downloaded copies update from the release page.
+
+The UI does the same in **VibeEdit › Check for Updates…** (`ui action show.updates`, also ☰ and Settings ›
+General). Homebrew and downloaded copies also check once a day when a project opens (**Settings › General ›
+Check for VibeEdit updates daily**). A newer release then opens Software Update by itself, once per launch, as the
+`updates` sheet with the options `update` (**Update Now**, Homebrew copies), `skip` (**Skip This Version**, `ui action app.update-skip`: no reminders until a
+newer release), `later` (**Remind Me Later**, `ui action app.update-later`: not before the next day) and `close`.
+Until a release is skipped, ☰ shows a dot and an **Update to VibeEdit …** item. The last answer is remembered, so the
+prompt and the dot work without asking GitHub at every launch. `ui action show.about` opens About VibeEdit.
+
+Development builds (`scripts/run.sh`) check only on demand. To try the prompt, start one with
+`VIBEEDIT_UPDATE_FEED=<release.json>` (a file shaped like GitHub's release JSON: `tag_name`, `html_url`,
+`published_at`, `body`; read instead of GitHub) and `VIBEEDIT_UPDATE_INSTALL=homebrew` or `direct`, for example
+`open --env VIBEEDIT_UPDATE_FEED=/tmp/release.json --env VIBEEDIT_UPDATE_INSTALL=homebrew build/VibeEdit.app`.
+Update Now runs in a development build only with `VIBEEDIT_UPDATE_BREW=<script>`, a stand-in for `brew` that gets
+the same arguments (`update`, `info --cask --json=v2 vibeedit`, `fetch`, `upgrade`), so a test never upgrades the
+installed release.
+Release builds ignore both.
+
+## Commands
+
+Every command is declared once as a `CommandSpec` in `VibeEdit/Core/Automation/CommandCatalog.swift`: its name,
+permission mode, parameters (type, range, choices, default and CLI binding) and whether it runs immediately,
+as a background job or after in-app approval. The socket validates every request against its spec before the
+handler runs, so the CLI and MCP return identical errors. The CLI parser, the MCP tool list and
+schemas, and the agent instructions are all generated from these specs.
+
+Print every usage line (also shown by `vibeedit --help`) with:
+
+```sh
+vibeedit help
+vibeedit help review shots   # one command: description, mode, parameters (works without the app)
+```
+
+The agent instructions list each command a terminal agent uses with its usage and the first sentence of its
+description (about 8k tokens); commands for the user, panels and plugin views (chat, plugin install and views,
+storage, agent setup, knowledge approval, skill switches, `clip speed`/`clip speed-curve` (agents use the `setSpeed`
+and `setSpeedCurve` ops)) are left out but still work.
+
+Add `--format text` to any command to print string results without JSON quoting. MCP tools take the same
+parameter names as the JSON-RPC `params` (`baseRev`, `atFrame`, …); the CLI spells them as options
+(`--base-rev`, `--at-frame`). Relative paths given to the CLI are made absolute against its working
+directory.
+
+### Permission modes
+
+| Mode | Token | Behavior |
+|---|---|---|
+| `read` | Not needed | Reads state; changes nothing |
+| `ui` | Required | Controls selection, playback, panels and dialogs; dialog responses can also apply edits |
+| `edit` | Required | Changes the project as one undoable, visible step; edits also need the current `--base-rev` |
+| `privileged` | Required | Waits for the user to approve in the app (see [Exports and approval](#exports-and-approval)) |
+
+### Command reference
+
+**[Command reference](../reference/commands.md)** lists every command with its usage, mode, how it runs, MCP
+tool name and parameters (types, ranges, choices, defaults). It is generated from the catalog
+(`scripts/update-commands.sh`) and a test fails when it is out of date, so it never misses a command.
+
+- Plugin actions: agents get the workflow in their instructions (list → select → run → `jobs status`), and the
+  session context lists every installed action with its `when` condition and parameters. Plugin actions also
+  appear in `ui actions` and run with `ui action <id>`. See [Writing plugins](plugins.md#commands).
+- `ui frame [frame]` renders the viewer picture to a PNG for agents to look at; it never moves the playhead.
+
+#### Allowed values
+
+| Parameter | Values |
+|---|---|
+| `timeline get --format` | `json` (default), `text` |
+| `project create --canvas` | `portrait` (default), `landscape`, `square` |
+| `project create --resolution` | `720`, `1080` (default), `2160` (short side) |
+| `project create --fps` | `29.97` (default), `30`, `24`, `60` |
+| `project create --language` | A language tag from the user's prompt or answer; no default (unset: plugins detect the language) |
+| `project create --dir` | An existing absolute folder; defaults to the projects folder (`project folder`, `~/Movies/VibeEdit` unless changed), made on first use |
+| `layers add --kind` | `video`, `adjustment`, `text`, `audio` |
+| `adjustment add --look` | A library look without a LUT file: built-in `original` (default), `vivid`, `muted-film`, `black-white`, `bright-airy`, `moody`, or `scope:id` from `library list --kind look` |
+| Grade options | `--exposure` −10…10, `--contrast` 0…4, `--saturation` 0…4, `--lut-strength` 0…1 (decimals allowed), `--lut` a LUT ID |
+| `media import --kind` | `video` (default), `audio` |
+| `export start --preset` | `tiktok`, `youtube-1080`, `youtube-4k`, `quick-draft`, `prores` |
+| `ui action open <dialog>` | `new-project`, `export`, `export-report`, `agent-changes`, `review`, `history`, `plugins`, `settings`, `doctor`, `knowledge`, `ask`, `sections`, `external-changes`, `plugin-proposals` |
+| `ui action panel <panel>` | `media`, `audio`, `text`, `stickers`, `effects`, `transitions`, `filters`, `brand`, `tools`; a tool opens Tools on it: `captions`, `voice`, `beats`, a plugin tool view (`<plugin>/<view>`) or a plugin tool action (its id). `ui view` reports the shown `tool` |
+| `ui view --zoom` | 1–600 pixels per second; `--zoom-anchor` is the frame kept in place (the playhead by default) |
+| `ui view --snap`, `--safe-area`, `--compare`, `--agent-dock` | `on` / `off` (also `true`/`false`, `yes`/`no`, `1`/`0`) |
+| `ui view --right-tab` | `inspector`, `agent` (shows that pane; Inspector and agent are separate columns, so the other stays as it is; `--agent-dock on|off` shows or hides the agent column) |
+| `ui view --inspector` | `video`, `audio`, `text`, `color`, `speed` |
+
+### Adding a command
+
+Add one `CommandSpec` to the catalog and one `handle`/`handleAuthored` registration in `ProjectDocument`, then
+run `scripts/update-commands.sh`. Debug builds assert that every spec has a handler, `CommandSpecTests` checks
+names, schemas and CLI bindings, and `CommandReferenceTests` fails until the reference is regenerated. If
+the command mirrors something in the UI, see the parity rule in
+[05 — Agent integration](../specs/05-agent-integration.md#ui-parity-rule). The step-by-step checklist is in
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+## Editing the timeline
+
+Edit commands need a live session token and the current revision as `--base-rev`. The server rejects stale
+revisions, file conflicts, busy operations and active timeline gestures; re-read the timeline and retry. Each
+apply is atomic and creates one undo step. The response has the new `rev` and `changed`. A batch that leaves the
+project exactly as it was returns `changed: false` with the current `rev`: no new revision, undo step, agent diff
+marks or plugin hooks.
+
+```sh
+vibeedit context get
+vibeedit timeline get --format text
+vibeedit timeline apply /absolute/path/ops.json --base-rev 12 --label 'Trim opening'
+vibeedit timeline undo --base-rev 13
+vibeedit timeline redo --base-rev 14
+```
+
+`context get` and `ui view` return the primary selected item as `selection` (the one last clicked, which
+single-clip actions use) and every selected item as `selectedItems`. `ui select a --items b,c` selects several
+items (`--add` keeps the current selection). Delete, Lift, Copy, Cut, Paste and Mute (`ui action timeline.delete`,
+`clip.copy`, `clip.cut`, `clip.paste`, `clip.mute`) act on the whole selection as one undo step;
+`timeline.select-all` and `timeline.deselect` change it. Copy and Cut also put the clips on the macOS pasteboard
+(private type `com.vibeedit.timeline-items`, JSON with the media they play), so Paste works in another project or
+another VibeEdit window: media the project lacks are added with a path from the project, and timing is converted to
+its frame rate. `timeline move-items --items a,b --by 30` moves several items like a selection drag;
+`--before c` (or `end`) moves the given clips of the magnetic main layer as one block. The Inspector's multi-selection
+fields (opacity, volume, fill, zoom, pan, tilt, rotation) are one `timeline apply` with
+`{"op": "patchItems", "items": [...], "patch": {...}}` for agents.
+
+`agent quick-edit faster|remove|music-lower|caption|punch-in|custom [--text] [--items]` (Quick Edit next to Send to
+Agent) sends a one-click request on the selection to the open agent with those items as its scope, ending with a
+review of their range (`review run --from A --to B` lists and counts only the issues touching those frames).
+
+`ui action clip.send-to-agent` (Send to Agent) attaches the selected items to the open agent's request, and
+`chat attach --items a,b` / `chat detach [--items a]` do the same for a chat agent; `agent detach [--items a]`
+removes them from the shown terminal tab. While items are attached, `context get` lists the caller's own tab's items
+as `scope` (`{plugin | terminal, scope: [{id, linked, track, layer, name, start, end}], mode, allowedForRequest}`;
+a session without a tab, such as the external agent token, gets `null`; a read without a token sees the shown tab's)
+and every chat message starts with a `[Scope]` block: edit only those items and ask before changing anything else.
+
+The app enforces that rule (the scope guard, #356). Every edit a chat or terminal session with attached items makes
+(`timeline apply`, `clip *`, `layers *`, `library apply`, and any other authored edit) is checked first:
+
+- Edits to scope items, their linked partners, and items made by edits the guard let through (a split's second
+  half, or an item from an edit the user allowed) run.
+- `insert` runs when the new item lies inside the scope's span (first start to last end, where the items are now).
+  A transition runs when either of its clips is in scope.
+- Media and LUT imports, beat grids and new layers run. Changes to existing layers, project settings, format, sections, LUT deletes and `restore` are project-wide and always count as outside.
+- Ripple shifts are not checked: the later clips a ripple delete or trim moves, and moves that shift a layer's whole
+  tail by one amount across the scope's span (`timeline close-gap` after lifting a scope clip), with the section
+  markers they carry. Moving a single clip is checked.
+- An agent's `timeline undo` or `redo` is checked as the change between the two states: clips that only moved on
+  their layer pass, a clip that comes back must lie in the span, one that goes away must be in scope, layer and
+  project settings are project-wide. A step cannot be held, so outside the scope it fails with `-32004` (and the
+  parts outside) in Ask first and Block alike; the user can undo it themselves.
+- A dry run is never held; `timeline apply --dry-run` adds `outsideScope {outOfScope, projectWide, mode}` when the
+  apply would be held (ask) or refused (block). An edit with a stale base revision fails with `-32002` before the
+  guard looks at it.
+
+What happens to an edit outside the scope is the user's choice in Settings › Agents ("Edits outside the attached
+clips"); agents cannot change it. The guard only runs when **Dangerously allow all agent actions** (on by default)
+is off:
+
+- **Ask first** (default): the edit is held. A sheet (`agent-scope` in `ui dialog`) offers **Allow Once**,
+  **Allow for This Request** (until the next chat message, or until a terminal's chips change) and **Reject**; only
+  the user can allow, agents can only reject. Return does not allow it. Closing the tab, or turning agent edits off,
+  rejects it.
+- **Block**: the edit is rejected at once.
+- **Allow**: every edit runs; the scope only tells the agent what the request is about.
+
+The command fails at once with `-32004` and `data: {outOfScope: [item IDs], projectWide: [changes]}`; a held edit
+also has `held: true` and `request`. Do not retry it. While it is held, `context get` shows it as `scope.held`;
+afterwards `scope.last` is `{request, label, outcome: applied | rejected | failed, rev?, error?}`. A held edit that
+the user allows is applied then; an edit sent with a base revision still fails (`outcome: failed`) if the project
+changed while it waited. While one edit is held, another
+one outside the scope fails with `-32003`.
+
+Use `timeline apply ... --dry-run` (MCP parameter `dryRun: true`) to validate the same batch on a copy.
+It checks the base revision, locks and project invariants, but changes no revision, undo history, files,
+preview or plugin hooks. The response has `dryRun: true`, current `rev`, `projectedRev`, predicted `duration`
+and `previousDuration` in frames, `changedItems`, `changedTracks`, `addedTracks` and `removedTracks`.
+Changed item IDs include additions, deletions, property changes and moves. A live edit token is still required.
+The preview does not reserve a revision; apply the batch with the same base revision and handle stale errors.
+
+Both the dry run and the apply return `fingerprint`, a hash of the ops and the base revision. Pass the dry run's
+value as `--expect-fingerprint` (MCP `expectFingerprint`) and the apply refuses with `-32602` and
+`data: {expected, actual}` if the ops sent differ from the ones that were reviewed.
+
+Say why an edit is made with `--why` (one sentence, up to 500 characters) and what it rests on with `--evidence`,
+entries separated by `;` (review issue IDs, transcript ranges, measurements; up to 20 of 200 characters):
+
+```bash
+vibeedit timeline apply ops.json --base-rev 12 --label 'Open on the hook' \
+  --why 'The plan opens on the quote; the old first 2 s were silence' \
+  --evidence 'review:hook-late; m1 9.72–10.32 s; script check beat 1 0.4' --expect-fingerprint 3f9c…
+```
+
+They stay with the undo step (also in the saved history). `timeline changes [--limit N] [--author agent|user|…]`
+lists recent edits newest first: `step`, `label`, `author`, `why`, `evidence`, `at`, the `rev` each produced and
+`changes {counts, text, truncated}`; `undone` lists the edits redo would bring back. Edits from before this was
+recorded show only label and author. Plugins see `why` in the `edit.committed` event.
+
+The edit list (`plan.cut`) is checked with `plan check` and built with `plan apply`. Both take `--patch` by entry
+ID (`{"voiceover": {"l1": {"pause": 0.8}}}`: that entry merges, the rest of the list stays). `plan apply` refuses
+while the check has an error, and before the graphics and voice stages a voice-led list always has one: a graphic
+without `media` (`graphic-no-media`) or a line without a kept take (`no-take`). To keep the check's fixes before
+then, `plan check --save` saves the merged list as `plan.cut` in one undoable edit without building it; any other
+error refuses with the problems. The result is the check's, with `rev` and `saved`:
+
+```bash
+vibeedit plan check --words --patch '{"voiceover": {"l1": {"pause": 0.8}}, "review": {"captionLineChars": 22}}' \
+  --save --base-rev last
+```
+
+
+### Timeline operations
+
+`ops.json` is an array of up to 1,000 operations:
+
+```json
+[
+  {"op": "split", "item": "clip-1", "atFrame": 30, "newID": "clip-right"},
+  {"op": "setProperties", "item": "clip-right", "patch": {"transform": {"zoom": 1.2}}}
+]
+```
+
+- **Operations.** `insert`, `delete`, `split`, `trim`, `roll`, `slip`, `move`, `reorder`, `setSpeed`, `setProperties`,
+  `setLinkedAudio`, track operations (`addTrack`, `moveTrack`, `setTrackProperties`, `deleteTrack`),
+  `setProjectProperties`, `setProviderPreference`, `setBeatGrid`, `upsertSection`, `deleteSection`,
+  `upsertTransition`, `deleteTransition`, `addColorLUT`, `deleteColorLUT`, `rippleDeleteRange` (`from`, `to`, optional
+  `tracks` and `continuous`: cuts a span out of every layer and closes it, as `timeline cut-range` does),
+  `setMediaRights` (a media's `license` and
+  `provenance`; null removes one), `setMediaData` (the agent's own fields on a media under `data`, such as take
+  numbers and verdicts; each key replaces, null removes; core never reads them) and `setFormat` (the canvas size; the
+  `project format` command and the toolbar's format menu use it). The agent instructions
+  (`VibeEdit/Core/Automation/AgentInstructions.swift`) show an example of each.
+- **Frames.** All frames are integers. `atFrame` and `toFrame` are absolute timeline frames; an item's `in` is a
+  source frame at that media's FPS.
+- **Property patches** replace the top-level keys they supply, so keep existing nested fields when you change
+  color, transform or tags.
+- **Sections and LUTs** keep stable IDs. A LUT catalog entry uses a project-relative `luts/*.cube` path and a 3D
+  size from 2 through 64. Apply it with `setProperties` on `color.lut`, with optional `color.lutStrength` from 0
+  through 1.
+- **Tracks.** `addTrack` takes the track object and an optional `atIndex` (0 is the back layer); without it the
+  layer goes in front of the layers of its kind.
+- **Transitions.** `upsertTransition` takes stable `from`/`to` clip IDs (or `between: [from, to]`), an optional `id`
+  (without one it updates the transition at that cut or names a new one `transition-<from>-<to>`), a kind, an
+  integer-frame `duration`, an
+  optional `easing` (`linear`, the default, `in`, `out`, `inOut` or `"cubic-bezier(x1,y1,x2,y2)"` with x1 and x2 in
+  0…1, the same ease type keyframes use) and an optional `motion`. The built-in kinds are rows of data, in the groups of the
+  Transitions panel: fade (`dissolve`, `blink`, `flash` to white, `dip-black`, `double-exposure`), whip (`whip` to the left, `whip-right`, `whip-up`, `whip-down`, with
+  motion blur), wipe (`wipe` from the left, `wipe-right`, `wipe-up`, `wipe-down`, `barn-door` from the middle,
+  `shutter`, `slide` and `slide-up` over the last picture), shape (`iris`, `diamond`), crash (`zoom`, `crash-zoom`,
+  `crash-out`), roll (`spin`, `roll`, `roll-right`), arc (`swing` — the next card swings in about its left
+  edge, `arc`, `arc-right`), infinite (`infinite-zoom`, `infinite-out`), screen (`screen-in`, `screen-out`) and
+  seamless (`blur`, `seamless-zoom`) and stylized (`glitch` — RGB split and
+  jitter, `halftone` — print dots, `flicker`, `color-shift`, `kaleidoscope`); any other kind (lowercase letters, digits, dashes) needs a
+  `motion`: `{"outgoing": {…}, "incoming": {…}}`, each side mapping `zoom`, `panX`/`panY` (share of the frame,
+  right/up), `rotation` (degrees, counterclockwise), `opacity`, `exposure` (EV), `scaleX` (horizontal squeeze),
+  `reveal` (share of the width shown from the left), `swing` (degrees about the left edge in perspective, positive
+  takes the right edge away), `rgbSplit` (red and blue apart by a share of the width, 0–0.2), `halftone` (dot
+  spacing as a share of the width, 0–0.1), `blur` (soft blur, share of the width, 0–0.1), `blurX`/`blurY` (motion
+  blur along that axis, 0–0.2), `revealFromRight`/`revealFromTop`/`revealFromBottom` (wipes from those edges),
+  `revealCenter` (share of the width shown around the centre), `iris` or `diamond` (a shape from the centre, 1 = the
+  whole frame), `zoomBlur` (streaked out from the centre, 0–0.2), `hue` (degrees), `saturation` (1 = unchanged, 0–4)
+  or `kaleidoscope` (0–1, a six-way mirror) to 2–16 values spread evenly over the eased tween. Preview and
+  export draw it the same way. The clips must be adjacent on one video track. `deleteTransition` restores a hard cut; moving or deleting either clip removes a transition that no
+  longer describes a valid cut.
+- **In and Out of text, stickers and overlays.** An item that is not part of a video cut (a caption, a title, a
+  sticker, a graphic, an overlay clip) uses the same kinds as its own entrance and exit:
+  `{"op": "setProperties", "item": "ID", "patch": {"enter": {"kind": "iris", "duration": 12}, "exit": {"kind":
+  "whip-up", "duration": 10, "easing": "in"}}}` (`motion` as on a transition; `null` removes one). They play inside
+  the item's own frame (the text box, the placed picture), so an iris or a wipe reveals the text itself. `enter`
+  plays the kind's incoming side over the first frames; `exit` its outgoing side over the last, and a kind whose
+  outgoing side leaves the picture as it is (a wipe, a shape, a slide, a dissolve) runs its incoming side backwards;
+  a side that does not hide the item (a whip, a zoom) also fades it. They work with keyframes and animation presets
+  (the keyframes move the result). Each is clamped to the item; at a clip edge that has a cut transition, the cut
+  wins. A split keeps `enter` on the left part and `exit` on the right. `vibeedit clip transition [ITEM] --side
+  in|out|both --kind KIND|none [--frames N] [--easing E] [--items A,B]` is the Inspector's In and Out; dragging a
+  Transitions tile onto a text or overlay item sets its In.
+- **Roll.** `{"op": "roll", "item": "ID", "edge": "end", "toFrame": 75}` moves the shared cut with exactly one
+  adjacent clip; `edge: "start"` uses the preceding clip. Both clips must stay nonempty and within source
+  bounds, and the rest of the track and the total duration stay fixed.
+- **Slip.** `{"op": "slip", "item": "ID", "sourceIn": 100}` sets an absolute source start without changing
+  timeline position or duration. It rejects text items and source overruns.
+- **Rejections.** Invalid render values, unsafe LUT paths, duplicate section boundaries, missing media, source
+  overruns and Main overlaps are rejected, and nothing is applied.
+
+Source-viewer insert and overwrite plan a group of these same operations.
+
+### Captions (SubRip)
+
+`vibeedit captions import /path/captions.srt --base-rev N` appends cues; `--replace` replaces the caption track
+atomically. Stale revisions and malformed files leave existing captions untouched.
+`vibeedit captions export --format text` writes SRT to stdout without changing the project. The Text library
+offers the same import, add, replace and export workflows.
+
+Input is UTF-8, at most 4 MiB and 10,000 cues. BOM, CRLF, multiline text and comma or period milliseconds are
+accepted. Timing rounds to the nearest project frame; reversed, out-of-bounds or sub-frame cues are rejected.
+Export sorts cues and keeps Unicode text. Paragraph gaps collapse to single line breaks because blank lines
+delimit SRT cues. Inline markup stays literal text; rich caption styling lives only in the project format.
+
+## Layers and placement
+
+Layer commands follow the layer rules in [02 — Project format](../specs/02-project-format.md#rules).
+
+```sh
+vibeedit layers add --kind video --role overlay --name "B-roll 2" --base-rev 12
+vibeedit media import /path/to/clip.mp4 --place --base-rev 12
+vibeedit media place --media MEDIA_ID --track TRACK_ID --at-frame 90 --base-rev 13
+vibeedit timeline move ITEM_ID --track TRACK_ID --at-frame 120 --base-rev 14
+```
+
+Track IDs and roles are dynamic: always take them from `timeline get`. `media place` and `timeline move` use
+the same planner as the timeline UI. When the range is taken, the clip goes to the next free layer of the same
+kind and role, or to a new layer next to the target, and linked sound follows onto a dialogue layer. Both
+return the layer actually used. Raw `timeline apply` insert and move operations that would overlap are
+rejected.
+
+`media import` of a file the project already has (same path, same kind, rate, length, size and sound) reuses
+that media and returns `existing: true` instead of adding a duplicate. With `--place` it still places a new
+item; without it the revision stays the same.
+
+## Library items
+
+The library panels (Media clips, Audio, Text, Stickers, Effects, Transitions, Filters, Voice, Brand) are collections of
+items with one model (#66). An item has an `id`, a `kind` (`clip`, `audio`, `text-preset`, `sticker`, `effect-preset`,
+`transition-preset`, `look`, `voice`, `brand`), a `name`, `tags`, a `pack`, `source` and `license`, `createdBy` (user, agent or plugin),
+`version`, usage, an optional copied `file` and `preview`, and `params` with what the kind needs.
+
+**Licences and provenance (P2-H8).** `license` is stored structured: `{id, version?, text?, url?, attribution?}` with
+`id` one of `cc0`, `public-domain`, `cc-by`, `cc-by-sa`, `cc-by-nd`, `cc-by-nc`, `cc-by-nc-sa`, `cc-by-nc-nd`,
+`royalty-free` (stock-site licences such as Pexels or Pixabay), `own`, `all-rights-reserved`, `custom` or `unknown`.
+`--license` takes the text as written and maps it (older items keep free text, read the same way). What it allows
+(`commercial`, `redistribute`, `attributionRequired`, `shareAlike`) follows from the id; `timeline get` reports it per
+media. `provenance` says where it came from: `origin` (`stock`, `ai`, `own`, `built-in`), `sourceUrl`, `author`,
+`provider`, `model`, `prompt`, `seed`, `requestId`, `charged` (US dollars a provider reported) and `parentMedia`.
+`media import --origin --license --source --author` and `library add --origin --author` record them; `library place`
+copies an item's onto the media it adds (with `libraryItem`); voice takes and saved plugin candidates record theirs
+(generated ones are `ai`, found ones `stock`, with the prompt, request ID and charge). `library export-pack` refuses
+items whose licence does not allow redistribution and lists `unknownLicenses`.
+
+**Credits (P2-H9), on request only.** `project credits` builds, from the media the edit plays, the credit lines
+(those a licence requires first; `text` is the block for a description), AI use (`pictureShare`, each output
+platform's AI-label rule), Content ID notes for stock or downloaded music, and flags (`nonCommercial`,
+`allRightsReserved`, `unknown`). Nothing is added to the video. By default review and exports say nothing about
+licences; set the project's `review.credits` to `true` and `review run` reports `ai-disclosure`, `credits-required`
+and `rights-unclear` as info, and each export's job result carries `credits` for its platform.
+
+Items come from four scopes; when the same ID is in several, the first wins, and `scope:id` picks one:
+
+| Scope | Where | Writable |
+|---|---|---|
+| `project` | `.vibeedit/library/library.json`, `usage.json`, `recent.json` and `files/` in the project folder; travels with the project | yes |
+| `user` | `~/Library/Application Support/VibeEdit/Library` (this Mac; `favorites.json` beside `usage.json`) | yes; agents need approval |
+| `plugin` | A pack in a plugin's `contributes.library` (#81), while the plugin is installed, trusted and on | no |
+| `built-in` | Shipped with VibeEdit | no |
+
+Built-in packs: **Text styles** (`bold-outline`, `cinematic-serif`, `keyword-sticker`, `place-card`, `hook-title`,
+`chapter-card`), **Emoji** stickers (`fire`, `yum`, `thumbs-up`, `hundred`, `star`, `pin`, `hot-pot`, `laughing`) and
+**Framing** effects (`punch-in`, `reset-framing`), **Motion** effects (`ken-burns-in`, `ken-burns-out`,
+`zoom-punch-in`), **Speed** effects (`speed-ramp`, `slow-motion`), **Transitions** presets (`soft-dissolve`, `quick-whip`,
+`zoom-punch`) and **Looks** (`original`, `vivid`, `muted-film`, `black-white`, `bright-airy`, `moody`). Their IDs are
+reserved. The Text, Stickers, Effects, Transitions and Filters panels show them first, then the items saved in the
+project or on this Mac.
+
+- `vibeedit library list [--panel text] [--kind sticker] [--tag food] [--scope user] [--created-by agent] [--pack X]
+  [--query word]` lists items with their usage; `library get <id>` adds the earlier versions and the file path.
+- **Favorites and Recent (D5).** `vibeedit library favorite <id> [--scope] [--off]` stars an item of any scope (built-in
+  and plugin ones too) or removes the star. Favorites are global: `scope:id` references in `favorites.json` in the user
+  library, so they follow you to every project and are not part of the project folder. **Recent** is per project: the
+  last 20 items placed or applied there (any scope, newest first) in `.vibeedit/library/recent.json`, written wherever a
+  use is counted; the global use counts stay as they are. `library list` and `library get` mark each item
+  `favorite: true|false`; `library list --favorites` keeps the starred ones and `--recent` the project's recent ones, newest
+  first. Both files keep fields they do not know; removing an item drops it from them, and moving it between the project
+  and This Mac keeps its star and its place in Recent. Without a saved project nothing is recorded in Recent.
+- `vibeedit library add --kind sticker --name Fire --params '{"emoji":"🔥"}' [--tags food,hot] [--pack Food]
+  [--file f.png] [--scope project|user]` saves a new item (the ID comes from the name unless `--id` is given).
+- `vibeedit library update <id> [--name] [--tags] [--params] [--file] …` saves a new version; the old one stays in
+  `history`. Built-in and plugin items are read-only: `--as <new-id> [--into user]` saves an improved copy with
+  `basedOn` pointing at the original. Nothing is overwritten silently.
+- `vibeedit library remove <id>` removes a project or user item and its files. Placed copies live in the project
+  folder and are never touched; files of the item that the open project's media still points at directly (placed
+  before #64 from a project library) are kept and listed in the result's `kept`.
+- `vibeedit library place <id> [--at-frame] [--duration] [--track] [--text] --base-rev N` adds a text preset or emoji
+  sticker as a text item, an image, animated or video sticker on the Overlay layer (see Stickers below), a look as an
+  adjustment, an audio item as a clip (see Audio below), or a clip item as media (below). `library apply <id> [--item] --base-rev N` sets a text preset,
+  an effect preset's recipe or a look's grade on an existing item. Both count a use (in `usage.json` next to
+  `library.json`; the item list is not rewritten).
+- `vibeedit library save-selection --kind text-preset|effect-preset|transition-preset|look|audio|sticker --name X [--item]
+  [--media] [--scope] [--tags] [--pack]` saves what is selected: a text item's style and text (see Text presets
+  below), a clip's `transform` and
+  `keyframes` as an effect recipe (see below), the transition at the selected clip (kind, duration, easing and the sound a preset placed at that cut),
+  a grade as a look: the whole filter stack, with the project LUT it uses copied in as the look's file, or an audio
+  clip (or, with `--media`, any project audio media) as an audio item (see Audio below), or an overlay item as a
+  sticker (see Stickers below).
+- `vibeedit library move <id> --to project|user` moves a saved item with its versions, files and use count.
+
+**Brand kits (#453).** A `brand` item's params hold what a channel keeps on every video, each optional (at least one
+set): `palette` {`accent`, `background`, `text`, `secondary`} as `#RRGGBB`, `fonts` {`heading`, `body`}, `logo` and
+`mascot` {pose: id} as sticker library references, `voice` {`provider`, `voice`} and `disclosure` (a label such as
+"Ảnh tạo bằng AI"). `library add --kind brand --name Acme --params '{"palette":{"accent":"#FFB000"}}'` saves one;
+`library apply <brand-id> --base-rev N` (no `--item`) sets the project's `brand` (the params plus `library` and `name`)
+and, in the same undo step, restyles every text item with `brandRoles`; the result lists the `restyled` items.
+`brandRoles` maps `textStyle` paths to roles: `fill`, `stroke`, `highlight`, `background.color`, `shadow.color` and
+`accentBars.color` (every bar) to a colour role, `font` to a font role; a role the kit leaves unset keeps the item's
+value. A text preset with `brandRoles` in its params passes them to the text it places and takes the project's kit
+at once, and so does a `plan.cut` title or caption whose `style` (or library preset) carries `brandRoles`. `project create --brand <id>` starts a project with a kit; `setProjectProperties {"brand": null}` removes it
+(styled text keeps its values). Recipes, graphics providers and voice skills read `project get` › `brand`. The Brand
+panel shows the kit in use and the saved kits (a click applies one); New Project offers the kits on this Mac.
+- Text presets (#380) are `params` `{textPreset, text, textStyle, animation}`: `textPreset` is a renderer preset and
+  `text` the sample (placed unless `library place --text` gives another). The optional `textStyle` holds the item's
+  own `size`, `positionY`, `strokeWidth`, `font`, `fill`, `stroke` and `highlight` (the item property rules of
+  `schema get`; other fields are refused) and
+  `animation` a `clip motion` preset. `library save-selection --kind text-preset` keeps the item's preset, text,
+  those `textStyle` fields and its motion preset when its keyframes are exactly one at the item's length (hand-made
+  keys are not saved). `library place` sets them on the new item; `library apply` sets the preset, then the stored
+  `textStyle` over the item's own (fields it does not store stay) and the animation at the item's length, as one undo
+  step. A preset whose `textStyle.font` is one of the project's own fonts (`fonts import`) is saved with that font
+  file as its `file`, in any scope (and gets it when moved to This Mac); placing or applying it in a project without
+  the font copies the file into that project's `fonts/` folder first. Items without `textStyle` or `animation`
+  behave as before: apply changes only the preset. The Text panel's
+  cards show the stored size, position, outline, font and text colour, and Edit… changes them and the animation.
+- **Text fonts and colours** (#412): `textStyle.font` is a PostScript name, `fill`, `stroke` and `highlight` are
+  `#RRGGBB`. `fonts list [--query q] [--project] [--language tag] [--covers]` gives the names (project fonts first;
+  `covers` says whether a font has every letter of the content language or `--language`, from macOS's locale data); `fonts import <file>` copies a .ttf/.otf/.ttc into the project's `fonts/` folder, which is
+  registered for the app process whenever the project opens, so preview and export use it on any Mac and nothing is
+  installed. A font that is neither installed nor in `fonts/` draws as Helvetica; `review run` reports it as
+  "Missing font". Inspector › Text has the same font menu (Add Font…), text and outline colours and outline width.
+- Transition presets (#77) are `params` `{kind, duration, easing, sfx}`: `sfx` names an audio library item, or the
+  preset carries its own sound as its `file` (`sfx` wins when both are set). `library apply` on one sets the transition
+  at the cut beside the video clip (the duration at most the shorter clip) and places the sound from the cut on an
+  SFX layer (added when missing), as one undo step. A sound from outside the project is copied into its `sfx/`
+  folder; applying a preset with a sound again at that cut replaces the sound the last one placed (items marked
+  `transitionSFX`). Edit a saved preset with `library update <id> --params '{...}'` (the Transitions panel's
+  Edit…).
+- Effect presets are recipes (#76): `params` `{steps: [...], parameters: {name: {default, min, max, label?}}}`.
+  Steps run in order on the clip, each on the clip as the steps before left it, and all of them are one undo step:
+
+  | `op` | Fields | Same as |
+  |---|---|---|
+  | `motion` | `preset` (`zoom-in`, `pan-left`, …), or `focus` `[x, y, w, h]` as fractions 0–1 of the picture with `focusTo`, `ease` | `clip motion --preset`, `--focus` |
+  | `keyframes` | `keys` `{zoom: [{t, value, ease?}, {frame, value}]}`; replaces those properties' keys, keeps the others | `clip motion --keyframes` |
+  | `speed` | `speed`, `keepDuration` | `clip speed` |
+  | `speedCurve` | `preset` or `points` `[[t, speed], …]`, `keepDuration` | `clip speed-curve` |
+  | `reverse` | — (a reversed clip stays reversed) | `clip reverse` |
+  | `freeze` | `t` or `frame`: the frame held over the clip (the first by default) | Freeze frame |
+  | `patch` | `patch`: item properties (`transform`, `opacity`, …) | the older `params.patch` |
+  | `sfx` | `sfx` (audio item ID; the preset's own `file` without it), `t` or `frame`, `volumeDb` | a sound on the SFX layer |
+  | `text` | `text`, `textPreset`, `t` or `frame`, `duration` (frames; to the clip's end by default) | `library place` of a text preset |
+
+  `t` runs from 0 (first frame) to 1 (last frame), so positions scale with the clip; `frame` counts integer frames
+  from the start (negative from the end). A value written `"$name"` takes the parameter (frames must stay whole).
+  `library apply <id> --set zoom=1.5,frames=12` (or `--set '{"zoom":1.5}'`) overrides parameters within their
+  range, and `--from F --to T` (timeline frames inside the clip) splits that part off in the same undo step and
+  applies the recipe only there; the result's `item` is the clip that got the effect. Sounds and text are marked
+  `effectSFX` / `effectText` with that clip's ID and replaced when the preset is applied to it again; a sound from
+  outside the project is copied into `sfx/`. A `reverse` step whose reversed copy is not in `reversed/` yet returns
+  `{job}` instead: the job renders the copy, then commits the whole recipe. A preset with only `params.patch` (made
+  before recipes) is one `patch` step and works as before. `save-selection --kind effect-preset` writes a recipe of
+  the clip's reverse, speed or speed ramp, `transform`, keyframes (as `t`) and the sound effect at its start (one a
+  preset placed, or one on an SFX layer starting with the clip), and a 320-pixel still of the clip's middle as the
+  preview. The Effects panel's **Apply with…** (the slider button, or the context menu) shows the parameters and an
+  optional frame range; it is the `effect-apply` dialog (`ui respond apply|cancel`). Edit… and Duplicate & Edit… show
+  the recipe as a form (a row per step: its op and fields, steps added, removed and moved; nested values as compact
+  JSON) or as JSON, both checked as typed; Save writes the same `params` as `library update <id> --params`.
+- Looks are filter stacks (#79): `params` `{color: {exposure, contrast, saturation, lutStrength}, lutName}` plus an
+  optional .cube LUT as the item's `file` (`library add --kind look --name X --file look.cube`; without `--params`
+  the look is just that LUT). `library place` adds one as an adjustment and `library apply` replaces a clip's or
+  adjustment's grade with it; when it has a LUT, the .cube is copied into the project's `luts/` folder
+  (`luts/library-<hash>.cube`, its project LUT keeps `sha256` and `libraryItem`) and added in the same undo step, and
+  using a look with the same file again reuses that LUT. Looks without a file apply their grade exactly as before.
+  Edit one with `library update <id> --params '{...}'` (the Filters panel's Edit…).
+- Audio items (#78) are music, sound effects and ambience kept outside any one project (user scope) or with it
+  (project scope). The item's `file` is the sound; `params` `{role, seconds, bpm, loopable, lufs, truePeak}` are all
+  optional: `role` is `music`, `sfx` or `ambience`, `seconds` the length, `bpm` the tempo, `lufs` the integrated
+  loudness and `truePeak` the true peak in dBTP, and `loopable` says the end joins the start. Mood, genre and use are
+  tags (`--tags calm,lofi,intro`). `library add --kind audio --name X --file song.wav [--params '{"loopable":true}']`
+  measures `seconds` and, without a role, picks `sfx` for a file under 10 seconds and `music` otherwise.
+  - `library analyze <id> [--provider P]` runs as a job (`jobs status --job J` for its result): it measures the length,
+    the loudness and true peak with an `audio.loudness` provider (as `audio measure`) and, unless the item is a sound
+    effect, the tempo with an `audio.beats` provider (as `beats detect`), on the library file itself, and saves them
+    as a new version. A missing or failing provider leaves that value as it was and says why in the result's
+    `notes`. An agent analyzing a user-scope item waits for approval like any user-library change. Read-only items
+    (plugin, built-in) need a copy first (`library update <id> --as <new-id>`).
+  - `library place <id> [--at-frame F] [--duration N] [--track T]` copies the file into the project's `music/` (music,
+    ambience) or `sfx/` (sound effects) folder as `library-<hash>.<ext>` (the same content is copied once and reused,
+    whichever item or folder asked), imports it as media (reusing media for the same file) and places it on the Music
+    or SFX layer, adding that layer when the project has none (a new Music layer ducks under speech like a new
+    project's), or on a free layer beside it, as one undo step. `--duration` trims the sound. VibeEdit has no clip
+    looping, so a longer duration on a `loopable` sound places copies back to back (the last one trimmed; the result
+    lists them in `items` with `looped: true`); a sound that does not loop plays once and the result has a `note`.
+  - `library save-selection --kind audio --name X [--item clip | --media id]` saves a project sound: the clip's (or
+    media's) whole file is copied in, with its `seconds` and a role from its layer (Music → `music`, SFX → `sfx`).
+  - `library preview <id>` plays the item's sound in VibeEdit (the Audio panel's play button); `library preview
+    --stop` stops it.
+  - The Audio panel lists the project's audio (context menu **Save to Library…**) and the library's audio items with
+    a play/stop button, badges for role, length, BPM, LUFS and loop, and **Place**; their context menu adds **Place at
+    Playhead** and **Analyze Length, Loudness & Tempo**, and Edit… sets the role and the loop flag. Audio files dropped
+    on the panel or chosen with Add… become items.
+- Clips (P2-H5) are footage kept in the library: a generated or downloaded B-roll shot or still. The item's `file`
+  is a .mov, .mp4, .m4v or an image; `params` are free (`library add --kind clip --name X --file shot.mp4` measures
+  `seconds`, `width`, `height` and `hasAudio`; a generator's `model`, `prompt` or `aspect` ride along). A
+  `library generate <prompt> --kind clip` provider makes them (model options are the provider's). `library place <id>
+  [--at-frame F] [--duration N] [--track T]` copies the file into the project's `clips/` folder as
+  `library-<hash>.<ext>` (once per content), imports it (reusing media for the same file, with the item's licence and
+  provenance) and places it like `media place`: on the main layer or `--track`, spilling onto a free layer when that
+  range is taken, with its sound on the dialogue layer when it has one, as one undo step. `--duration` trims it; a
+  longer one plays the clip once and the result has a `note`. The Media panel's **Clips** tab lists them: a click
+  places one at the playhead, and movies or images dropped there or chosen with Add… become items.
+- Stickers (#64) have a kind, `params.stickerKind`: `emoji` (`params.emoji`, drawn as text with `params.textPreset`),
+  `image` (a PNG, JPEG, HEIC, WebP… file; transparency is kept), `animated` (a GIF, APNG or animated WebP) or
+  `video-alpha` (a .mov or .mp4 with an alpha channel: HEVC with alpha or ProRes 4444 with alpha). Lottie files are
+  refused: export the animation as a GIF, an animated WebP or a movie with alpha. `library add --kind sticker --name
+  Arrow --file arrow.png [--pack Arrows] [--tags arrow] [--source URL --license CC0] [--scope project]` reads the kind,
+  `width`, `height` and `frames` from the file (an image with more than one frame is `animated`; a movie without
+  alpha is refused, since it would cover the picture below). Optional placing defaults in `params`: `size` (the
+  sticker's width as 0.01–1 of the frame width; 0.3 without one), `position` (`center`, `top`, `bottom`, `left`,
+  `right`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, which keep the sticker inside the safe area the
+  viewer draws, or `{x, y}`, its centre as 0–1 of the frame from the top left), `animation` (a `clip motion` preset
+  such as `pop-in` or `slide-up`; zoom keys scale the sticker's own size and pan/tilt keys move it from its place)
+  and `seconds` (how long it stays; 3 for an image without one).
+  - `library place <id> [--at-frame F] [--duration N] [--position top-right|x,y] [--size 0.25] [--track T]` copies an
+    image, animated or video sticker's file into the project's `stickers/` folder as `library-<hash>.<ext>` (the same
+    content is copied once), imports it as media (reusing media for the same file) and places it on the Overlay layer,
+    added in front of the other video layers when the project has none, or on a free overlay layer beside it, fitted
+    (`fill: false`) and framed with `transform` zoom, pan and tilt, all as one undo step. Options win over the
+    sticker's defaults. An animated sticker (GIF, APNG, animated WebP) is placed as a ProRes 4444 movie with alpha
+    written next to its copy (`library-<hash>.x<loops>.mov`, looped to cover `--duration` or the sticker's `seconds`)
+    and the result says `animated: true`. A
+    sticker movie plays once (a longer `--duration` is cut to its length and the `note` says so) and is marked
+    `alpha: true` in the project, so VibeEdit previews it from the original instead of a proxy without alpha (`media
+    import` marks any movie with an alpha channel the same way). Emoji
+    stickers place as text exactly as before; `--position` and `--size` do not apply to them.
+  - The project copy belongs to the project: `library remove` or `library update` of the sticker never changes it.
+  - `library save-selection --kind sticker --name X [--item id]` saves the selected overlay: an image (or a movie with
+    `alpha`) with its file, `size`, `position` (`{x, y}`) and `seconds` from the item's framing and length, or an emoji
+    text item with its text and text preset. A filling item keeps only its length.
+  - The Stickers panel shows emoji, image and movie thumbnails (badges for animated and video stickers), places one
+    at the playhead on click (context menu **Place at Playhead**), takes dropped or chosen images and alpha movies
+    (Add…), and its item sheet (Duplicate & Edit…, Edit…, Save selection as sticker) sets size, position and
+    animation.
+- Plugin items (#81) come from the packs plugins ship (`contributes.library`, plugin API 6; see the
+  [plugin guide](plugins.md#library-packs)). They list in the `plugin` scope with `createdBy` `{by: plugin, plugin,
+  pluginName, pluginVersion}` and paths under the plugin folder (`library get` gives `fileURL`), are read-only (`library
+  update <id> --as <new-id>` saves an editable copy with the files) and go away when the plugin is removed, turned off
+  or changed and not trusted again. `library place` and `library apply` copy any file they use into the project first
+  (`music/`, `sfx/`, `stickers/`, `luts/`), even for a plugin installed in the project's `.vibeedit/plugins`, so the
+  timeline never points into a plugin. An item whose ID is built in or came from an earlier plugin is left out and
+  `plugins list` reports it under `diagnostics`.
+- `vibeedit library search "<text>" --kind audio [--provider <plugin or provider id>] [--limit 12] [--page 1]` and
+  `vibeedit library generate "<prompt>" --kind sticker [--provider P] [--limit 4] [--params '{"seconds":30}']` ask a plugin
+  that provides `library.search` or `library.generate` (Freesound or Giphy search, AI music or stickers…) for
+  candidates. Each runs as a job; `jobs status --job J` gives `{kind, provider: {plugin, provider, version,
+  capability}, directory, candidates: [{index, id, name, kind, tags, params, source, license, fileURL, previewURL,
+  …}]}`, with the files in a request folder under `~/Library/Caches/VibeEdit/LibraryCandidates` (removed after a day).
+  Nothing is saved until `library add --from-result <job>:<index> [--scope user] [--name] [--tags] [--id]` copies one
+  in with its files, source, license and the provider as `provenance` (`createdBy.plugin` names the plugin), or the
+  search itself is given `--save <index> [--scope project|user]` (a failed save is reported as `saveError`, and the
+  candidates stay). Agents saving to the user scope wait for approval as with `library add`. A named `--provider`
+  must be available and serve the kind; without one, the highest-priority provider that serves it is used. Network
+  use is the plugin's own; VibeEdit only starts the plugin.
+- `vibeedit library stats [--panel]` reports usage, the saved items nobody used, and duplicates (same kind, params
+  and file), to prune or merge. Saved items compare the `fileSHA256` stored when their file was copied in.
+- `vibeedit library export-pack --pack Food --output ~/Food` writes a pack folder (`pack.json` and `files/`);
+  `library import-pack <folder|zip> [--scope user] [--replace]` adds one. IDs already there are refused unless
+  `--replace` saves them as new versions.
+
+Agents' `add`, `save-selection`, `update`, `analyze`, `remove` and `import-pack` in the `user` scope, and every `move`, wait for
+the user's approval, like exports; the project scope follows the normal edit rules.
+
+Each panel (Audio, Text, Stickers, Effects, Transitions, Filters) opens on a home view (Recent, Favorites, then one
+section per pack with two rows of tiles and **See all n ›**; the section headers fold) and shows its items with search,
+source chips (All, Mine, Packs with counts, and Online, which opens the plugin search; a search with no match offers
+it too), pack and tag filters, a star on each tile, badges for agent-made and project or Mac items, plugin packs grouped under the plugin's name, **Add…** (and
+drops) for files and packs, **Save selection as…**, **Search…** and **Generate…** when a plugin provides them for the
+panel's kinds (the sheet runs `library search`/`library generate`, previews each candidate and saves it with **Save**;
+`ui action open library-search|library-generate` opens it for the open panel and `ui respond run|save-<index>|close` answers
+it), and a context menu: Duplicate & Edit (`update --as`), Rename (`update --name`), Move (`move`), Show Source &
+License (`get`), Show in Finder and Remove (`remove`). `ui view --library-query X --library-pack P --library-tag T
+--library-scope user --library-source mine|packs|all --library-collection recent|favorites|all` sets the open panel's
+search and filters (`libraryFilter` in the view state; a filter leaves the home view for a list, `all` and an empty
+filter return to it); the item sheet
+is the `library-item` dialog (`ui respond save|cancel`).
+
+**Panel width, tiles and drag (P1-10).** The library panel is as wide as its right edge was dragged (300–520 pt;
+`ui view --library-width N`; by default 372 pt on a screen of 1680 pt or more and 300 pt below), or wide: 760 pt over the
+viewer with a category sidebar (All, Recent, Favorites, Mine and each pack; `--library-wide true|false`, Esc leaves it).
+The Text, Stickers, Effects, Transitions and Filters panels have a footer with a tile-size slider and a grid or list
+switch, remembered per panel on this Mac (`--library-tile-size 0..1`, `--library-layout grid|list` for the open panel;
+`libraryLayout` {width, wide, mode, tileSize} in the view state). Text styles, effects, looks and transitions show a
+picture with the name under it in the grid; a "+" on hover places an item at the playhead (as `library place`). Every
+tile can be dragged onto the timeline (`vibeedit-library:scope:id`, the string plugin view grids use): sounds, stickers,
+text styles, looks and clips are placed where they land; an effect or transition is used on the clip under the
+pointer (as `library apply`), or on the selection.
+
+## Media proxies
+
+Heavy footage (HEVC, a long side above 1920 px, or above 20 Mbit/s) gets a preview proxy when it is imported:
+an H.264 copy at most 960 px on the long side, with a keyframe every 10 frames and the original frame times,
+written to `.vibeedit/cache/proxies/<media id>.mov`. The viewer reads proxies; exports always read the originals.
+
+Proxies are made one at a time as `media.proxy` jobs, and the preview switches to each one as it lands.
+
+- `vibeedit media proxy [MEDIA_ID] [--force]` queues them by hand and returns a status per media: `queued`
+  (with its job ID), `exists`, `not-needed`, `skipped`, `converting` (see below) or `unsupported` (with `codec` and
+  `reason`). The Media panel's **Create Preview Proxy** menu does the same with `--force`.
+- VibeEdit turns on the macOS VP9 (and, where the Mac has it, AV1) decoder at launch. Video the Mac still cannot
+  decode (AV1 on an M1 or M2, for example) is converted on import: a `media.convert` job runs the system's ffmpeg
+  (Homebrew, `/usr/local/bin` or `PATH`) to write an H.264 copy with the same frames and frame times to
+  `media/converted/<media id>.mov`, then points the media at it (one undo step; `originalPath` keeps the original,
+  which is never changed). `media import` reports this as `proxy: {status: "converting", job}`. Until the copy
+  lands, the viewer shows black there and `ui frame` on those frames and `export start` fail with
+  `unsupported_media`; sound and analysis work from the original. Without ffmpeg the status is `unsupported`:
+  install it and run `media proxy MEDIA_ID`.
+- `media list` reports each media's `proxy` state: `none`, `queued` or `ready`.
+
+## Dialogs and UI actions
+
+Anything you can click or press in the editor is also a command. Buttons, menu items and shortcuts are
+`UIAction` cases (`VibeEdit/Core/Automation/UIAction.swift`) with an ID, a title and shortcuts; the views bind
+to them and `ui action` runs the same code.
+
+```sh
+vibeedit ui actions                 # every action, its shortcuts and whether it is enabled now
+vibeedit ui action timeline.split   # by ID
+vibeedit ui action cmd+b            # or by shortcut: cmd+=, space, i, shift+delete
+vibeedit ui view --zoom 60 --snap on --inspector color --reveal 300
+vibeedit ui view --zoom 480 --zoom-anchor 1200   # zoom in on frame 1200, keeping it where it is on screen
+vibeedit ui action timeline.zoom-fit            # or shift+z: show the whole timeline
+vibeedit ui action clip.freeze                  # the clip context menu: clip.freeze, clip.change-framing, clip.unlink-audio
+vibeedit ui action shift+right                  # timeline arrows: left/right step a frame, shift+left/right a second
+```
+
+Shortcuts are written as `cmd+shift+z`; modifiers can also be spelled `command`, `option`/`alt`/`opt` and
+`control`/`ctrl`. When one shortcut means different things in different places (`space` plays the source viewer
+while it is shown), `ui action` picks the one that is available.
+
+Every alert, file panel, sheet and popover is visible to `ui dialog`:
+
+```sh
+vibeedit ui action project.open     # returns at once with {"started": true}
+vibeedit ui dialog                  # the open-panel, with its option IDs
+vibeedit ui respond --path /path/to/project
+```
+
+- `ui action` refuses while a dialog is open; answer it first.
+- Actions that open an alert or panel (`project.new`, `project.open`, `project.import-media`) return at once
+  so you can answer the dialog.
+- `ui respond --dialog ID` answers only if that dialog is topmost.
+- `ui action open` refuses while another dialog is open, and some sheets only open when they apply (for example
+  `export` needs a nonempty timeline).
+- The export approval and plugin-install sheets offer agents only `deny` or `cancel`. Approving stays with
+  the user.
+- `agent-folder-trust` asks before Claude Code or Codex starts in a folder it does not trust yet (from the dock,
+  New brief, handoff or `agent open`). Only the user answers it (`userOnly`; `ui respond` refuses); Not now does
+  not start the agent. Allow writes the CLI's own trust record (`hasTrustDialogAccepted` in `.claude.json`,
+  `trust_level` in Codex's `config.toml`), so its trust menu does not show. For Claude Code the same sheet also
+  accepts Bypass Permissions mode once (`skipDangerousModePermissionPrompt` in its `settings.json`), so its
+  "WARNING: Claude Code running in Bypass Permissions mode" menu does not show either; when only that is missing,
+  the sheet asks "Let Claude run commands without asking?". For a project in VibeEdit's projects folder outside a
+  git repository, **Always for every project in "<projects folder>"** is ticked by default, so one Allow covers later
+  projects too.
+- The New brief sheet is the `ask` dialog: `send` sends the request to the sheet's agent (starting it if needed),
+  `clear` empties it and `footage` opens its file panel (answer it with `ui respond --path`).
+- A plugin view in a window is `plugin-window` (`"window": true`). It never blocks `ui action` or other dialogs and
+  is answered by ID: `ui respond --dialog sheet:plugin-window:<plugin>/<view> dock|undock|close`.
+
+## Jobs
+
+`captions generate`, `beats detect` and `voice speak` call the same `CapabilityService` as the Text, Audio and
+Voice panels, so provider resolution, health checks, output confinement and validation are identical.
+
+```sh
+vibeedit captions generate --media MEDIA_ID --replace
+vibeedit beats detect --media AUDIO_MEDIA_ID
+vibeedit voice speak 'Xin chào các bạn' --takes 3
+vibeedit voice place voiceover/generated/…/take-2.wav --at-frame 120
+vibeedit jobs wait JOB_ID --timeout 25
+vibeedit jobs status JOB_ID
+vibeedit jobs cancel JOB_ID
+```
+
+- Each returns `{"job": ID, "state": "running"}` at once. `jobs wait ID` holds the call until the job's state or
+  step changes or it finishes, up to `--timeout` seconds (1–30, default 25), and returns `{job, changed,
+  timedOut}`; call it again until the state is `completed`, `failed` or `cancelled` instead of polling `jobs
+  status`. A completed job's result includes the new `rev`, plus `bpm`/`beats`, or the measured voice `takes`
+  (and the `item` a chosen take went into).
+- Every job reports `progress` (0–1 or null), `step` (its current step; `detail` is the same text) and
+  `usage {provider, wallSec, units, costUSD, costSource}`. `wallSec` is the time it has run; `provider`, `units`
+  and `costUSD` appear only as plugin providers reported them (`costSource: "provider"`), never estimated, and
+  are null for VibeEdit's own work such as exports.
+- Every provider job may call a paid provider. `--request-id ID` makes a resend return the
+  same job (`reused: true`) instead of paying again, while the job is still listed. `--dry-run` runs nothing and
+  returns the request as it would go to the provider (option values left out, only their names), `paid`, and the
+  provider's `estimate` when it gives one.
+- The result is one undoable edit attributed to the agent, with change markers and the Undo toast.
+- `voice speak` measures every take (seconds, units, unitsPerSecond, silences, pauses, the provider's score) and
+  keeps them all in `voiceover/generated` with a `<take>.json` provenance sidecar; pick one and put it on the
+  Voiceover track with `voice place TAKE [--at-frame N | --replace ITEM]`. `--choose N` inserts take N at once;
+  `--replace ITEM` puts take `--choose` (default 1) into that item and times its captions again.
+- `--provider ID` overrides the project preference for one request.
+- `vibeedit capabilities get [CAPABILITY] [--kind K] [--voices]` says whether each capability can serve now: `available`, or
+  `reason` `missing` (no plugin provides it: the user installs one), `not_configured` (turned off, not approved,
+  changed, outdated or missing a required plugin: the user turns it on or approves it) or `unhealthy` (a dependency
+  fails its health check). Each provider has `plugin`, `priority`, `paid`, `state` and `detail`; `commands` lists
+  the commands that call the capability; `--voices` adds every voice provider's voices with their facts and measured
+  rates. Health checks run in parallel and stop after about 8 s
+  (`healthChecked: false`). A job command whose capability cannot serve fails at the call with `capability_missing`;
+  one that fails later in its job keeps `errorCategory` on the job.
+- A capability that is already running (from the UI or another job) is rejected with a retry error.
+- Opening another project cancels and clears all jobs.
+- Installing plugins, running their dependency recipes, trusting a plugin or turning one on is never available
+  through automation. See [Writing plugins](plugins.md).
+
+Jobs move through `queued`, `running`, `completed`, `failed` and `cancelled`. Exports and proxy builds use the
+same job center.
+
+## Exports and approval
+
+```sh
+vibeedit export start --preset quick-draft --name draft-v1 --include-srt --normalize-audio
+vibeedit export otio --name timeline-v1
+vibeedit export status
+```
+
+`export start` and `export otio` need a live session token. They return at once with an approval request ID,
+and the app shows a sheet with the author, preset, output path, caption behavior and normalization choice.
+Denying writes nothing. Approving starts the same background pipeline as the Export sheet. Only one privileged
+request can wait for approval at a time.
+
+**Settings → Approve agent actions without asking** is off by default, but Dangerously allow all agent actions (on
+by default) overrides it; no command can change either. When you turn it on, requests run at once, return `approval: "approved"` and are audited as
+`<method>.auto-approved`.
+
+- **Output.** Files go to the project's `render/` folder unless you pass `--output-dir`.
+- **Queue.** Each approved export (and each export started in the UI) becomes an `export.start` job. Exports
+  render one at a time in request order, from the project as it was when requested. `jobs cancel` stops a
+  queued or running export.
+- **Status.** `export status` lists the queue with job IDs. While an export runs, its top-level fields (`job`,
+  `step`, `progress`, `preset`, `path`, `includedSRT`) describe that export and the previous receipt moves to
+  `lastExport`. After an export of this session failed (not cancelled), `state` is `failed` with `error`,
+  `failedAt`, the `preset` and `path` it was writing, and the previous receipt under `lastExport`, until a later
+  export finishes. Otherwise it returns the most recent receipt: path, preset, duration, bytes, cuts, captions and
+  companion-SRT state. Poll it after an approved request.
+- **Captions.** An export asked to include SubRip writes no `.srt` when the timeline has no captions.
+- **Loudness.** `--normalize-audio` needs an installed, healthy `audio.loudness` plugin and runs the two-pass
+  target and true-peak workflow. A normalized receipt also includes `lufs`, `truePeakDbTP`,
+  `normalizationGainDb` and whether the final measurement was verified; other exports return `lufs: null`.
+- **OTIO.** `export otio` writes OpenTimelineIO JSON. It keeps integer-frame timing, source ranges and rates,
+  layered overlaps, text generators, section markers, speed effects and VibeEdit metadata.
+- **Ledger.** Every finished export is kept in `.vibeedit/export-history.json` (the last 100) with an ID (`x-…`),
+  the revision, preset, path and length, and a fingerprint of the edit: looks, caption and title presets, music,
+  transitions, clip count, average and median cut, the hook (first cut and first text in seconds, the first
+  text, the first media, cuts and caption words in the first 3 s) and the sections. Its sections and caption words
+  in timeline seconds go to `.vibeedit/exports/<id>.json`. `export history [--limit] [--full]` lists them newest
+  first; `export link --url URL --platform tiktok --posted-at 2026-10-13 [--export ID]` records where one was
+  posted (the latest by default). `project history [--limit N]` reads the last N projects (the open one first):
+  their exports, links and the fingerprint of the latest export (or the open timeline), and how many projects
+  used each look, preset, music file and transition, with the hook and cut numbers per project, for variety
+  checks and the creator's own medians.
+- **Outcomes.** `outcomes import FILE [--export ID] [--platform] [--totals JSON]` reads a retention curve and totals
+  from the platform's analytics: CSV with a header (a time column, or a `Video position (%)` column that becomes
+  seconds, and a retention column; `--time-column` and `--retention-column` name them) or JSON (`{curve: [{t |
+  position, retention}], totals: {views…}}`). It is stored in `.vibeedit/outcomes/<export id>.json`. `outcomes map
+  [--export] [--top] [--window]` lays it over the export's sections: retention at each section's start and end, the
+  raw change, the largest drop (with the caption words within 4 s), the largest lift, the replay peak and the viewers
+  at its start, then the largest drops of the whole curve. Values the file lacks stay `null`; nothing is called good
+  or bad.
+
+## Batch pipelines
+
+A batch runs the same steps over many inputs. Each input becomes its own project (decision D4), so every result
+can be opened and fixed: a media file becomes a new project made from the pipeline's template, with the file's
+folder linked as `footage`; a project input is that project, and the steps run on it in place.
+
+```sh
+vibeedit batch run pipeline.json                 # asks the user once, returns the batch ID
+vibeedit batch status --wait 100                 # holds until an item or step changes
+vibeedit batch status BATCH_ID                   # every item's steps, jobs, errors and outputs
+vibeedit batch cancel                            # the running batch and its running step's job
+vibeedit batch presets pipeline.json --name "Captions draft"
+vibeedit batch run --preset "Captions draft" --inputs ~/Movies/shoot,~/Movies/old-edit
+```
+
+```json
+{
+  "name": "Captions draft",
+  "inputs": ["clips", {"path": "~/Movies/VibeEdit/w555-widgets", "kind": "project"}],
+  "template": {"canvas": "portrait", "resolution": "1080", "fps": "30", "language": "en",
+               "brand": "my-brand", "outputs": ["tiktok", "shorts"]},
+  "steps": [
+    {"action": "media.import", "params": {"path": "{input}", "place": true}, "label": "Import"},
+    {"action": "captions.generate", "params": {"media": "{media}"}, "label": "Auto captions"},
+    {"action": "export", "label": "Export"}
+  ],
+  "onFailure": "skip",
+  "concurrency": 1,
+  "outputName": "{name}-{preset}",
+  "projectsFolder": "~/Movies/VibeEdit/batch"
+}
+```
+
+- **Inputs** are paths of media files, folders or projects (or `{path, kind}` with kind `file`, `folder` or
+  `project`). A folder gives its video, audio and image files and the project folders directly inside it, in name
+  order; the same input twice runs once. Relative paths resolve against the pipeline file's folder (the CLI passes
+  it as `base`); over MCP give absolute paths or `base`.
+- **Template** holds the New Project settings of `project create` (`canvas`, `resolution`, `fps`, `language`,
+  `brand`) and `outputs`, the export presets the project is made for (`project format --outputs`). Fields left out
+  take `project create`'s defaults. New projects go to `projectsFolder` (the projects folder by default), named
+  after the input, with ` 2`, ` 3`… when the folder is taken.
+- **Steps** run in order on the item's open project. `action` is a command ID or an installed plugin action ID
+  (`plugins actions`), with `params` as that command takes them; `baseRev` is filled with the current revision when
+  the command takes one. String parameters may use `{input}` (the input's path), `{name}`, `{project}` (the project
+  file) and `{media}` (the media ID the last step returned, such as `media import`'s, else the project's first media).
+  Only commands that run immediately or as a job are allowed: a command that needs approval (`export start`,
+  `export otio`), one that opens or closes projects, and the batch commands are refused before anything runs,
+  as is an ID that is neither a command nor a plugin action.
+- **Export step.** `{"action": "export", "params": {"presets": ["tiktok"], "includeSRT": true}}` exports each preset
+  of `presets` (a list or comma-separated), else the template's `outputs`, to the project's `render/` folder, named
+  by `outputName` (`{name}`, `{preset}`, `{index}` — the item's 1-based position — and `{pipeline}`; it must hold
+  `{name}` or `{index}`). `normalizeAudio`, `bitrate` (Mbps) and `without` (sound roles) work as on `export start`.
+  It is covered by the batch's one approval; the graphics-draft guard still applies, the draft-audit guard does not
+  (each result is a project to open and review).
+- **Approval.** `batch run` is a privileged command: the app shows one approval sheet with the item count, the steps,
+  the exports per item and where new projects go; the result says `approved` (true when agent actions are approved
+  without asking). A refused batch ends `denied`. Only one batch runs at a time.
+- **Running.** Items run one at a time, because every step acts on the editor's one open project; `concurrency` is
+  kept in the file and `batch status` reports `{asked, used}` (used is 1 today). Each immediate step runs as a
+  `batch.step` job in the job center, a job command (`captions generate`, `plugins run`, exports) as its own job, and
+  the step records that job. After its steps (also after a failed one) the project is saved. A step that fails ends
+  its item (`failed`, later steps `skipped`); `onFailure: "skip"` goes on with the next item, `"stop"` ends the batch
+  `failed` with the rest `skipped`. Opening the first item needs `--save-current` or `--discard-current` when the
+  open project has unsaved changes, like `project open`. If the user opens another project during a batch, the next
+  step fails instead of editing the wrong project.
+- **Status.** A batch is `awaiting_approval`, `running`, then `completed` (items may have failed or been skipped),
+  `failed`, `cancelled` or `denied`. Each item has `input`, `kind`, `project`, `state`, `step` (1-based, while
+  running), `outputs` and `steps` [{`action`, `state`, `job`, `error`, `errorCategory`, `outputs`, `result`}].
+  Runs are kept for this app session (the last 10 finished); opening another project clears the job list but not
+  the batches. `batch status --all` lists them.
+- **Presets** are pipelines saved in the user store, `~/Library/Application Support/VibeEdit/Batch/Presets/<name>.json`.
+  `batch presets` lists them; `batch presets FILE [--name N] [--keep-inputs]` saves one (inputs are dropped unless
+  kept; a relative `projectsFolder` or kept input is saved absolute, resolved against the file's folder or `--base`,
+  so the preset runs the same from the batch window); `--get N` returns one and `--remove N` deletes it.
+  `batch run --preset N --inputs A,B` runs one on new inputs.
+- **The app must stay open.** Batches run inside the running VibeEdit, through the same command handlers as the CLI;
+  there are no headless runs without the app. `batch run`, `batch cancel` and `batch presets` are not held by the
+  read-after-switch rule, so the agent that started a batch can still cancel it while its items open.
+- **The batch window** (File ▸ Batch…, `ui action open batch`, or a tool card's **Run on › Many projects /
+  files…**, which adds that tool as the first step) builds, saves and runs the same pipeline: inputs, steps (＋ Add
+  step lists the tools, the export step, every command a step may run and the plugin actions) and the selected
+  step's settings, with the queue below. Its Run is the user's approval. `ui dialog` lists it as `sheet:batch` with the
+  pipeline (its steps by label and action), the queue and the window's last message (in the app's language) in its
+  message; answer it with `ui respond OPTION --dialog sheet:batch`:
+  - inputs: `add-inputs`, then `ui respond --path` answers the file panel;
+  - steps: `add-step:<action>` adds a step from the core step catalog (the ＋ Add step groups: `media.place`,
+    `captions.generate`, `captions.replace`, `captions.style`, `library.apply`, `music.replace`, `review.run`,
+    `export`) and selects it; `remove-step-N`, `move-step-N-up` / `move-step-N-down` (N is 1-based, as listed);
+    `load-preset:<name>` loads a saved preset's steps and settings, keeping the inputs. A step's settings are not
+    options: put them in a preset (`batch presets FILE --name NAME`) and load it;
+  - `save-preset`; `run`; `cancel`; `open-N` / `reveal-N` for finished item N; `close`.
+
+  Step edits apply at once, so the next `ui dialog` shows them. While a batch runs only `add-inputs`, `save-preset`,
+  `cancel` and `close` are offered. After `open-N` (or a run that opens projects) call `context get` once before the
+  next `ui` command: the project switch makes the next `ui` call fail with `stale_revision` otherwise.
+
+## Model APIs
+
+The dock no longer has a model-API tab (removed 2026-10-04): it generated a script or one timeline proposal per
+request, without tools, the agent kit or a look at the result, which is not enough to finish a video. To use a
+model with API billing, use a Codex tab (it passes `OPENAI_API_KEY` through) or log the Claude CLI in with a Console
+account (Claude tabs never receive `ANTHROPIC_API_KEY`); both get the agent kit and the full command set. See the
+[Claude CLI reference](https://code.claude.com/docs/en/cli-reference) and the
+[Codex CLI reference](https://developers.openai.com/codex/cli/reference).
+
+## Debug log
+
+The app, the `vibeedit` CLI and `vibeedit-mcp` append one line per event to `~/Library/Logs/VibeEdit/debug.log`
+(rotated to `debug.1.log` at 5 MB) and mirror it to the unified log under subsystem `app.vibeedit`. It records:
+
+- app launch, with the executable path and build time;
+- project opens, with the layer layout and any layer-rule repair;
+- every committed or rejected edit with its operation name, and layer placement and spill decisions;
+- media import details (`kind`, `hasAudio`, frames), proxy queueing, timeline gestures and library panel
+  switches;
+- every automation request with its author, duration and success/failure code, and auto-approved exports.
+
+Sensitive command parameters are marked in `CommandParameter` and replaced with `[redacted]`; unknown input
+fields are redacted too. Chat text, option values, arbitrary plugin parameters and operation payloads are not
+persisted. RPC results and error messages are omitted because they may echo secrets. The CLI logs the parsed
+command name, never raw argv. Log files are created with `0600`, existing active files are restricted on write,
+and unified-log messages use private visibility. Open uses `O_NOFOLLOW` and append mode. Handles are retained;
+a stable `.lock` file protects append and rotation across processes, and writers reopen when the pathname's
+inode changes. Release builds disable logging by default; use `VIBEEDIT_DEBUG_LOG=1` to enable it explicitly,
+or `VIBEEDIT_DEBUG_LOG=0` to disable it in Debug. `VIBEEDIT_DEBUG_LOG_PATH` overrides the file destination.
+
+```sh
+tail -f ~/Library/Logs/VibeEdit/debug.log
+```
+
+Set `VIBEEDIT_DEBUG_LOG=0` to turn it off. Test runners never write to it.
+
+### Error responses
+
+CLI failures write `{"error":{"code":-32002,"message":"…","data":{"expected":1,"actual":2}}}` to stderr
+and leave stdout empty. `data` is optional. MCP returns the same object in `structuredContent` and JSON text,
+with `isError: true`. Error messages are intended for the requesting client and are omitted from debug logs.
+
+| Condition | RPC code | CLI exit status |
+|---|---:|---:|
+| Stale revision / project read required | -32002 | 75 |
+| Editor busy | -32003 | 69 |
+| App/socket unavailable | -32000 | 69 |
+| Missing or revoked token | -32001 | 77 |
+| Edit outside the attached scope, rejected or blocked | -32004 | 77 |
+| Invalid request, command or arguments | -32600 / -32601 / -32602 | 64 |
+| Malformed response | -32700 | 65 |
+| Internal / other failure | -32603 / other | 70 |
+
+Stale revision errors include `data.expected` and `data.actual`. Refresh the project before constructing a new
+edit; do not blindly replay after a timeout because a timed-out mutation may already have completed.
