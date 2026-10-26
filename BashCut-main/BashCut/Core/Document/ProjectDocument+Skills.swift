@@ -1,0 +1,243 @@
+import BashCutAgent
+import BashCutAutomation
+import BashCutPlugin
+import BashCutProject
+import BashCutStorage
+import Foundation
+
+/// Skills commands (#71): the agent kit's and the plugins' skills read-only, and the project's and every project's
+/// skills to write, turn on or off and delete. Agents' changes to skills every project reads wait for the user's
+/// approval.
+extension ProjectDocument {
+    func registerSkillCommands() {
+        handleAuthored("skills.export") { document, arguments, _ in try document.exportSkills(arguments) }
+        handle("skills.list") { document, arguments, _ in
+            document.agents.loadKnowledge()
+            let origin = try Self.skillOrigin(arguments.optionalString("scope"))
+            return .array(KnowledgeSkillRef.Origin.allCases.filter { origin == nil || $0 == origin }
+                .flatMap { document.skillsJSON($0) })
+        }
+        handle("skills.get") { document, arguments, author in
+            document.agents.loadKnowledge()
+            let name = try arguments.string("name")
+            let origins = try Self.skillOrigin(arguments.optionalString("scope")).map { [$0] }
+                ?? KnowledgeSkillRef.Origin.allCases
+            let knowledge = document.agents.knowledge
+            for origin in origins {
+                // A plugin skill is `<plugin-id>:<name>`; its link name or a bare name one plugin has works too. A kit
+                // skill answers to the names agents see it by too: `bc:review` (Claude Code, Codex) and `bc-review`
+                // (Codex's link).
+                let id = origin == .plugin ? document.pluginSkillID(name) : origin == .kit ? AgentKnowledgeStore.kitSkillName(name) : name
+                guard let id else { continue }
+                let ref = KnowledgeSkillRef(origin: origin, name: id)
+                guard let text = knowledge.text(of: ref),
+                      case .object(var fields)? = document.skillsJSON(origin).first(where: { $0.name == id })
+                else { continue }
+                let sections = SkillFrontMatter.sections(text)
+                fields["sections"] = .array(sections.map { .string($0.heading) })
+                if let asked = arguments.optionalString("section") {
+                    let wanted = asked.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+                    let picked = sections.filter { section in
+                        wanted.contains { !$0.isEmpty && section.heading.lowercased().contains($0) }
+                    }
+                    guard !picked.isEmpty else {
+                        throw RPCFailure(-32602, "No section of \(id) matches \(asked); its sections: "
+                            + sections.map(\.heading).joined(separator: " | "))
+                    }
+                    fields["text"] = .string(picked.map(\.text).joined(separator: "\n"))
+                } else {
+                    fields["text"] = .string(text)
+                }
+                document.logSkillRead(id, origin: origin, author: author)
+                return .object(fields)
+            }
+            throw RPCFailure(-32602, "No skill named \(name)")
+        }
+        handleAuthored("skills.save") { document, arguments, author in
+            let scope = try Self.writableSkillScope(arguments)
+            let name = try AgentKnowledgeStore.skillName(arguments.string("name"))
+            let text = try arguments.string("text")
+            let source = Self.knowledgeSource(author, arguments)
+            document.agents.loadKnowledge()
+            return try document.knowledgeChange(
+                "skills.save", approval: scope == .user, author: author, arguments: ["name": name, "scope": scope.rawValue]) {
+                try document.agents.knowledge.writeSkill(named: name, text: text, scope: scope, source: source)
+                return try document.skillJSON(name, scope: scope)
+            }
+        }
+        for enabled in [true, false] {
+            let method = enabled ? "skills.enable" : "skills.disable"
+            handleAuthored(method) { document, arguments, author in
+                let scope = try Self.writableSkillScope(arguments)
+                let name = try arguments.string("name")
+                return try document.knowledgeChange(
+                    method, approval: scope == .user, author: author, arguments: ["name": name, "scope": scope.rawValue]) {
+                    try document.agents.knowledgeStore.setSkillEnabled(name, enabled, scope: scope)
+                    document.agents.loadKnowledge()
+                    return try document.skillJSON(name, scope: scope)
+                }
+            }
+        }
+        handleAuthored("skills.remove") { document, arguments, author in
+            let scope = try Self.writableSkillScope(arguments)
+            let name = try arguments.string("name")
+            let source = Self.knowledgeSource(author, arguments)
+            return try document.knowledgeChange(
+                "skills.remove", approval: scope == .user, author: author, arguments: ["name": name, "scope": scope.rawValue]) {
+                try document.agents.knowledgeStore.removeSkill(named: name, scope: scope, source: source)
+                document.agents.loadKnowledge()
+                return .bool(true)
+            }
+        }
+        handleAuthored("skills.propose") { document, arguments, author in
+            document.agents.loadKnowledge()
+            let name = try arguments.string("name")
+            guard let before = document.agents.knowledge.kit?.skillText(name) else {
+                throw RPCFailure(-32602, "The agent kit has no skill named \(name)")
+            }
+            let lesson = try document.agents.knowledgeStore.proposeKitChange(
+                skill: name, before: before, after: arguments.string("text"), summary: arguments.string("summary"),
+                reason: arguments.optionalString("reason") ?? "", source: Self.knowledgeSource(author, arguments))
+            document.agents.loadKnowledge()
+            if author != .user {
+                document.message = String(format: String(localized: "%@ proposes a change to the kit skill %@"),
+                                          author.rawValue.capitalized, name)
+            }
+            return .object(["id": .string(lesson.id), "title": .string(lesson.title), "diff": .string(lesson.fix)])
+        }
+    }
+
+    /// Records a skill read in the run log (spec 13 §6.1), as BashCut saw it: kit skills as `bc:<name>`, the way the
+    /// checklist and the kit hook name them. Nothing is logged before the first save, and a failed write never fails
+    /// the read.
+    private func logSkillRead(_ name: String, origin: KnowledgeSkillRef.Origin, author: Author?) {
+        let entry: [String: JSONValue] = [
+            "kind": .string("skill"), "name": .string(WorkflowChecklist.skillName(name, origin: origin.rawValue)),
+            "origin": .string(origin.rawValue), "author": .string(author?.rawValue ?? "unknown"),
+            "rev": .integer(project.revision), "verified": .bool(true), "via": .string("skills.get"),
+        ]
+        rememberSkillRead(entry)
+        guard let log = runLog else {
+            holdRunEntry(entry)
+            return
+        }
+        do { try log.append(entry) } catch { DebugLog.write("runlog", "skill read not logged: \(error)") }
+    }
+
+    /// The skills of one origin as `skills list` shows them.
+    private func skillsJSON(_ origin: KnowledgeSkillRef.Origin) -> [JSONValue] {
+        let knowledge = agents.knowledge
+        if origin == .plugin {
+            return plugins.skills.map { skill in
+                .object([
+                    "name": .string(skill.id), "scope": .string("plugin"), "readOnly": .bool(true),
+                    "enabled": .bool(true), "plugin": .string(skill.pluginID), "pluginName": .string(skill.pluginName),
+                    "description": .string(
+                        SkillFrontMatter((try? String(contentsOf: skill.file, encoding: .utf8)) ?? "").summary),
+                    "path": .string(skill.file.path),
+                ])
+            }
+        }
+        guard let scope = KnowledgeScope(rawValue: origin.rawValue) else {
+            guard let kit = knowledge.kit else { return [] }
+            return kit.skills.map { name in
+                let front = SkillFrontMatter(kit.skillText(name) ?? "")
+                return .object([
+                    "name": .string(name), "scope": .string("kit"), "readOnly": .bool(true),
+                    "enabled": .bool(settings.loadAgentKit), "version": .string(kit.version),
+                    "description": .string(front.summary), "triggers": .array(front.triggers.map(JSONValue.string)),
+                    "path": .string(kit.skillsFolder.appendingPathComponent("\(name)/SKILL.md").path),
+                ])
+            }
+        }
+        return knowledge.skills(scope).map { skill in
+            let front = SkillFrontMatter((try? String(contentsOf: skill.file, encoding: .utf8)) ?? "")
+            var fields: [String: JSONValue] = [
+                "name": .string(skill.name), "scope": .string(scope.rawValue), "readOnly": .bool(false),
+                "enabled": .bool(skill.enabled), "description": .string(front.summary),
+                "path": .string(skill.file.path),
+            ]
+            if scope == .project {
+                fields["claude"] = .bool(skill.claude)
+                fields["codex"] = .bool(skill.codex)
+            }
+            return .object(fields)
+        }
+    }
+
+    private func skillJSON(_ name: String, scope: KnowledgeScope) throws -> JSONValue {
+        guard let origin = KnowledgeSkillRef.Origin(rawValue: scope.rawValue),
+              let skill = skillsJSON(origin).first(where: { $0.name == name })
+        else { throw RPCFailure(-32602, "No skill named \(name)") }
+        return skill
+    }
+
+    /// The ID of a ready plugin's skill named `name` (`<plugin-id>:<name>`, or a bare name only one plugin has).
+    /// A plugin skill by its ID, its agent link name (`vlog-product-ad`, as agents list it) or a bare name one plugin has.
+    private func pluginSkillID(_ name: String) -> String? {
+        if plugins.skills.contains(where: { $0.id == name }) { return name }
+        if let linked = plugins.skills.first(where: { $0.linkName == name }) { return linked.id }
+        let matches = plugins.skills.filter { $0.name == name }
+        return matches.count == 1 ? matches[0].id : nil
+    }
+
+    /// `skills.export` (#506): saved skills copied out, as plain folders or a skill pack plugin.
+    private func exportSkills(_ arguments: CommandArguments) throws -> JSONValue {
+        agents.loadKnowledge()
+        guard let scope = KnowledgeScope(rawValue: arguments.optionalString("scope") ?? "user") else {
+            throw RPCFailure(-32602, "scope must be project or user")
+        }
+        let saved = agents.knowledge.skills(scope)
+        let wanted = arguments["skills"].map { $0.array.compactMap(\.string) }
+        if let missing = wanted?.first(where: { name in !saved.contains { $0.name == name } }) {
+            throw RPCFailure(-32602, "No \(scope.rawValue) skill named \(missing)")
+        }
+        let chosen = saved.filter { wanted?.contains($0.name) ?? true }
+        guard !chosen.isEmpty else { throw RPCFailure(-32602, "No \(scope.rawValue) skills to export") }
+        var metadata: PluginSkillPack.Metadata?
+        if arguments.bool("asPlugin") {
+            let id = try arguments.string("id")
+            metadata = PluginSkillPack.Metadata(
+                id: id, name: arguments.optionalString("name") ?? id, version: arguments.optionalString("version") ?? "0.1.0",
+                author: arguments.optionalString("author").map { PluginAuthor(name: $0) })
+        }
+        let output = URL(fileURLWithPath: try arguments.string("output")).standardizedFileURL
+        do {
+            try PluginSkillPack.export(chosen.map { $0.file.deletingLastPathComponent() }, metadata: metadata, to: output)
+        } catch { throw RPCFailure(-32602, error.localizedDescription) }
+        return .object([
+            "output": .string(output.path), "skills": .array(chosen.map { .string($0.name) }),
+            "plugin": metadata.map { .string($0.id) } ?? .null,
+        ])
+    }
+
+    private static func skillOrigin(_ value: String?) throws -> KnowledgeSkillRef.Origin? {
+        guard let value else { return nil }
+        guard let origin = KnowledgeSkillRef.Origin(rawValue: value) else {
+            throw RPCFailure(-32602, "scope must be project, user, plugin or kit")
+        }
+        return origin
+    }
+
+    private static func writableSkillScope(_ arguments: CommandArguments) throws -> KnowledgeScope {
+        let value = arguments.optionalString("scope") ?? "project"
+        guard let scope = KnowledgeScope(rawValue: value) else {
+            let reason = switch value {
+            case "kit": "Kit skills are read-only; propose a change with skills propose"
+            case "plugin":
+                "Plugin skills are read-only; copy one with skills get, then skills save --scope project or user"
+            default: "scope must be project or user"
+            }
+            throw RPCFailure(-32602, reason)
+        }
+        return scope
+    }
+}
+
+private extension JSONValue {
+    /// The `name` field of an object.
+    var name: String? {
+        guard case .object(let fields) = self else { return nil }
+        return fields["name"]?.string
+    }
+}

@@ -1,0 +1,377 @@
+import Foundation
+
+/// A keyboard shortcut written the way agents type it: `cmd+shift+z`, `space`, `i`.
+public struct UIShortcut: Sendable, Hashable, CustomStringConvertible {
+    public enum Modifier: String, Sendable, CaseIterable, Comparable {
+        case command = "cmd", shift, option = "opt", control = "ctrl"
+
+        public static func < (lhs: Self, rhs: Self) -> Bool {
+            allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
+        }
+    }
+
+    /// One character, or a named key: `space`, `delete`, `escape`, `left`, `right`.
+    public let key: String
+    public let modifiers: Set<Modifier>
+
+    public init(_ key: String, _ modifiers: Set<Modifier> = []) {
+        self.key = key
+        self.modifiers = modifiers
+    }
+
+    /// Parses `cmd+shift+z`; modifiers may also be spelled `command`, `option`, `alt`, `control`.
+    public init?(parsing text: String) {
+        let aliases: [String: Modifier] = [
+            "cmd": .command, "command": .command, "shift": .shift, "opt": .option, "option": .option,
+            "alt": .option, "ctrl": .control, "control": .control,
+        ]
+        var parts = text.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
+        // `cmd++` names the plus key.
+        if text.hasSuffix("++") { parts.removeLast(2); parts.append("+") }
+        guard let key = parts.popLast(), !key.isEmpty else { return nil }
+        var modifiers: Set<Modifier> = []
+        for part in parts {
+            guard let modifier = aliases[part] else { return nil }
+            modifiers.insert(modifier)
+        }
+        self.init(key, modifiers)
+    }
+
+    public var description: String {
+        (modifiers.sorted().map(\.rawValue) + [key]).joined(separator: "+")
+    }
+}
+
+/// Every action the user triggers from the editor's buttons, menus and shortcuts. The UI and the
+/// `ui.action` command run the same code, so anything a person can click an agent can run.
+/// Add a case here with its title and shortcut, then handle it in `ProjectDocument+UIActions`.
+public enum UIAction: String, CaseIterable, Sendable {
+    case undo = "edit.undo"
+    case redo = "edit.redo"
+    case newProject = "project.new"
+    case openProject = "project.open"
+    case saveProject = "project.save"
+    case closeProject = "project.close"
+    case importMedia = "project.import-media"
+    case showHistory = "show.history"
+    case showReview = "show.review"
+    case showPlugins = "show.plugins"
+    case showDoctor = "show.doctor"
+    case showSettings = "show.settings"
+    case showAgentKit = "show.agent-kit"
+    case showExport = "show.export"
+    case showExportProgress = "show.export-progress"
+    case showSections = "show.sections"
+    case showCommands = "show.commands"
+    case showAssetSearch = "show.assets"
+    case showBatch = "show.batch"
+    case showShortcuts = "show.shortcuts"
+    case showUpdates = "show.updates"
+    case showAbout = "show.about"
+    case toggleAgentDock = "agent.toggle-dock"
+    case toggleLibraryPanel = "view.library-pane"
+    case toggleInspector = "view.inspector-pane"
+    case askAgent = "agent.ask"
+    case openClaudeTerminal = "agent.open-claude"
+    case openCodexTerminal = "agent.open-codex"
+    case openShellTerminal = "agent.open-shell"
+    case openChatAgent = "agent.open-chat"
+    case dismissAgentKitPrompt = "agent.kit-later"
+    case showAgentSetup = "agent.setup-show"
+    case installAgentSkills = "agent.kit-install"
+    case installEditingTools = "agent.tools-install"
+    case restartAgentForKit = "agent.restart-tab"
+    case skipAppUpdate = "app.update-skip"
+    case remindAppUpdateLater = "app.update-later"
+    case togglePlayback = "playback.toggle"
+    case previousFrame = "playhead.previous-frame"
+    case nextFrame = "playhead.next-frame"
+    case backSecond = "playhead.back-second"
+    case forwardSecond = "playhead.forward-second"
+    case shuttleBack = "playback.shuttle-back"
+    case shuttleStop = "playback.stop"
+    case shuttleForward = "playback.shuttle-forward"
+    case toggleCompare = "view.compare"
+    case toggleSafeArea = "view.safe-area"
+    case toggleFullScreenPreview = "viewer.fullscreen"
+    case toggleSnap = "timeline.snap"
+    case zoomIn = "timeline.zoom-in"
+    case zoomOut = "timeline.zoom-out"
+    case zoomFit = "timeline.zoom-fit"
+    case toggleCompactHeader = "timeline.header-compact"
+    case split = "timeline.split"
+    case delete = "timeline.delete"
+    case lift = "timeline.lift"
+    case freezeFrame = "clip.freeze"
+    case changeFraming = "clip.change-framing"
+    case unlinkAudio = "clip.unlink-audio"
+    case speedUp = "clip.speed-up"
+    case slowDown = "clip.slow-down"
+    case resetSpeed = "clip.speed-reset"
+    case refreshWaveforms = "timeline.refresh-waveforms"
+    case addVideoLayer = "layer.add-video"
+    case addAdjustmentLayer = "layer.add-adjustment"
+    case addTextLayer = "layer.add-text"
+    case addAudioLayer = "layer.add-audio"
+    case layerUp = "layer.up"
+    case layerDown = "layer.down"
+    case deleteLayer = "layer.delete"
+    case sourceTogglePlayback = "source.toggle-playback"
+    case sourcePreviousFrame = "source.previous-frame"
+    case sourceNextFrame = "source.next-frame"
+    case markIn = "source.mark-in"
+    case markOut = "source.mark-out"
+    case sourceInsert = "source.insert"
+    case sourceOverwrite = "source.overwrite"
+    case sourceClose = "source.close"
+    case sourceShow = "source.show"
+    case showAgentChanges = "agent.show-changes"
+    case undoAgentChange = "agent.undo-changes"
+    case dismissAgentChange = "agent.dismiss-changes"
+    case openExportOutput = "export.open-output"
+    case revealExportOutput = "export.reveal-output"
+    case cancelExport = "export.cancel"
+    case dismissExportNotice = "export.dismiss-notice"
+    case clearRecentProjects = "project.clear-recents"
+    case showRecentProjects = "project.show-recents"
+    case selectAll = "timeline.select-all"
+    case deselect = "timeline.deselect"
+    case copyClips = "clip.copy"
+    case cutClips = "clip.cut"
+    case pasteClips = "clip.paste"
+    case muteClips = "clip.mute"
+    case sendToAgent = "clip.send-to-agent"
+    case showRunPanel = "run.show"
+    case dismissRunPanel = "run.dismiss"
+    case toggleRunPanel = "run.toggle"
+    case stopAgent = "run.stop"
+    case toggleFollowAgent = "run.follow"
+    case fixRunIssues = "run.fix-issues"
+    case tryAnotherRecipe = "run.another-recipe"
+
+    public var id: String { rawValue }
+
+    /// Speeds the Speed tab, the clip menu and Speed up / Slow down step through.
+    public static let speedPresets: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+
+    /// `2×`, `1.5×`, `0.75×`.
+    public static func speedLabel(_ speed: Double) -> String {
+        let text = speed == speed.rounded() ? String(Int(speed)) : String(format: "%g", (speed * 100).rounded() / 100)
+        return text + "×"
+    }
+
+    /// Inspector tabs, for `ui.view --inspector`.
+    /// The right column's tabs, for `ui.view --right-tab`; they match `RightColumnTab`.
+    public static let rightTabs = ["inspector", "agent"]
+    public static let inspectorTabs = ["video", "audio", "text", "color", "speed"]
+    /// The Media panel's sources: footage, project media, shared assets, the selects store (P1-D8) and library clips
+    /// (P2-H5), matching `MediaLibrarySource`.
+    public static let mediaSources = ["footage", "project", "shared", "selects", "clips"]
+    /// The lists a library panel shows instead of its home view (`ui view --library-collection`).
+    public static let libraryCollections = ["recent", "favorites"]
+    /// Settings sections, for `ui.view --settings-section`.
+    public static let settingsSections = ["general", "agents", "plugins", "storage"]
+    /// Knowledge window sections, for `ui.view --knowledge-section`.
+    public static let knowledgeSections = ["inbox", "lessons", "prefs", "facts", "notes", "skills", "history"]
+    /// Plugins sheet tabs, for `ui.view --plugins-tab`.
+    public static let pluginsTabs = ["installed", "browse", "updates", "activity"]
+    /// Plugin category ids, matching `PluginCategory` (checked by `PluginCategoryTests`).
+    public static let pluginCategories = ["agents", "captions", "voice", "audio", "color", "effects", "export", "utilities"]
+
+    public var title: String {
+        switch self {
+        case .undo: "Undo"
+        case .redo: "Redo"
+        case .newProject: "New project"
+        case .openProject: "Open project…"
+        case .saveProject: "Save"
+        case .closeProject: "Close project (save, then show the Welcome screen)"
+        case .importMedia: "Import footage…"
+        case .showHistory: "History"
+        case .showReview: "Review"
+        case .showPlugins: "Plugins"
+        case .showDoctor: "Doctor"
+        case .showSettings: "Settings"
+        case .showAgentKit: "Agent skills (Settings › Agents)"
+        case .showExport: "Export…"
+        case .showExportProgress: "Show the running export: progress, queue and cancel"
+        case .showSections: "Sections"
+        case .showCommands: "Command palette"
+        case .showAssetSearch: "Search all assets: the whole library, project media and selects, grouped by kind"
+        case .showBatch: "Batch runner: build a pipeline of steps, run it over many files or projects, follow the queue"
+        case .showShortcuts: "Keyboard shortcuts"
+        case .showUpdates: "Check for BashCut updates"
+        case .showAbout: "About BashCut (version and build)"
+        case .toggleAgentDock: "Show or hide the agent dock"
+        case .toggleLibraryPanel: "Show or hide the library panel (left of the viewer)"
+        case .toggleInspector: "Show or hide the Inspector (right of the viewer)"
+        case .askAgent: "New brief"
+        case .openClaudeTerminal: "Claude terminal"
+        case .openCodexTerminal: "Codex terminal"
+        case .openShellTerminal: "Shell terminal"
+        case .openChatAgent: "Chat agent"
+        case .dismissAgentKitPrompt: "Setup card: Later folds it into the dock's Setup chip until the kit changes"
+        case .showAgentSetup: "Setup chip: open the agent setup card again (skills and editing tools)"
+        case .installAgentSkills: "Setup card: install or update the BashCut skills for the picked agent (Claude Code or Codex)"
+        case .installEditingTools: "Setup card: open the Recommended plugins install (the starter bundle)"
+        case .restartAgentForKit: "Setup card: restart the agent tabs started before the skills were installed"
+        case .skipAppUpdate: "Skip this BashCut version: no reminders until a newer release"
+        case .remindAppUpdateLater: "Remind me about this BashCut update tomorrow"
+        case .togglePlayback: "Play or pause"
+        case .previousFrame: "Previous frame"
+        case .nextFrame: "Next frame"
+        case .backSecond: "Back one second"
+        case .forwardSecond: "Forward one second"
+        case .shuttleBack: "Play backwards (J again: 2×, 4×; silent)"
+        case .shuttleStop: "Stop playback (K)"
+        case .shuttleForward: "Play forwards (L again: 2×, 4×)"
+        case .toggleCompare: "Compare color before/after"
+        case .toggleSafeArea: "Safe area"
+        case .toggleFullScreenPreview:
+            "Full-screen preview on or off: the program picture alone, on a second screen when there is one (Esc exits)"
+        case .toggleSnap: "Snap"
+        case .zoomIn: "Zoom timeline in"
+        case .zoomOut: "Zoom timeline out"
+        case .zoomFit: "Zoom timeline to fit"
+        case .toggleCompactHeader: "Switch the layer header between compact (V1/A1 IDs) and wide (full names)"
+        case .split: "Split selected clip at the playhead"
+        case .delete: "Delete selected clip (ripple)"
+        case .lift: "Lift selected clip (leave a gap)"
+        case .freezeFrame: "Freeze frame"
+        case .changeFraming: "Change framing"
+        case .unlinkAudio: "Unlink audio"
+        case .speedUp: "Speed up selected clip"
+        case .slowDown: "Slow down selected clip"
+        case .resetSpeed: "Reset selected clip to normal speed"
+        case .refreshWaveforms: "Refresh waveforms"
+        case .addVideoLayer: "Add video layer"
+        case .addAdjustmentLayer: "Add adjustment layer"
+        case .addTextLayer: "Add text layer"
+        case .addAudioLayer: "Add audio layer"
+        case .layerUp: "Move selected layer up"
+        case .layerDown: "Move selected layer down"
+        case .deleteLayer: "Delete selected empty layer"
+        case .sourceTogglePlayback: "Play or pause the source viewer"
+        case .sourcePreviousFrame: "Source previous frame"
+        case .sourceNextFrame: "Source next frame"
+        case .markIn: "Mark source in"
+        case .markOut: "Mark source out"
+        case .sourceInsert: "Insert source range at the playhead"
+        case .sourceOverwrite: "Overwrite with source range at the playhead"
+        case .sourceClose: "Close the source viewer (back to the timeline viewer)"
+        case .sourceShow: "Show the source viewer again with the clip last opened from Media"
+        case .showAgentChanges: "Show the latest agent changes"
+        case .undoAgentChange: "Undo the latest agent change"
+        case .dismissAgentChange: "Dismiss the agent change notice"
+        case .openExportOutput: "Open the last exported video"
+        case .revealExportOutput: "Reveal the last exported video in Finder"
+        case .cancelExport: "Cancel the running export (queued exports start next)"
+        case .dismissExportNotice: "Dismiss the export notice"
+        case .clearRecentProjects: "Clear recent projects"
+        case .showRecentProjects: "View all recent projects: search by name or path, open, reveal or remove"
+        case .selectAll: "Select every clip on the timeline"
+        case .deselect: "Clear the clip selection"
+        case .copyClips: "Copy selected clips"
+        case .cutClips: "Cut selected clips (leave gaps)"
+        case .pasteClips: "Paste copied clips at the playhead"
+        case .muteClips: "Mute or unmute selected clips"
+        case .sendToAgent: "Send selected clips to the open agent as the scope of its request"
+        case .showRunPanel: "Show the run panel again (the agent's stages, or the result card after its export)"
+        case .dismissRunPanel: "Close the run panel until the next run"
+        case .toggleRunPanel: "Agent button: open or close the run panel (the agent's stages, steps and jobs)"
+        case .stopAgent: "Run panel: stop the agent (cancel its jobs and interrupt its turn)"
+        case .toggleFollowAgent: "Run panel: follow mode on or off (the timeline scrolls to where the agent works)"
+        case .fixRunIssues: "Result card: ask the open agent to fix the review issues left, then export again"
+        case .tryAnotherRecipe: "Result card: ask the open agent for another version made with a different recipe"
+        }
+    }
+
+    /// The shortcut shown on the button or menu item.
+    public var shortcut: UIShortcut? { shortcuts.first }
+
+    /// Every key that runs the action; later ones work while the timeline has keyboard focus.
+    public var shortcuts: [UIShortcut] {
+        switch self {
+        case .split: [UIShortcut("b", [.command]), UIShortcut("s")]
+        case .delete: [UIShortcut("delete")]
+        case .lift: [UIShortcut("delete", [.shift])]
+        // Timeline-only, like `s`: a global ⇧Z would swallow capital Z typed in text fields.
+        case .zoomFit: [UIShortcut("z", [.shift])]
+        case .freezeFrame: [UIShortcut("f", [.shift])]
+        case .toggleSnap: [UIShortcut("n")]
+        // Arrow keys step the playhead while the timeline has keyboard focus.
+        case .previousFrame: [UIShortcut("left")]
+        case .nextFrame: [UIShortcut("right")]
+        case .backSecond: [UIShortcut("left", [.shift])]
+        case .forwardSecond: [UIShortcut("right", [.shift])]
+        // J/K/L while the timeline has keyboard focus, like `s`: global letters would swallow typing.
+        case .shuttleBack: [UIShortcut("j")]
+        case .shuttleStop: [UIShortcut("k")]
+        case .shuttleForward: [UIShortcut("l")]
+        // Timeline-only: the Edit menu's Copy, Cut, Paste and Select All reach the timeline while it has focus, and
+        // text fields everywhere else.
+        case .selectAll: [UIShortcut("a", [.command])]
+        case .copyClips: [UIShortcut("c", [.command])]
+        case .cutClips: [UIShortcut("x", [.command])]
+        case .pasteClips: [UIShortcut("v", [.command])]
+        case .deselect: [UIShortcut("escape")]
+        default: primaryShortcut.map { [$0] } ?? []
+        }
+    }
+
+    private var primaryShortcut: UIShortcut? {
+        switch self {
+        case .undo: UIShortcut("z", [.command])
+        case .redo: UIShortcut("z", [.command, .shift])
+        case .newProject: UIShortcut("n", [.command])
+        case .openProject: UIShortcut("o", [.command])
+        case .saveProject: UIShortcut("s", [.command])
+        case .closeProject: UIShortcut("w", [.command, .shift])
+        case .importMedia: UIShortcut("i", [.command])
+        case .showHistory: UIShortcut("z", [.command, .option])
+        case .showSettings: UIShortcut(",", [.command])
+        case .showCommands: UIShortcut("p", [.command, .shift])
+        case .showAssetSearch: UIShortcut("f", [.command, .shift])
+        case .showShortcuts: UIShortcut("/", [.command])
+        case .showReview: UIShortcut("r", [.command, .shift])
+        case .showExport: UIShortcut("e", [.command])
+        case .toggleAgentDock: UIShortcut("j", [.command])
+        case .toggleLibraryPanel: UIShortcut("s", [.command, .control])
+        case .toggleInspector: UIShortcut("i", [.command, .control])
+        case .askAgent: UIShortcut("k", [.command])
+        case .toggleSafeArea: UIShortcut("'", [.command, .shift])
+        case .toggleCompare: UIShortcut("c", [.command, .option])
+        // ⌃⌘F is View › Enter Full Screen (the whole window).
+        case .toggleFullScreenPreview: UIShortcut("f", [.command, .option])
+        case .speedUp: UIShortcut("]", [.command])
+        case .slowDown: UIShortcut("[", [.command])
+        case .resetSpeed: UIShortcut("r", [.command, .option])
+        case .showRecentProjects: UIShortcut("r", [.control])
+        case .unlinkAudio: UIShortcut("l", [.command, .option])
+        case .togglePlayback: UIShortcut("space")
+        case .zoomIn: UIShortcut("=", [.command])
+        case .zoomOut: UIShortcut("-", [.command])
+        case .sourceTogglePlayback: UIShortcut("space")
+        case .markIn: UIShortcut("i")
+        case .markOut: UIShortcut("o")
+        case .sourceInsert: UIShortcut("e")
+        case .sourceOverwrite: UIShortcut("q")
+        case .sourceClose: UIShortcut("escape")
+        default: nil
+        }
+    }
+
+    /// Actions that may show an alert or file panel; `ui.action` starts them and returns at once,
+    /// and the agent answers the dialog with `ui.dialog` / `ui.respond`.
+    public var mayShowModal: Bool { [.newProject, .openProject, .importMedia].contains(self) }
+
+    /// The action with this ID, or every action bound to this shortcut. One shortcut can mean
+    /// different actions in different places (`space` plays the source viewer when it is shown);
+    /// the caller picks the one that is available.
+    public static func matching(_ text: String) -> [UIAction] {
+        let value = text.trimmingCharacters(in: .whitespaces)
+        if let action = UIAction(rawValue: value.lowercased()) { return [action] }
+        guard let shortcut = UIShortcut(parsing: value) else { return [] }
+        return allCases.filter { $0.shortcuts.contains(shortcut) }
+    }
+}

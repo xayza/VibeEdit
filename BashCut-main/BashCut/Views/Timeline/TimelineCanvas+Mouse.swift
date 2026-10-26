@@ -1,0 +1,409 @@
+import AppKit
+import BashCutAutomation
+import BashCutDocument
+import BashCutProject
+
+/// Pointer and keyboard handling: scrubbing the playhead, moving and trimming clips, hover feedback,
+/// the clip context menu and timeline keys. Drags update overlays only; the edit is committed on release.
+extension TimelineCanvas {
+    /// Pointer distance that grabs the playhead line or a clip edge.
+    static let playheadGrab = 4.0
+    static let edgeGrab = 7.0
+    static let snapDistance = 8.0
+
+    // MARK: Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
+            owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard gesture == nil else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let onPlayhead = grabsPlayhead(point)
+        playheadView.highlighted = onPlayhead
+        if point.y < TimelineLayout.rulerHeight, point.x >= layout.leading {
+            showBadge(Timecode.string(min(project.duration, layout.frame(at: point.x)), fps: project.fps), at: point)
+        } else if onPlayhead {
+            showBadge(Timecode.string(playhead, fps: project.fps), at: point)
+        } else {
+            badge.show(nil, nearX: 0, y: 0, within: visibleRect)
+        }
+        let clip = onPlayhead ? nil : hit(at: point)
+        hoveredItemID = clip?.1.id
+        // The clip's full name, since its title on the timeline may be cut in the middle.
+        let name = clip.map { clipTitle($0.1, track: $0.2) }
+        if toolTip != name { toolTip = name }
+        if onPlayhead || clip.map({ !$0.2.isLocked && edge(at: point, of: $0.0) != nil }) == true {
+            hoverCursor = .resizeLeftRight
+        } else if let clip, !clip.2.isLocked {
+            hoverCursor = .openHand
+        } else {
+            hoverCursor = .arrow
+        }
+        hoverCursor.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard gesture == nil else { return }
+        hoveredItemID = nil
+        toolTip = nil
+        playheadView.highlighted = false
+        badge.show(nil, nearX: 0, y: 0, within: visibleRect)
+        NSCursor.arrow.set()
+    }
+
+    override func cursorUpdate(with event: NSEvent) { hoverCursor.set() }
+
+    func grabsPlayhead(_ point: CGPoint) -> Bool {
+        if point.y < TimelineLayout.rulerHeight { return point.x >= layout.leading }
+        guard abs(point.x - layout.x(playhead)) <= Self.playheadGrab else { return false }
+        // A clip edge under the playhead stays trimmable.
+        if let clip = hit(at: point), edge(at: point, of: clip.0) != nil { return false }
+        return true
+    }
+
+    func edge(at point: CGPoint, of rect: CGRect) -> BashCutProject.Edge? {
+        point.x - rect.minX < Self.edgeGrab ? .start : rect.maxX - point.x < Self.edgeGrab ? .end : nil
+    }
+
+    func showBadge(_ text: String, at point: CGPoint) {
+        var visible = visibleRect
+        visible.origin.x += layout.leading
+        visible.size.width -= layout.leading
+        badge.show(text, nearX: point.x, y: max(visible.minY + 2, point.y - 24), within: visible)
+    }
+
+    // MARK: Snapping
+
+    /// `frame` moved to the nearest clip edge, section, beat (or the playhead) within a few points, unless
+    /// snapping is off or ⌘ is held.
+    func snap(
+        _ frame: Int, excluding itemID: String?, toPlayhead: Bool, modifiers: NSEvent.ModifierFlags
+    ) -> (frame: Int, snapped: Bool) {
+        guard document.ui.snapping, !modifiers.contains(.command) else { return (frame, false) }
+        var candidates = project.tracks.flatMap(\.items).filter { $0.id != itemID }.flatMap { [$0.at, $0.end] }
+        candidates += project.sectionMarkers.map(\.at) + project.beatFrames + [0, project.duration]
+        if toPlayhead { candidates.append(playhead) }
+        // The selected clip's keys, so the playhead lands on one to change it.
+        if let selected = selectedID.flatMap(locate)?.1, let motion = selected.motion {
+            candidates += motion.keyedFrames.filter { (0..<selected.duration).contains($0) }.map { selected.at + $0 }
+        }
+        guard let nearest = candidates.min(by: { abs($0 - frame) < abs($1 - frame) }),
+            Double(abs(nearest - frame)) * scale < Self.snapDistance
+        else { return (frame, false) }
+        return (nearest, true)
+    }
+
+    // MARK: Gestures
+
+    override func mouseDown(with event: NSEvent) {
+        guard !document.busy, !document.conflict else { return }
+        window?.makeFirstResponder(self)
+        document.showTimelineViewer()
+        let point = convert(event.locationInWindow, from: nil)
+        dragRevision = document.project.revision
+        if grabsPlayhead(point) {
+            gesture = .playhead
+            NSCursor.resizeLeftRight.set()
+            scrub(to: point, event: event)
+            return
+        }
+        if let marker = sectionHit(at: point) {
+            gesture = .section(marker)
+            dragFrame = marker.at
+            document.timelineGestureActive = true
+            return
+        }
+        if let row = layout.row(at: point.y) { document.selectedTrackID = row.track.id }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if let (rect, item, track) = hit(at: point) {
+            selectedGap = nil
+            if modifiers.contains(.shift) {
+                document.extendSelection(to: item.id)
+                return
+            }
+            let toggling = modifiers.contains(.command)
+            let inGroup = document.selectedIDs.count > 1 && document.selectedIDs.contains(item.id)
+            if !toggling && !inGroup { document.selectedID = item.id }
+            guard !track.isLocked else {
+                if toggling { document.toggleSelection(item.id) }
+                document.message = String(format: String(localized: "%@ is locked"), track.name)
+                return
+            }
+            let edge = edge(at: point, of: rect)
+            var drag = ClipDrag(
+                item: item, track: track, origin: point, edge: edge,
+                rolling: edge != nil && event.modifierFlags.contains(.option),
+                slipping: edge == nil && toggling && track.kind != "text")
+            drag.group = inGroup && edge == nil && !toggling
+            drag.clickSelection = toggling ? .toggle : inGroup ? .only : nil
+            gesture = .clip(drag)
+            (edge == nil ? NSCursor.closedHand : NSCursor.resizeLeftRight).set()
+            ghost.begin(image: edge == nil ? capture(rect) : nil, outlineOnly: edge != nil)
+            document.timelineGestureActive = true
+            return
+        }
+        let keep = modifiers.contains(.command) || modifiers.contains(.shift)
+        if !keep { document.clearSelection() }
+        selectedGap = gapHit(at: point)
+        gesture = .marquee(origin: point, base: keep ? document.selectedIDs : [])
+        document.preview.seek(min(project.duration, layout.frame(at: point.x)))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        switch gesture {
+        case .playhead:
+            scrub(to: point, event: event)
+        case .section:
+            let target = snap(min(project.duration, layout.frame(at: point.x)), excluding: nil, toPlayhead: true, modifiers: event.modifierFlags)
+            dragFrame = target.frame
+            showGuides(at: target.frame, snapped: target.snapped)
+            showBadge(Timecode.string(target.frame, fps: project.fps), at: point)
+        case .clip(let drag):
+            dragClip(drag, to: point, event: event)
+        case .marquee(let origin, let base):
+            let rect = CGRect(
+                x: min(origin.x, point.x), y: min(origin.y, point.y),
+                width: abs(point.x - origin.x), height: abs(point.y - origin.y))
+            // A few points of travel before a click becomes a rectangle, so clicking empty space still just seeks.
+            guard rect.width > 3 || rect.height > 3 else { return }
+            marquee.show(rect)
+            document.select(base + items(in: rect))
+        case nil:
+            return
+        }
+        autoscroll(with: event)
+    }
+
+    private func scrub(to point: CGPoint, event: NSEvent) {
+        let target = snap(min(project.duration, layout.frame(at: point.x)), excluding: nil, toPlayhead: false, modifiers: event.modifierFlags)
+        document.preview.seek(target.frame)
+        placePlayhead(target.frame)
+        snapGuide.show(atX: target.snapped ? layout.x(target.frame) : nil, height: bounds.height)
+        showBadge(Timecode.string(target.frame, fps: project.fps), at: CGPoint(x: point.x, y: TimelineLayout.rulerHeight + 26))
+    }
+
+    private func dragClip(_ drag: ClipDrag, to point: CGPoint, event: NSEvent) {
+        let delta = Int(((point.x - drag.origin.x) / scale).rounded())
+        if drag.slipping {
+            updateSlip(delta: delta, item: drag.item)
+            showBadge(String(format: String(localized: "Source in: %d frames"), slipSourceIn ?? 0), at: point)
+            return
+        }
+        (drag.edge == nil ? NSCursor.closedHand : NSCursor.resizeLeftRight).set()
+        let start = drag.edge == .end ? drag.item.end : drag.item.at
+        let target = snap(max(0, start + delta), excluding: drag.item.id, toPlayhead: true, modifiers: event.modifierFlags)
+        dragFrame = target.frame
+        showGuides(at: target.frame, snapped: target.snapped)
+        showGhost(drag, frame: target.frame, pointer: point)
+        switch drag.edge {
+        case .start:
+            showBadge(Timecode.duration(drag.item.end - target.frame, fps: project.fps)
+                + "  " + Timecode.delta(target.frame - drag.item.at, fps: project.fps), at: point)
+        case .end:
+            showBadge(Timecode.duration(target.frame - drag.item.at, fps: project.fps)
+                + "  " + Timecode.delta(target.frame - drag.item.end, fps: project.fps), at: point)
+        case nil where drag.group:
+            let count = String(format: String(localized: "%d clips"), document.selectedIDs.count)
+            showBadge(Timecode.delta(target.frame - drag.item.at, fps: project.fps) + "  " + count, at: point)
+        case nil:
+            let row = layout.row(at: point.y)?.track.name ?? drag.track.name
+            showBadge(Timecode.string(target.frame, fps: project.fps) + "  " + row, at: point)
+        }
+    }
+
+    /// Where the dragged clip would land: its new extent on the layer under the pointer (moves) or on its own
+    /// layer (trims and rolls).
+    private func showGhost(_ drag: ClipDrag, frame: Int, pointer: CGPoint) {
+        let home = layout.row(for: drag.track.id)
+        // A group move keeps every clip on its own layer.
+        let row = drag.edge == nil && !drag.group ? (layout.row(at: pointer.y) ?? home) : home
+        guard let row else { return ghost.show(nil) }
+        let (start, end): (Int, Int) = switch drag.edge {
+        case .start: (min(frame, drag.item.end - 1), drag.item.end)
+        case .end: (drag.item.at, max(frame, drag.item.at + 1))
+        case nil: (frame, frame + drag.item.duration)
+        }
+        ghost.show(NSRect(x: layout.x(start), y: row.y, width: max(3, Double(end - start) * scale - 2), height: row.height))
+    }
+
+    /// A picture of the canvas inside `rect`, for the drag ghost.
+    private func capture(_ rect: CGRect) -> NSImage? {
+        guard let representation = bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        cacheDisplay(in: rect, to: representation)
+        let image = NSImage(size: rect.size)
+        image.addRepresentation(representation)
+        return image
+    }
+
+    func showGuides(at frame: Int?, snapped: Bool) {
+        dropGuide.show(atX: frame.map(layout.x), height: bounds.height)
+        snapGuide.show(atX: snapped ? frame.map(layout.x) : nil, height: bounds.height, width: 2)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let finished = gesture
+        defer {
+            gesture = nil
+            dragFrame = nil
+            slipSourceIn = nil
+            document.timelineGestureActive = false
+            showGuides(at: nil, snapped: false)
+            ghost.show(nil)
+            marquee.show(nil)
+            badge.show(nil, nearX: 0, y: 0, within: visibleRect)
+            mouseMoved(with: event)
+        }
+        switch finished {
+        case .section(let section):
+            guard let frame = dragFrame, frame != section.at else { return }
+            guard document.project.revision == dragRevision else { return gestureDropped() }
+            document.apply(.upsertSection(id: section.id, label: section.label, atFrame: frame), label: "Move section")
+        case .clip(let drag):
+            guard dragFrame != nil else { return clicked(drag) }
+            commitClipDrag(drag, event: event)
+        case .playhead, .marquee, nil:
+            return
+        }
+    }
+
+    private func gestureDropped() {
+        DebugLog.write("timeline", "gesture dropped: revision changed \(dragRevision)→\(document.project.revision)")
+        document.message = String(localized: "Timeline changed during the gesture; try again.")
+    }
+
+    /// A clip was clicked without dragging.
+    private func clicked(_ drag: ClipDrag) {
+        switch drag.clickSelection {
+        case .toggle: document.toggleSelection(drag.item.id)
+        case .only: document.selectedID = drag.item.id
+        case nil: return
+        }
+    }
+
+    private func commitClipDrag(_ drag: ClipDrag, event: NSEvent) {
+        guard let frame = dragFrame else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let name = drag.slipping ? "slip" : drag.rolling ? "roll" : drag.edge.map { "trim-\($0)" } ?? "move"
+        DebugLog.write("timeline", "\(name) \(drag.item.id) from \(drag.track.id)@\(drag.item.at) to frame \(frame)")
+        guard document.project.revision == dragRevision else { return gestureDropped() }
+        if drag.group {
+            commitGroupDrag(drag, frame: frame)
+        } else if drag.slipping, let slipSourceIn {
+            document.apply(.slip(item: drag.item.id, sourceIn: slipSourceIn), label: "Slip clip")
+        } else if drag.rolling, let edge = drag.edge {
+            document.apply(.roll(item: drag.item.id, edge: edge, toFrame: frame), label: "Roll cut")
+        } else if let edge = drag.edge {
+            document.apply(
+                .trim(item: drag.item.id, edge: edge, toFrame: frame, ripple: drag.track.role == TrackRole.main),
+                label: "Trim clip")
+        } else {
+            let destination = (layout.row(at: point.y) ?? layout.rows.last.map { $0 })?.track ?? drag.track
+            if destination.id == drag.track.id, destination.magnetic {
+                let before = destination.items.filter { $0.id != drag.item.id }.sorted { $0.at < $1.at }
+                    .first { frame < $0.at + $0.duration / 2 }?.id
+                document.apply(.reorder(item: drag.item.id, before: before), label: "Reorder clip")
+            } else {
+                do { try document.moveItem(drag.item.id, to: destination.id, at: frame) } catch {
+                    document.message = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// A selection dragged by one of its clips: every clip moves by the same frames on its own layer, or, on a
+    /// magnetic layer, that layer's selected clips move as one block, in order, before the clip under the drop.
+    private func commitGroupDrag(_ drag: ClipDrag, frame: Int) {
+        do {
+            guard drag.track.magnetic else { return try document.moveSelection(by: frame - drag.item.at) }
+            let block = document.selectedItems.filter { item in drag.track.items.contains { $0.id == item.id } }
+            let start = frame - (drag.item.at - (block.map(\.at).min() ?? drag.item.at))
+            let before = SelectionEdits.anchor(document.selectedIDs, on: drag.track.id, at: start, in: document.project)
+            try document.reorderSelection(on: drag.track.id, before: before)
+        } catch { document.message = error.localizedDescription }
+    }
+
+    private func updateSlip(delta: Int, item: Item) {
+        guard let media = project.media.first(where: { $0.id == item.mediaID }) else { return }
+        let offset = Double(delta) / project.fps.value * media.fps.value * item.speed
+        let consumed = Double(item.duration) / project.fps.value * media.fps.value * item.speed
+        let maximum = max(0, Int((Double(media.frames) - consumed + 0.0001).rounded(.down)))
+        slipSourceIn = min(maximum, max(0, item.sourceIn + Int(offset.rounded())))
+        dragFrame = item.at
+    }
+
+    // MARK: Keys
+
+    /// Plain letters that run an action while the timeline has keyboard focus.
+    private static let letterActions: [String: UIAction] = [
+        "s": .split, "n": .toggleSnap, "j": .shuttleBack, "k": .shuttleStop, "l": .shuttleForward,
+    ]
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers.isEmpty, let key = event.charactersIgnoringModifiers?.lowercased(),
+           let action = Self.letterActions[key] {
+            document.run(action)
+            return
+        }
+        switch (event.keyCode, event.charactersIgnoringModifiers?.lowercased()) {
+        case (53, _):
+            gesture = nil
+            dragFrame = nil
+            slipSourceIn = nil
+            document.timelineGestureActive = false
+            showGuides(at: nil, snapped: false)
+            ghost.show(nil)
+            marquee.show(nil)
+            selectedGap = nil
+            document.run(.deselect)
+        case (51, _), (117, _):
+            if let gap = selectedGap {
+                deleteGap(gap)
+            } else {
+                document.run(modifiers.contains(.shift) ? .lift : .delete)
+            }
+        case (123, _), (124, _):
+            let back = event.keyCode == 123
+            document.run(modifiers.contains(.shift) ? (back ? .backSecond : .forwardSecond) : (back ? .previousFrame : .nextFrame))
+        case (_, "z") where modifiers == .shift:
+            document.run(.zoomFit)
+        case (_, "f") where modifiers == .shift:
+            document.run(.freezeFrame)
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    func deleteGap(_ gap: (trackID: String, range: Range<Int>)) {
+        do {
+            try document.closeGap(at: gap.range.lowerBound, trackID: gap.trackID)
+            selectedGap = nil
+        } catch { document.message = error.localizedDescription }
+    }
+}
+
+/// The Edit menu's Copy, Cut, Paste and Select All are nil-targeted: they reach the timeline while it has focus.
+extension TimelineCanvas: NSMenuItemValidation {
+    @objc func copy(_ sender: Any?) { document.run(.copyClips) }
+    @objc func cut(_ sender: Any?) { document.run(.cutClips) }
+    @objc func paste(_ sender: Any?) { document.run(.pasteClips) }
+    override func selectAll(_ sender: Any?) { document.run(.selectAll) }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let action: UIAction? = switch menuItem.action {
+        case #selector(copy(_:)): .copyClips
+        case #selector(cut(_:)): .cutClips
+        case #selector(paste(_:)): .pasteClips
+        case #selector(selectAll(_:)): .selectAll
+        default: nil
+        }
+        return action.map(document.canPerform) ?? true
+    }
+}

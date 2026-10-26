@@ -1,0 +1,307 @@
+import BashCutEngine
+import Foundation
+import Observation
+
+/// App preferences from Settings, plus the recent-projects list. Each change is written to
+/// `UserDefaults` at once under the keys earlier builds used, so existing preferences carry over.
+@MainActor @Observable
+public final class SettingsModel {
+    /// Entries in Open Recent and on the Welcome screen.
+    public static let recentProjectLimit = 8
+    /// Entries kept for View All (#529).
+    public static let recentHistoryLimit = 50
+
+    /// Folder agents work in and shared media resolves against; nil uses the project folder, or without a project the
+    /// projects folder (~/Movies/BashCut), never the home folder.
+    public var workspace: URL? {
+        didSet {
+            if let workspace { defaults.set(workspace.path, forKey: Keys.workspace) } else {
+                defaults.removeObject(forKey: Keys.workspace)
+            }
+        }
+    }
+    /// Folder New Project and `project create` put new projects in; nil uses `standardProjectsFolder`.
+    public var projectsFolder: URL? { didSet { store(projectsFolder, Keys.projectsFolder) } }
+    /// Load the agent kit's editing skills in BashCut's Claude and Codex tabs. On by default.
+    public var loadAgentKit: Bool { didSet { defaults.set(loadAgentKit, forKey: Keys.loadAgentKit) } }
+    /// Claude tabs load only BashCut's MCP server (`--strict-mcp-config`): the user's other servers stay out of the
+    /// agent's context, which every turn resends.
+    public var agentOnlyBashCutMCP: Bool {
+        didSet { defaults.set(agentOnlyBashCutMCP, forKey: Keys.agentOnlyBashCutMCP) }
+    }
+    /// A kit folder to use instead of the one inside BashCut (a checkout being worked on); nil uses the built-in kit.
+    public var agentKitFolder: URL? { didSet { store(agentKitFolder, Keys.agentKitFolder) } }
+    /// The kit version whose setup banner the user put off with Later; a newer kit shows it again.
+    public var agentKitPromptDismissed: String? {
+        didSet { defaults.set(agentKitPromptDismissed, forKey: Keys.agentKitPromptDismissed) }
+    }
+    /// The kit version whose setup banner the dock has shown in full once; after that it takes one line.
+    public var agentKitPromptSeen: String? {
+        didSet { defaults.set(agentKitPromptSeen, forKey: Keys.agentKitPromptSeen) }
+    }
+    /// Claude Code's configuration folder when it is not found by itself (`CLAUDE_CONFIG_DIR`); nil detects it.
+    public var claudeConfigFolder: URL? {
+        didSet { store(claudeConfigFolder, Keys.claudeConfigFolder) }
+    }
+    /// Codex's home folder when it is not found by itself (`CODEX_HOME`); nil detects it.
+    public var codexHomeFolder: URL? {
+        didSet { store(codexHomeFolder, Keys.codexHomeFolder) }
+    }
+    /// `AgentProviderID` raw value of the agent the dock starts by default, or `lastUsedAgent` for the one the user
+    /// last opened or sent a brief to.
+    public var defaultProviderRaw: String { didSet { defaults.set(defaultProviderRaw, forKey: Keys.defaultAgent) } }
+    /// The agent the user last opened or sent a brief to; the default while `defaultProviderRaw` is `lastUsedAgent`.
+    public var lastAgentRaw: String? { didSet { defaults.set(lastAgentRaw, forKey: Keys.lastAgent) } }
+    public static let lastUsedAgent = "last"
+    public var allowAgentEdits: Bool { didSet { defaults.set(allowAgentEdits, forKey: Keys.allowAgentEdits) } }
+    /// Agents outside the app (CLI/MCP from any terminal) edit through the 0600 automation token file.
+    public var allowExternalAgents: Bool {
+        didSet { defaults.set(allowExternalAgents, forKey: Keys.allowExternalAgents) }
+    }
+    /// Dangerously allow all agent actions: timeline edits, privileged actions (exports, kit setup, library items for
+    /// every project, preferences), edits outside an attached scope and plugin action confirmations all run without
+    /// asking. Installing and trusting plugins follows `trustPluginsAutomatically`. Only the user can change it.
+    public var dangerouslyAllowAgents: Bool {
+        didSet { defaults.set(dangerouslyAllowAgents, forKey: Keys.dangerouslyAllowAgents) }
+    }
+    /// Whether agents may edit: their own switch, or everything allowed.
+    public var agentsCanEdit: Bool { dangerouslyAllowAgents || allowAgentEdits }
+    /// Whether privileged agent actions run without the approval sheet.
+    public var agentActionsAutoApproved: Bool { dangerouslyAllowAgents || autoApprovePrivileged }
+    /// What happens when an agent with an attached scope edits outside it (#356): `ask`, `block` or `off`
+    /// (`AgentScopeMode`). Like export approval, only the user can change it in Settings.
+    public var agentScopeModeRaw: String {
+        didSet { defaults.set(agentScopeModeRaw, forKey: Keys.agentScopeMode) }
+    }
+    /// Gate modes by ID (`G1`…`G5`, P1-D4); a gate not listed asks. Only the user loosens a gate.
+    public var workflowGatesRaw: [String: String] {
+        didSet { defaults.set(workflowGatesRaw, forKey: Keys.workflowGates) }
+    }
+    /// The most review rounds an agent runs before it hands the rest to the user (P1-D4).
+    public var maxReviewRounds: Int { didSet { defaults.set(maxReviewRounds, forKey: Keys.maxReviewRounds) } }
+    /// Run privileged agent commands (exports) without the in-app confirmation sheet. Off by default;
+    /// only the user can change it in Settings — no automation command exists for it.
+    public var autoApprovePrivileged: Bool {
+        didSet { defaults.set(autoApprovePrivileged, forKey: Keys.autoApprovePrivileged) }
+    }
+    /// Install, link and set up plugins without the approval sheet, and trust plugins in the user plugin folder again
+    /// after their files change. On by default so plugins are easy to add; plugins that come with a project still ask.
+    public var trustPluginsAutomatically: Bool {
+        didSet { defaults.set(trustPluginsAutomatically, forKey: Keys.trustPluginsAutomatically) }
+    }
+    /// Deliver editor events to plugin hooks. On by default; each plugin also has its own hooks switch.
+    public var runPluginHooks: Bool { didSet { defaults.set(runPluginHooks, forKey: Keys.runPluginHooks) } }
+    /// Apply edits proposed by plugin hooks at once instead of asking. Off by default; like export approval,
+    /// only the user can change it in Settings.
+    public var autoApplyPluginHookEdits: Bool {
+        didSet { defaults.set(autoApplyPluginHookEdits, forKey: Keys.autoApplyPluginHookEdits) }
+    }
+    /// Look for plugin updates in the registry once a day when a project opens. Only marks them; installing
+    /// stays a user decision.
+    public var checkPluginUpdatesDaily: Bool {
+        didSet { defaults.set(checkPluginUpdatesDaily, forKey: Keys.checkPluginUpdatesDaily) }
+    }
+    /// Look for a newer BashCut release once a day when a project opens. Only tells; updating stays a user decision.
+    public var checkAppUpdatesDaily: Bool {
+        didSet { defaults.set(checkAppUpdatesDaily, forKey: Keys.checkAppUpdatesDaily) }
+    }
+    /// The release the user skipped (Skip This Version): no prompt or ☰ dot for it; a newer release shows again.
+    public var appUpdateDismissed: String? {
+        didSet { defaults.set(appUpdateDismissed, forKey: Keys.appUpdateDismissed) }
+    }
+    /// Remind Me Later: the update prompt does not open by itself before this time. The ☰ dot stays.
+    public var appUpdateRemindAfter: Date? {
+        didSet { defaults.set(appUpdateRemindAfter, forKey: Keys.appUpdateRemindAfter) }
+    }
+    /// `ExportPreset` raw value the Export sheet starts with.
+    public var defaultExportPresetRaw: String {
+        didSet { defaults.set(defaultExportPresetRaw, forKey: Keys.defaultExportPreset) }
+    }
+    /// "system", "en" or "vi"; applies after a restart.
+    public var interfaceLanguage: String {
+        didSet {
+            defaults.set(interfaceLanguage, forKey: Keys.interfaceLanguage)
+            if interfaceLanguage == "system" {
+                defaults.removeObject(forKey: Keys.appleLanguages)
+            } else {
+                defaults.set([interfaceLanguage], forKey: Keys.appleLanguages)
+            }
+        }
+    }
+    /// Width of the timeline's layer header in points (#531), kept within `EditorUIState.timelineLeadingRange`.
+    public var timelineHeaderWidth: Double {
+        didSet {
+            defaults.set(timelineHeaderWidth, forKey: Keys.timelineHeaderWidth)
+            timelineHeaderWidthChosen = true
+        }
+    }
+    /// Whether the user set the header width (dragged it or switched it); until then it follows the window width
+    /// (`EditorUIState.defaultTimelineLeading`).
+    public private(set) var timelineHeaderWidthChosen = false
+    /// Developer mode (P1-2): shows what is meant for plugin authors, such as the sample plugins in the rail, the
+    /// menus and Plugins › Browse. Off by default; the CLI and automation reach those plugins either way.
+    public var developerMode: Bool { didSet { defaults.set(developerMode, forKey: Keys.developerMode) } }
+    /// The library panel's dragged width (P1-10); nil: the default for the screen.
+    public var libraryPanelWidth: Double? {
+        didSet { defaults.set(libraryPanelWidth, forKey: Keys.libraryPanelWidth) }
+    }
+    /// Tile size and grid or list per library panel name.
+    public var libraryPanelLayouts: [String: LibraryPanelLayout] {
+        didSet { defaults.set(try? JSONEncoder().encode(libraryPanelLayouts), forKey: Keys.libraryPanelLayouts) }
+    }
+    /// Most recent first, at most `recentHistoryLimit`.
+    public private(set) var recentHistory: [RecentProject]
+    /// The newest `recentProjectLimit` of the history: the menus and the Welcome screen.
+    public var recentProjects: [URL] { recentHistory.prefix(Self.recentProjectLimit).map(\.url) }
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    private enum Keys {
+        static let workspace = "agentWorkspace"
+        static let workflowGates = "workflowGates"
+        static let maxReviewRounds = "maxReviewRounds"
+        static let projectsFolder = "projectsFolder"
+        static let defaultAgent = "defaultAgent"
+        static let lastAgent = "lastAgent"
+        static let loadAgentKit = "loadAgentKit"
+        static let agentOnlyBashCutMCP = "agentOnlyBashCutMCP"
+        static let agentKitFolder = "agentKitFolder"
+        static let agentKitPromptDismissed = "agentKitPromptDismissed"
+        static let agentKitPromptSeen = "agentKitPromptSeen"
+        static let claudeConfigFolder = "claudeConfigFolder"
+        static let codexHomeFolder = "codexHomeFolder"
+        static let allowAgentEdits = "allowAgentEdits"
+        static let allowExternalAgents = "allowExternalAgents"
+        static let autoApprovePrivileged = "autoApprovePrivileged"
+        static let agentScopeMode = "agentScopeMode"
+        static let dangerouslyAllowAgents = "dangerouslyAllowAgents"
+        static let defaultExportPreset = "defaultExportPreset"
+        static let runPluginHooks = "runPluginHooks"
+        static let trustPluginsAutomatically = "trustPluginsAutomatically"
+        static let autoApplyPluginHookEdits = "autoApplyPluginHookEdits"
+        static let checkPluginUpdatesDaily = "checkPluginUpdatesDaily"
+        static let checkAppUpdatesDaily = "checkAppUpdatesDaily"
+        static let appUpdateDismissed = "appUpdateDismissed"
+        static let appUpdateRemindAfter = "appUpdateRemindAfter"
+        static let interfaceLanguage = "interfaceLanguage"
+        static let appleLanguages = "AppleLanguages"
+        /// Paths only, as builds before #529 read them; still written, read when the history below is missing.
+        static let recentProjectPaths = "recentProjectPaths"
+        static let recentHistory = "recentProjects"
+        static let timelineHeaderWidth = "timelineHeaderWidth"
+        static let developerMode = "developerMode"
+        static let libraryPanelWidth = "libraryPanelWidth"
+        static let libraryPanelLayouts = "libraryPanelLayouts"
+    }
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        workspace = defaults.string(forKey: Keys.workspace).map { URL(fileURLWithPath: $0) }
+        projectsFolder = defaults.string(forKey: Keys.projectsFolder).map { URL(fileURLWithPath: $0) }
+        defaultProviderRaw = defaults.string(forKey: Keys.defaultAgent) ?? Self.lastUsedAgent
+        lastAgentRaw = defaults.string(forKey: Keys.lastAgent)
+        loadAgentKit = defaults.object(forKey: Keys.loadAgentKit) as? Bool ?? true
+        agentOnlyBashCutMCP = defaults.object(forKey: Keys.agentOnlyBashCutMCP) as? Bool ?? true
+        agentKitFolder = defaults.string(forKey: Keys.agentKitFolder).map { URL(fileURLWithPath: $0) }
+        agentKitPromptDismissed = defaults.string(forKey: Keys.agentKitPromptDismissed)
+        agentKitPromptSeen = defaults.string(forKey: Keys.agentKitPromptSeen)
+        claudeConfigFolder = defaults.string(forKey: Keys.claudeConfigFolder).map { URL(fileURLWithPath: $0) }
+        codexHomeFolder = defaults.string(forKey: Keys.codexHomeFolder).map { URL(fileURLWithPath: $0) }
+        allowAgentEdits = defaults.object(forKey: Keys.allowAgentEdits) as? Bool ?? true
+        allowExternalAgents = defaults.object(forKey: Keys.allowExternalAgents) as? Bool ?? true
+        autoApprovePrivileged = defaults.bool(forKey: Keys.autoApprovePrivileged)
+        agentScopeModeRaw = defaults.string(forKey: Keys.agentScopeMode) ?? "ask"
+        workflowGatesRaw = defaults.dictionary(forKey: Keys.workflowGates) as? [String: String] ?? [:]
+        maxReviewRounds = (defaults.object(forKey: Keys.maxReviewRounds) as? Int).map {
+            min(max($0, WorkflowGate.roundLimits.lowerBound), WorkflowGate.roundLimits.upperBound)
+        } ?? 3
+        dangerouslyAllowAgents = defaults.object(forKey: Keys.dangerouslyAllowAgents) as? Bool ?? true
+        runPluginHooks = defaults.object(forKey: Keys.runPluginHooks) as? Bool ?? true
+        trustPluginsAutomatically = defaults.object(forKey: Keys.trustPluginsAutomatically) as? Bool ?? true
+        autoApplyPluginHookEdits = defaults.bool(forKey: Keys.autoApplyPluginHookEdits)
+        checkPluginUpdatesDaily = defaults.object(forKey: Keys.checkPluginUpdatesDaily) as? Bool ?? true
+        checkAppUpdatesDaily = defaults.object(forKey: Keys.checkAppUpdatesDaily) as? Bool ?? true
+        appUpdateDismissed = defaults.string(forKey: Keys.appUpdateDismissed)
+        appUpdateRemindAfter = defaults.object(forKey: Keys.appUpdateRemindAfter) as? Date
+        defaultExportPresetRaw = defaults.string(forKey: Keys.defaultExportPreset) ?? ExportPreset.tiktok.rawValue
+        interfaceLanguage = defaults.string(forKey: Keys.interfaceLanguage) ?? "system"
+        developerMode = defaults.bool(forKey: Keys.developerMode)
+        timelineHeaderWidth = (defaults.object(forKey: Keys.timelineHeaderWidth) as? Double).map {
+            min(max($0, EditorUIState.timelineLeadingRange.lowerBound), EditorUIState.timelineLeadingRange.upperBound)
+        } ?? EditorUIState.compactTimelineLeading
+        timelineHeaderWidthChosen = defaults.object(forKey: Keys.timelineHeaderWidth) != nil
+        libraryPanelWidth = (defaults.object(forKey: Keys.libraryPanelWidth) as? Double).map(LibraryPanelMetrics.clamp)
+        libraryPanelLayouts = defaults.data(forKey: Keys.libraryPanelLayouts)
+            .flatMap { try? JSONDecoder().decode([String: LibraryPanelLayout].self, from: $0) } ?? [:]
+        if let entries = defaults.array(forKey: Keys.recentHistory) as? [[String: Any]] {
+            recentHistory = entries.compactMap { entry in
+                (entry["path"] as? String).map {
+                    RecentProject(url: URL(fileURLWithPath: $0), name: entry["name"] as? String,
+                                  lastOpened: entry["opened"] as? Date)
+                }
+            }
+        } else {
+            recentHistory = defaults.stringArray(forKey: Keys.recentProjectPaths)?.map {
+                RecentProject(url: URL(fileURLWithPath: $0))
+            } ?? []
+        }
+    }
+
+    /// ~/Movies/BashCut: visible in Finder and, unlike Desktop or Documents, not behind a macOS privacy prompt.
+    /// Sandboxed builds reach it through the Movies folder entitlement.
+    public static var standardProjectsFolder: URL {
+        let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies", isDirectory: true)
+        return movies.appendingPathComponent("BashCut", isDirectory: true)
+    }
+
+    /// Where a new project goes when no other folder is chosen.
+    public var defaultProjectsFolder: URL { projectsFolder ?? Self.standardProjectsFolder }
+
+    /// Remembers the folder a project was just created in as the next default; the standard folder clears it.
+    public func rememberProjectsFolder(_ url: URL) {
+        let folder = url.standardizedFileURL
+        projectsFolder = folder == Self.standardProjectsFolder.standardizedFileURL ? nil : folder
+    }
+
+    /// The export preset chosen in Settings, or nil when the user never picked one.
+    public var savedExportPreset: ExportPreset? {
+        defaults.string(forKey: Keys.defaultExportPreset).flatMap(ExportPreset.init(rawValue:))
+    }
+
+    /// Moves `url` to the top of the recent projects, with the project's name and the time it was opened.
+    public func rememberRecentProject(_ url: URL, name: String? = nil, at date: Date = Date()) {
+        let entry = RecentProject(url: url, name: name, lastOpened: date)
+        recentHistory.removeAll { $0.url == entry.url }
+        recentHistory.insert(entry, at: 0)
+        if recentHistory.count > Self.recentHistoryLimit { recentHistory.removeLast(recentHistory.count - Self.recentHistoryLimit) }
+        saveRecentProjects()
+    }
+
+    public func forgetRecentProject(_ url: URL) {
+        let normalized = url.standardizedFileURL
+        recentHistory.removeAll { $0.url == normalized }
+        saveRecentProjects()
+    }
+
+    public func clearRecentProjects() {
+        recentHistory.removeAll()
+        defaults.removeObject(forKey: Keys.recentHistory)
+        defaults.removeObject(forKey: Keys.recentProjectPaths)
+    }
+
+    private func store(_ url: URL?, _ key: String) {
+        if let url { defaults.set(url.path, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+
+    private func saveRecentProjects() {
+        defaults.set(recentHistory.map { entry -> [String: Any] in
+            var fields: [String: Any] = ["path": entry.url.path]
+            if let name = entry.name { fields["name"] = name }
+            if let date = entry.lastOpened { fields["opened"] = date }
+            return fields
+        }, forKey: Keys.recentHistory)
+        // Builds before #529 (the Homebrew release beside a dev build) read the paths only.
+        defaults.set(recentProjects.map(\.path), forKey: Keys.recentProjectPaths)
+    }
+}

@@ -1,0 +1,302 @@
+import BashCutAgent
+import BashCutPlugin
+import SwiftUI
+
+/// The Skills section of the Knowledge window (#71): this project's skills, the ones for every project, the ones ready
+/// plugins ship (#377) and the agent kit's. Project and user skills are edited with a Markdown preview, turned on or
+/// off and deleted; plugin skills are read-only with Copy to this project or every project; kit skills are read-only
+/// with "Propose change…". Every action here is also a `skills` command.
+struct KnowledgeSkillsSection: View {
+    @Bindable var model: AgentKnowledgeModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                list
+                Divider()
+                addRow.padding(10)
+            }.frame(width: 300)
+            Divider()
+            Group {
+                if let ref = model.selectedSkill {
+                    KnowledgeSkillDetail(model: model, ref: ref)
+                } else {
+                    ContentUnavailableView(
+                        "No skill selected", systemImage: "wand.and.stars",
+                        description: Text("Add a skill for this project or every project, or read the agent kit's."))
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var list: some View {
+        List(selection: Binding(get: { model.selectedSkill }, set: { model.selectSkill($0) })) {
+            if model.hasProject {
+                Section("This project") { rows(model.skills, origin: .project) }
+            }
+            Section("Every project") { rows(model.userSkills, origin: .user) }
+            if !model.pluginSkills.isEmpty {
+                Section("Plugins") {
+                    ForEach(model.pluginSkills) { skill in
+                        let ref = KnowledgeSkillRef(origin: .plugin, name: skill.id)
+                        KnowledgeSkillRow(name: skill.name, summary: model.skillSummaries[ref], plugin: skill.pluginName)
+                            .tag(ref)
+                            .contextMenu { PluginSkillCopyButtons(model: model, ref: ref) }
+                    }
+                }
+            }
+            if let kit = model.kit {
+                Section(String(format: String(localized: "Agent kit %@"), kit.version)) {
+                    ForEach(kit.skills, id: \.self) { name in
+                        KnowledgeSkillRow(name: name, summary: model.skillSummaries[KnowledgeSkillRef(origin: .kit, name: name)])
+                            .tag(KnowledgeSkillRef(origin: .kit, name: name))
+                    }
+                }
+            }
+        }.listStyle(.sidebar).scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder private func rows(_ skills: [AgentKnowledgeSkill], origin: KnowledgeSkillRef.Origin) -> some View {
+        if skills.isEmpty {
+            Text("None yet").font(.caption).foregroundStyle(.secondary)
+        }
+        ForEach(skills, id: \.name) { skill in
+            let ref = KnowledgeSkillRef(origin: origin, name: skill.name)
+            KnowledgeSkillRow(name: skill.name, summary: model.skillSummaries[ref], skill: skill).tag(ref)
+                .contextMenu {
+                    Button(skill.enabled ? "Turn off" : "Turn on") { model.setSkillEnabled(ref, !skill.enabled) }
+                    Divider()
+                    Button("Delete…", role: .destructive) { model.deleteSkill(ref) }
+                }
+        }
+    }
+
+    private var addRow: some View {
+        let typed = !model.newSkillName.trimmingCharacters(in: .whitespaces).isEmpty
+        let valid = AgentKnowledgeStore.isValidSkillName(model.newSkillName)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                TextField("new-skill-name", text: $model.newSkillName).textFieldStyle(.roundedBorder)
+                    .onSubmit { if valid { model.createSkill() } }
+                Picker("Scope", selection: $model.newSkillScope) {
+                    Text("This project").tag(KnowledgeScope.project)
+                    Text("Every project").tag(KnowledgeScope.user)
+                }.labelsHidden().fixedSize().disabled(!model.hasProject)
+                Button("Add", action: model.createSkill).disabled(!valid)
+            }
+            if typed, !valid {
+                Text("Use lowercase words joined by hyphens").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct KnowledgeSkillRow: View {
+    let name: String
+    let summary: String?
+    var skill: AgentKnowledgeSkill?
+    /// The plugin that ships it, for a plugin skill.
+    var plugin: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(name).foregroundStyle(skill?.enabled == false ? .secondary : .primary)
+                Spacer(minLength: 4)
+                if let plugin { KnowledgeChip(text: plugin, color: .teal) }
+                if let skill {
+                    if !skill.enabled { KnowledgeChip(text: "Off", color: .gray) }
+                    if skill.claude { KnowledgeChip(text: "Claude", color: .purple) }
+                    if skill.codex { KnowledgeChip(text: "Codex", color: .cyan) }
+                }
+            }
+            if let summary, !summary.isEmpty {
+                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }.padding(.vertical, 2)
+    }
+}
+
+private struct KnowledgeSkillDetail: View {
+    @Bindable var model: AgentKnowledgeModel
+    let ref: KnowledgeSkillRef
+
+    private var isKit: Bool { ref.origin == .kit }
+    private var editable: Bool { !ref.isReadOnly || (isKit && model.kitProposal != nil) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            Picker("View", selection: $model.skillPreview) {
+                Text("Edit").tag(false)
+                Text("Preview").tag(true)
+            }.pickerStyle(.segmented).labelsHidden().fixedSize()
+            if model.skillPreview {
+                ScrollView { SkillMarkdownPreview(text: model.skillText).padding(12) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
+            } else {
+                TextEditor(text: $model.skillText).font(.system(size: 12, design: .monospaced))
+                    .border(.gray.opacity(0.3)).disabled(!editable)
+            }
+            footer
+        }.padding(16)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(ref.name).font(.headline)
+                    KnowledgeChip(text: scopeTitle, color: isKit ? .indigo : ref.origin == .plugin ? .teal : .gray)
+                    if let skill = model.selectedSkillEntry, !skill.enabled { KnowledgeChip(text: "Off", color: .gray) }
+                }
+                if let path {
+                    Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            }
+            Spacer()
+            if ref.origin == .plugin {
+                Menu("Copy…") { PluginSkillCopyButtons(model: model, ref: ref) }.fixedSize()
+            } else if isKit {
+                if model.kitProposal == nil {
+                    Button("Propose change…", systemImage: "square.and.pencil", action: model.beginKitProposal)
+                }
+            } else if let skill = model.selectedSkillEntry {
+                Toggle("On for agents", isOn: Binding(
+                    get: { skill.enabled }, set: { model.setSkillEnabled(ref, $0) }))
+                    .toggleStyle(.switch).controlSize(.small)
+                if ref.origin == .project, !(skill.claude && skill.codex) {
+                    Button("Share with Claude + Codex") { model.shareWithBoth(ref) }
+                }
+                Button("Delete…", systemImage: "trash", role: .destructive) { model.deleteSkill(ref) }
+                    .labelStyle(.iconOnly).help("Delete skill")
+            }
+        }
+    }
+
+    private var scopeTitle: String {
+        switch ref.origin {
+        case .project: "This project"
+        case .user: "Every project"
+        case .plugin: model.pluginSkill(ref.name)?.pluginName ?? String(localized: "Plugin")
+        case .kit: "Agent kit"
+        }
+    }
+
+    private var path: String? {
+        switch ref.origin {
+        case .kit: model.kit?.skillsFolder.appendingPathComponent("\(ref.name)/SKILL.md").path
+        case .plugin: model.pluginSkill(ref.name)?.file.path
+        default: model.selectedSkillEntry?.file.path
+        }
+    }
+
+    @ViewBuilder private var footer: some View {
+        if ref.origin == .plugin {
+            Text("Plugin skills are read-only and go away with the plugin. Copy one to change it.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else if isKit {
+            if let draft = model.kitProposal {
+                let binding = Binding(get: { model.kitProposal ?? draft }, set: { model.kitProposal = $0 })
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("The kit is read-only. Your change goes to the Inbox as a proposal with its diff.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField("What the change does", text: binding.summary).textFieldStyle(.roundedBorder)
+                    TextField("Why (what happened)", text: binding.reason).textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button("Send proposal", action: model.submitKitProposal)
+                            .disabled(!model.skillChanged
+                                || draft.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Cancel", action: model.discardSkillEdits)
+                    }
+                }
+            } else {
+                Text("Kit skills are read-only. Propose a change to send it to the Inbox for review.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            HStack {
+                Button("Save skill", action: model.saveSkill).keyboardShortcut("s", modifiers: .command)
+                    .disabled(!model.skillChanged)
+                Button("Revert", action: model.discardSkillEdits).disabled(!model.skillChanged)
+            }
+        }
+    }
+}
+
+/// Copy a plugin's skill to this project or to every project.
+private struct PluginSkillCopyButtons: View {
+    let model: AgentKnowledgeModel
+    let ref: KnowledgeSkillRef
+
+    var body: some View {
+        if model.hasProject {
+            Button("Copy to This Project") { model.copyPluginSkill(ref, to: .project) }
+        }
+        Button("Copy for Every Project") { model.copyPluginSkill(ref, to: .user) }
+    }
+}
+
+/// A light Markdown rendering of a SKILL.md: front matter as fields, headings, bullet and numbered lists, quotes,
+/// rules, code blocks and paragraphs with inline styling (blocks from `SkillMarkdown`).
+struct SkillMarkdownPreview: View {
+    let text: String
+
+    var body: some View {
+        let front = SkillFrontMatter(text)
+        VStack(alignment: .leading, spacing: 8) {
+            if !front.fields.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(front.keys, id: \.self) { key in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(key).font(.caption.bold()).foregroundStyle(.secondary).frame(width: 90, alignment: .leading)
+                            Text(front.fields[key] ?? "").font(.caption).textSelection(.enabled)
+                        }
+                    }
+                }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+            }
+            ForEach(Array(SkillMarkdown.blocks(front.body).enumerated()), id: \.offset) { _, block in
+                view(block)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+    }
+
+    @ViewBuilder private func view(_ block: SkillMarkdown.Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(Self.inline(text)).font(level == 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
+                .padding(.top, 4)
+        case .bullet(let text):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(verbatim: "•").foregroundStyle(.secondary)
+                Text(Self.inline(text))
+            }
+        case .numbered(let number, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(verbatim: "\(number).").foregroundStyle(.secondary).monospacedDigit()
+                Text(Self.inline(text))
+            }
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1).fill(Color.secondary.opacity(0.5)).frame(width: 3)
+                Text(Self.inline(text)).foregroundStyle(.secondary)
+            }.fixedSize(horizontal: false, vertical: true)
+        case .rule:
+            Divider().padding(.vertical, 2)
+        case .code(let text):
+            Text(text).font(.system(size: 11, design: .monospaced)).padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+        case .paragraph(let text):
+            Text(Self.inline(text))
+        }
+    }
+
+    private static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}

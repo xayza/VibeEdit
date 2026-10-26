@@ -1,0 +1,227 @@
+import AppKit
+import BashCutAgent
+import BashCutAutomation
+import BashCutDocument
+import BashCutProject
+import Foundation
+
+/// An agent session that can carry an attached scope: a chat tab or a terminal tab (#356).
+@MainActor protocol AgentScopeOwner: AnyObject {
+    /// The items attached with Send to Agent.
+    var scope: [AgentScopeItem] { get }
+    /// The user chose Allow for this request: edits outside the scope run until the request ends.
+    var scopeAllowed: Bool { get set }
+    /// Items made by in-scope edits (a split's second half, a title inside the span); they count as in scope.
+    var scopeExtra: Set<String> { get set }
+    /// The answer to the last held edit, for `context get` (`scope.last`).
+    var scopeLast: JSONValue? { get set }
+    /// The tab's title, for the dialog.
+    var title: String { get }
+}
+
+/// An agent edit outside its attached scope, waiting for the user (#356).
+struct AgentScopeHold: Identifiable {
+    let id: UUID
+    let operation: EditOperation
+    let label: String
+    let author: Author
+    let coalescingKey: String?
+    /// The revision the agent based the edit on; the edit still fails as stale if the project moved past it.
+    let baseRevision: Int?
+    /// The session that made it.
+    let token: String
+    /// The tab's title and what lies outside the scope, for the sheet.
+    let agent: String
+    let outside: String
+    /// The command that made it (P3-I1).
+    var command: String? = CommandCaller.method
+}
+
+/// The buttons of the held-edit sheet; the raw values are the `ui respond` option IDs.
+enum AgentScopeChoice: String {
+    case reject
+    case allowOnce = "allow-once"
+    case allowRequest = "allow-request"
+}
+
+/// What the guard decided for an edit it let through; `owner` is set while a scope is active, and items the edit
+/// makes join that scope.
+struct AgentScopeDecision {
+    var owner: (any AgentScopeOwner)?
+}
+
+extension ProjectDocument {
+    /// The guard's mode; off while all agent actions are allowed.
+    var agentScopeMode: AgentScopeMode {
+        settings.dangerouslyAllowAgents ? .off : AgentScopeMode(rawValue: settings.agentScopeModeRaw) ?? .ask
+    }
+
+    /// Rejects the held edit when the session that made it ends or loses edit access.
+    func rejectScopeHold(from token: String? = nil) {
+        guard let hold = scopeHold, token == nil || hold.token == token else { return }
+        resolveScopeHold(.reject, byUser: false)
+    }
+
+    /// The chat or terminal tab a live session token belongs to.
+    func scopeOwner(for token: String) -> (any AgentScopeOwner)? {
+        if let chat = chatAgents.owner(of: token) { return chat }
+        return agents.sessions.first { $0.token == token }
+    }
+
+    /// The scope guard (#356), called by the edit choke point before an edit applies. Edits by the user (also from
+    /// a shell tab), by sessions without an attached scope, and every edit while the guard is off pass. Otherwise
+    /// an edit outside the scope is rejected (block) or held while the user is asked (ask). Asking never blocks the
+    /// main actor: the command fails at once with `held` in its data, and the edit applies later if the user allows
+    /// it. Only the user can allow it. A stale edit passes, so it fails as stale instead of being held.
+    func checkAgentScope(
+        _ operation: EditOperation, label: String, author: Author, baseRevision: Int?, coalescingKey: String?
+    ) throws -> AgentScopeDecision {
+        guard author != .user, let token = CommandCaller.token, let owner = scopeOwner(for: token),
+            !owner.scope.isEmpty
+        else { return AgentScopeDecision() }
+        if let baseRevision, baseRevision != project.revision { return AgentScopeDecision() }
+        let mode = agentScopeMode
+        guard mode != .off, !owner.scopeAllowed else { return AgentScopeDecision(owner: owner) }
+        let check = AgentScopeGuard.check(operation, scope: owner.scope, extra: owner.scopeExtra, in: project)
+        guard !check.isInScope else { return AgentScopeDecision(owner: owner) }
+        let outside = check.summary(in: project)
+        DebugLog.write("edit", "scope guard (\(mode.rawValue)) stopped an edit by \(author): \(check.items.count) "
+            + "item(s) outside, project-wide: \(check.projectWide.joined(separator: ", "))")
+        guard mode == .ask else {
+            throw RPCFailure(
+                -32004, "Blocked: this edit changes \(outside), outside the attached scope. Ask the user to attach "
+                    + "these items or to change them themselves.", data: check.json)
+        }
+        guard scopeHold == nil else {
+            throw RPCFailure(
+                -32003, "Another edit outside the scope is waiting for the user; retry after they answer", category: .busyApproval)
+        }
+        let hold = AgentScopeHold(
+            id: UUID(), operation: operation, label: label, author: author, coalescingKey: coalescingKey,
+            baseRevision: baseRevision, token: token, agent: owner.title, outside: outside)
+        scopeHold = hold
+        owner.scopeLast = nil
+        NSApp.activate(ignoringOtherApps: true)
+        var data = check.json.object
+        data["held"] = .bool(true)
+        data["request"] = .string(hold.id.uuidString)
+        throw RPCFailure(
+            -32004, "Held: this edit changes \(outside), outside the attached scope. BashCut is asking the user and "
+                + "applies the edit only if they allow it. Do not retry: read context get (scope.held, scope.last) "
+                + "for their answer.", data: .object(data))
+    }
+
+    /// The scope guard for an agent's undo or redo (#356), checked as the change between the two states. A step
+    /// cannot be held for the user (it is no edit the app could replay later), so one that reaches outside the scope
+    /// fails in ask and block mode alike, naming what lies outside; the user can undo it themselves.
+    func checkAgentScopeStep(undo: Bool, author: Author) throws -> AgentScopeDecision {
+        guard author != .user, let token = CommandCaller.token, let owner = scopeOwner(for: token),
+            !owner.scope.isEmpty
+        else { return AgentScopeDecision() }
+        guard agentScopeMode != .off, !owner.scopeAllowed,
+            let target = (undo ? history.lastUndo : history.redoEntries.last)?.before
+        else { return AgentScopeDecision(owner: owner) }
+        let check = AgentScopeGuard.check(from: project, to: target, scope: owner.scope, extra: owner.scopeExtra)
+        guard !check.isInScope else { return AgentScopeDecision(owner: owner) }
+        let step = undo ? "undo" : "redo"
+        DebugLog.write("edit", "scope guard stopped an \(step) by \(author): \(check.items.count) item(s) outside")
+        throw RPCFailure(
+            -32004, "Blocked: this \(step) changes \(check.summary(in: project)), outside the attached scope. Ask the "
+                + "user to \(step) it in BashCut, or to attach these items.", data: check.json)
+    }
+
+    /// For a dry run, which is never held: what the guard would do with the edit for this caller. Nil when it would
+    /// pass; else the parts outside the scope and `mode` (ask: the edit would be held for the user; block: refused).
+    func agentScopePreview(_ operation: EditOperation, author: Author) -> JSONValue? {
+        guard author != .user, let token = CommandCaller.token, let owner = scopeOwner(for: token),
+            !owner.scope.isEmpty, agentScopeMode != .off, !owner.scopeAllowed
+        else { return nil }
+        let check = AgentScopeGuard.check(operation, scope: owner.scope, extra: owner.scopeExtra, in: project)
+        guard !check.isInScope else { return nil }
+        var data = check.json.object
+        data["mode"] = .string(agentScopeMode.rawValue)
+        return .object(data)
+    }
+
+    /// The user's answer to a held edit: Allow Once or Allow for This Request apply it now (on the current project),
+    /// Reject drops it. `context get` reports the outcome to the agent as `scope.last`.
+    func resolveScopeHold(_ choice: AgentScopeChoice, byUser: Bool = true) {
+        guard let hold = scopeHold else { return }
+        scopeHold = nil
+        let owner = scopeOwner(for: hold.token)
+        var outcome: [String: JSONValue] = ["request": .string(hold.id.uuidString), "label": .string(hold.label)]
+        switch choice {
+        case .reject:
+            outcome["outcome"] = .string("rejected")
+            if byUser { recordVerdict(KnowledgeVerdict(
+                verdict: .reject, signal: .scopeGuard, subject: hold.command, label: hold.label,
+                agent: hold.author.rawValue)) }
+            message = String(format: String(localized: "Rejected an edit by %@ outside the attached clips"), hold.agent)
+        case .allowOnce, .allowRequest:
+            if choice == .allowRequest { owner?.scopeAllowed = true }
+            let before = project
+            do {
+                // Run as the user's decision: no session token, so the guard does not stop it again.
+                let result = try CommandCaller.$token.withValue(nil) {
+                    try commitEdit(
+                        hold.operation, label: hold.label, author: hold.author, baseRevision: hold.baseRevision,
+                        coalescingKey: hold.coalescingKey)
+                }
+                if let owner { recordScopeEdit(AgentScopeDecision(owner: owner), before: before) }
+                recordVerdict(KnowledgeVerdict(
+                    verdict: .keep, signal: .scopeGuard, subject: hold.command, label: hold.label,
+                    agent: hold.author.rawValue, rev: result.revision))
+                outcome["outcome"] = .string("applied")
+                outcome["rev"] = .integer(result.revision)
+            } catch {
+                outcome["outcome"] = .string("failed")
+                outcome["error"] = .string(error.localizedDescription)
+                message = error.localizedDescription
+            }
+        }
+        DebugLog.write("edit", "held edit by \(hold.author) \(choice.rawValue): \(outcome["outcome"]?.string ?? "")")
+        owner?.scopeLast = .object(outcome)
+    }
+
+    /// After an edit the guard let through (in scope, or allowed by the user), the items it made join the scope, so
+    /// later edits to them are not asked.
+    func recordScopeEdit(_ decision: AgentScopeDecision, before: Project) {
+        guard let owner = decision.owner else { return }
+        let old = Set(before.tracks.flatMap(\.items).map(\.id))
+        owner.scopeExtra.formUnion(project.tracks.flatMap(\.items).map(\.id).filter { !old.contains($0) })
+    }
+
+    /// `context get`'s `agentPermissions`: what agents may do without asking, as the user set it in Settings › Agents.
+    var agentPermissionsJSON: JSONValue {
+        .object([
+            "edits": .bool(settings.agentsCanEdit), "autoApprove": .bool(settings.agentActionsAutoApproved),
+            "scopeGuard": .string(agentScopeMode.rawValue), "allowAll": .bool(settings.dangerouslyAllowAgents),
+        ])
+    }
+
+    /// `context get`'s `scope`: the caller's own tab. A session without a tab (the external agent token) gets null,
+    /// since nothing was attached to it and the guard does not check it; a caller without a token (a read from a
+    /// plain shell) sees the shown chat or terminal tab's.
+    var agentScopeJSON: JSONValue {
+        let owner: (any AgentScopeOwner)? = if let token = CommandCaller.token {
+            scopeOwner(for: token)
+        } else {
+            agents.chatPluginID.map { chatAgents.model(for: $0) } ?? agents.current
+        }
+        guard let owner else { return .null }
+        var fields: [String: JSONValue] = [
+            "scope": .array(owner.scope.map(\.json)), "mode": .string(agentScopeMode.rawValue),
+            "allowedForRequest": .bool(owner.scopeAllowed),
+            "held": scopeHold.flatMap { hold in
+                scopeOwner(for: hold.token) === owner
+                    ? .object(["request": .string(hold.id.uuidString), "label": .string(hold.label),
+                               "outside": .string(hold.outside)])
+                    : nil
+            } ?? .null,
+            "last": owner.scopeLast ?? .null,
+        ]
+        if let chat = owner as? ChatAgentModel { fields["plugin"] = .string(chat.pluginID) }
+        if let session = owner as? TerminalSession { fields["terminal"] = .string(session.provider.id.rawValue) }
+        return .object(fields)
+    }
+}

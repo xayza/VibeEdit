@@ -1,0 +1,296 @@
+import Darwin
+import Foundation
+
+public enum AutomationPaths {
+    public static var socket: String {
+        ProcessInfo.processInfo.environment["BASHCUT_SOCKET"]
+            ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/BashCut/automation.sock").path
+    }
+
+    /// Token for agents outside the app, written by the running app with mode 0600 next to the 0600 socket,
+    /// so it grants nothing beyond what can already open the socket. Removed when the app quits or the
+    /// Settings switch is off.
+    public static var tokenFile: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/BashCut/automation-token")
+    }
+
+    /// The variables a process started by the app reaches this session with: the socket, its token and the project
+    /// (`BASHCUT_SOCKET`, `BASHCUT_SESSION_TOKEN`, `BASHCUT_PROJECT`); `AgentLaunch` sets the same three for agents.
+    public static func sessionEnvironment(token: String, socket: String = socket, project: URL?) -> [String: String] {
+        ["BASHCUT_SOCKET": socket, "BASHCUT_SESSION_TOKEN": token, "BASHCUT_PROJECT": project?.path ?? ""]
+    }
+
+    /// The session token from an in-app terminal (`BASHCUT_SESSION_TOKEN`), else the external-agent token file.
+    public static func sessionToken() -> String? {
+        if let token = ProcessInfo.processInfo.environment["BASHCUT_SESSION_TOKEN"], !token.isEmpty { return token }
+        guard let data = try? Data(contentsOf: tokenFile), data.count < 256 else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private enum SocketIO {
+    static let maximumBytes = 8 * 1024 * 1024
+    static func address(_ path: String) throws -> sockaddr_un {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bytes = Array(path.utf8) + [0]
+        guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            throw RPCFailure(-32000, "Socket path is too long")
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
+        return address
+    }
+    /// `seconds` bounds each read and write; a call that waits on purpose (`jobs.wait`) gets longer.
+    static func configure(_ descriptor: Int32, seconds: Int = 10) {
+        var noSignal: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+        setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
+    }
+    static func readLine(_ descriptor: Int32) throws -> Data {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while data.count <= maximumBytes {
+            let count = Darwin.read(descriptor, &buffer, buffer.count)
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw RPCFailure(-32000, "Socket closed or timed out") }
+            if let newline = buffer[..<count].firstIndex(of: 10) {
+                guard data.count + newline <= maximumBytes else {
+                    throw RPCFailure(-32600, "Request exceeds the size limit")
+                }
+                data.append(contentsOf: buffer[..<newline])
+                return data
+            }
+            data.append(contentsOf: buffer[..<count])
+        }
+        throw RPCFailure(-32600, "Request exceeds the size limit")
+    }
+    static func writeLine(_ data: Data, _ descriptor: Int32) throws {
+        guard data.count <= maximumBytes else {
+            throw RPCFailure(-32000, "Response exceeds the size limit")
+        }
+        var bytes = data
+        bytes.append(10)
+        try bytes.withUnsafeBytes { raw in
+            guard let start = raw.baseAddress else { return }
+            var offset = 0
+            while offset < raw.count {
+                let count = Darwin.write(descriptor, start.advanced(by: offset), raw.count - offset)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw RPCFailure(-32000, "Cannot write socket response") }
+                offset += count
+            }
+        }
+    }
+}
+
+public enum UnixRPCClient {
+    /// How long to wait for the answer: `jobs.wait` holds the request up to its `timeout` (at most
+    /// `JobWaitDefaults.maximum`), `checkpoint.status`
+    /// and `batch.status` up to their `wait`, `agent.ask`
+    /// until the user answers or its `timeout` passes; `project.create --import`, `review.run --measure` and
+    /// `export.start --wait` while they import, measure or export; `color.measure` while it renders the edit;
+    /// `review.verify` while it re-samples the picture. Other calls get 30 s: the app can be busy on the main actor
+    /// for longer than 10 s (run11: `project.create` 10.0 s), and a write that answers late is not a failed write.
+    static func readSeconds(_ request: RPCRequest) -> Int {
+        switch request.method {
+        case "jobs.wait": min(JobWaitDefaults.maximum, max(1, request.params["timeout"]?.int ?? JobWaitDefaults.seconds)) + 10
+        case "checkpoint.status": min(JobWaitDefaults.maximum, max(0, request.params["wait"]?.int ?? 0)) + 10
+        case "batch.status": min(JobWaitDefaults.maximum, max(0, request.params["wait"]?.int ?? 0)) + 10
+        case "project.create": request.params["importFootage"] == .bool(true) ? 120 : 30
+        case "review.run": request.params["measure"] == .bool(true) ? 115 : 30
+        case "export.start": request.params["wait"] == .bool(true) ? 115 : 30
+        case "color.measure": 60
+        case "review.verify": 115
+        case "agent.ask":
+            min(AgentAskDefaults.maximumSeconds, max(5, request.params["timeout"]?.int ?? AgentAskDefaults.seconds)) + 10
+        default: 30
+        }
+    }
+
+    public static func call(_ request: RPCRequest, path: String = AutomationPaths.socket) throws
+        -> RPCResponse
+    {
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw RPCFailure(-32000, "Cannot create socket") }
+        defer { Darwin.close(descriptor) }
+        SocketIO.configure(descriptor, seconds: readSeconds(request))
+        var address = try SocketIO.address(path)
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else {
+            throw RPCFailure(-32000, "Cannot reach BashCut; open the app first")
+        }
+        try SocketIO.writeLine(JSONEncoder().encode(request), descriptor)
+        let line: Data
+        do { line = try SocketIO.readLine(descriptor) } catch let failure as RPCFailure where failure.code == -32000 {
+            throw RPCFailure(-32000, "BashCut closed the connection or did not answer within \(readSeconds(request)) s; the call may still "
+                + "finish, so check its result before running it again")
+        }
+        let response = try RPCResponse.parse(line)
+        if let error = response.error { throw error }
+        return response
+    }
+}
+
+/// Accepts connections on a dedicated thread and serves each client on a concurrent queue, so blocking
+/// socket I/O never occupies the Swift cooperative pool and one slow client cannot stall the others.
+private final class AcceptLoop: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private let finished = DispatchSemaphore(value: 0)
+    private let slots = DispatchSemaphore(value: 16)
+    private let clients = DispatchQueue(label: "app.bashcut.automation.clients", attributes: .concurrent)
+
+    private var isCancelled: Bool { lock.withLock { cancelled } }
+
+    func start(descriptor: Int32, handler: @escaping @Sendable (RPCRequest) async -> RPCResponse) {
+        let thread = Thread { [self] in
+            while !isCancelled {
+                var pollFD = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+                guard Darwin.poll(&pollFD, 1, 100) > 0 else { continue }
+                let client = Darwin.accept(descriptor, nil, nil)
+                guard client >= 0 else { continue }
+                SocketIO.configure(client)
+                guard slots.wait(timeout: .now()) == .success else {
+                    Self.reply(RPCResponse(id: .null, error: RPCFailure(-32003, "Too many automation clients", category: .unavailable).typed), client)
+                    Darwin.close(client)
+                    continue
+                }
+                clients.async { [self] in
+                    defer {
+                        Darwin.close(client)
+                        slots.signal()
+                    }
+                    Self.serve(client, handler: handler)
+                }
+            }
+            finished.signal()
+        }
+        thread.name = "BashCut automation accept"
+        thread.start()
+    }
+
+    /// Stops accepting and waits for the accept thread to exit; in-flight clients finish on their own.
+    func stop() async {
+        lock.withLock { cancelled = true }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { [finished] in
+                finished.wait()
+                continuation.resume()
+            }
+        }
+    }
+
+    // Bounded, one request per connection; callers reconnect for each command.
+    private static func serve(_ client: Int32, handler: @escaping @Sendable (RPCRequest) async -> RPCResponse) {
+        let request: RPCRequest
+        do {
+            request = try RPCRequest.parse(SocketIO.readLine(client))
+        } catch {
+            reply(RPCResponse(id: .null, error: RPCFailure(-32600, "Invalid JSON-RPC request").typed), client)
+            return
+        }
+        // App Nap throttles a BashCut in the background: without this, a call waited up to 3 s while an export or
+        // its checks used the CPU (#350). Socket traffic does not count as activity by itself.
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep, reason: "Automation request")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
+        let box = ResponseBox()
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            box.response = await handler(request)
+            done.signal()
+        }
+        done.wait()
+        if let response = box.response { reply(response, client) }
+    }
+
+    private static func reply(_ response: RPCResponse, _ client: Int32) {
+        guard let encoded = try? JSONEncoder().encode(response) else { return }
+        try? SocketIO.writeLine(encoded, client)
+    }
+}
+
+/// Written once by the handler task before `done` is signalled, then read by the client thread.
+private final class ResponseBox: @unchecked Sendable {
+    var response: RPCResponse?
+}
+
+public actor UnixRPCServer {
+    private var loop: AcceptLoop?
+    private var descriptor: Int32 = -1
+    private var path: String?
+    public init() {}
+
+    public func start(path: String, handler: @escaping @Sendable (RPCRequest) async -> RPCResponse)
+        throws
+    {
+        guard loop == nil else { return }
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try clearStaleSocket(path)
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw RPCFailure(-32000, "Cannot create automation socket") }
+        SocketIO.configure(descriptor)
+        var address = try SocketIO.address(path)
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard bound == 0 else {
+            Darwin.close(descriptor)
+            throw RPCFailure(-32000, "Cannot bind automation socket")
+        }
+        guard chmod(path, 0o600) == 0, Darwin.listen(descriptor, 16) == 0 else {
+            Darwin.close(descriptor)
+            unlink(path)
+            throw RPCFailure(-32000, "Cannot secure automation socket")
+        }
+        self.descriptor = descriptor
+        self.path = path
+        let loop = AcceptLoop()
+        loop.start(descriptor: descriptor, handler: handler)
+        self.loop = loop
+    }
+    private func clearStaleSocket(_ path: String) throws {
+        // A stale socket is only removed after an unsuccessful probe; never evict a live instance.
+        if FileManager.default.fileExists(atPath: path) {
+            do {
+                _ = try UnixRPCClient.call(RPCRequest(method: "context.get"), path: path)
+                throw RPCFailure(-32000, "Another BashCut instance owns the automation socket")
+            } catch let error as RPCFailure
+                where error.message == "Cannot reach BashCut; open the app first"
+            {
+                guard
+                    (try FileManager.default.attributesOfItem(atPath: path)[.type]) as? FileAttributeType
+                        == .typeSocket
+                else {
+                    throw RPCFailure(-32000, "Automation path is not a socket")
+                }
+                try FileManager.default.removeItem(atPath: path)
+            }
+        }
+    }
+
+    public func stop() async {
+        if descriptor >= 0 { Darwin.shutdown(descriptor, SHUT_RDWR) }
+        await loop?.stop()
+        if descriptor >= 0 { Darwin.close(descriptor) }
+        if let path { unlink(path) }
+        descriptor = -1
+        loop = nil
+        path = nil
+    }
+}

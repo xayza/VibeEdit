@@ -1,0 +1,114 @@
+import Testing
+
+@testable import BashCutProject
+
+struct ReviewTests {
+    @Test("Review finds picture gaps; caption lines and zones need the project's limits and outputs")
+    func rules() throws {
+        var project = Project(name: "Review")
+        let media = Media(fields: [
+            "id": .string("m"), "path": .string("video.mov"), "frames": .integer(300),
+            "fps": FrameRate().json,
+        ])
+        var caption = Item(id: "caption", at: 0, duration: 90)
+        caption["text"] = .string(String(repeating: "a", count: 50))
+        project = try project.applying(
+            .group(
+                label: "fixture", author: .user,
+                ops: [
+                    .addMedia(media),
+                    .insert(track: "v1", item: Item(id: "clip", media: "m", at: 30, duration: 60)),
+                    .insert(track: "t1", item: caption),
+                ])
+        ).project
+        let bare = TimelineReview.run(project)
+        #expect(Set(bare.map(\.id)) == ["gap-clip", "platform-none"])
+        #expect(bare.first { $0.id == "gap-clip" }?.facts["frames"] == .integer(30))
+        project["review"] = .object(["captionLineChars": .integer(32), "minSpeechCoverage": .number(0.9)])
+        let issues = TimelineReview.run(project, context: ReviewContext(targets: ReviewTargets(platforms: [.tiktok])))
+        #expect(Set(issues.map(\.id)) == ["gap-clip", "caption-caption", "safe-bottom-caption", "coverage"])
+        #expect(issues.allSatisfy { ["gap", "caption", "safe-bottom", "coverage"].contains($0.kind) })
+    }
+
+    @Test("Review flags each missing font once, at its first text item (#415)")
+    func missingFont() throws {
+        var project = Project(name: "Fonts")
+        var ops: [EditOperation] = []
+        for (index, font) in ["Gone-Bold", "Gone-Bold", "Here-Regular"].enumerated() {
+            var text = Item(id: "t\(index)", at: index * 30, duration: 30)
+            text["text"] = .string("Xin chào")
+            text["textStyle"] = .object(["font": .string(font)])
+            ops.append(.insert(track: "t1", item: text))
+        }
+        project = try project.applying(.group(label: "fixture", author: .user, ops: ops)).project
+        let issues = TimelineReview.run(project, fontAvailable: { $0 == "Here-Regular" })
+        #expect(issues.filter { $0.title == "Missing font" }.map(\.id) == ["font-t0"])
+        #expect(!TimelineReview.run(project).contains { $0.title == "Missing font" })
+    }
+
+    @Test("textStyle font and colours are validated (#413)")
+    func textStyleRules() throws {
+        let project = Project(name: "Style")
+        for (style, valid) in [
+            (["font": JSONValue.string("Montserrat-ExtraBold"), "fill": .string("#FFD400"), "stroke": .string("#000000")], true),
+            (["fill": JSONValue.string("yellow")], false),
+            (["stroke": JSONValue.string("#00000")], false),
+            (["font": JSONValue.string("")], false),
+        ] {
+            var text = Item(id: "t", at: 0, duration: 30)
+            text["text"] = .string("A")
+            text["textStyle"] = .object(style)
+            let result = Result { try project.applying(.insert(track: "t1", item: text)) }
+            #expect(((try? result.get()) != nil) == valid, "\(style)")
+        }
+    }
+
+    @Test("Voiceover near tagged speech: within the project's margin, else only actual overlap")
+    func voiceoverProximity() throws {
+        var project = Project(name: "Voice review", fps: FrameRate(30, 1))
+        let media = Media(fields: [
+            "id": .string("m"), "path": .string("video.mov"), "frames": .integer(300),
+            "fps": FrameRate(30, 1).json,
+        ])
+        var speech = Item(id: "speech", media: "m", at: 0, duration: 30)
+        speech["tag"] = .object(["role": .string("speech")])
+        let close = Item(id: "close", media: "m", at: 38, duration: 5)
+        let boundary = Item(id: "boundary", media: "m", at: 39, duration: 5)
+        var extraVoice = Track(id: "a5", kind: "audio", role: "voiceover")
+        extraVoice.items = [close, boundary]
+        project = try project.applying(
+            .group(
+                label: "fixture", author: .user,
+                ops: [.addMedia(media), .insert(track: "v1", item: speech)]
+            )
+        ).project
+        project.tracks.append(extraVoice)
+
+        #expect(!TimelineReview.run(project).contains { $0.id.hasPrefix("overlap-") })
+        project["review"] = .object(["voiceoverMarginSeconds": .number(0.3)])
+        let overlapIDs = Set(
+            TimelineReview.run(project).filter { $0.id.hasPrefix("overlap-") }.map(\.id))
+        #expect(overlapIDs == ["overlap-close"])
+        #expect(abs(TimelineReview.speechCoverage(project) - 36.0 / 44.0) < 0.0001)
+    }
+
+    @Test("Clips placed by hand count as speech from their first heard word to the last (#507-36)")
+    func heardCoverage() throws {
+        let media = Media(fields: [
+            "id": .string("m"), "path": .string("talk.mov"), "frames": .integer(300), "fps": FrameRate(30, 1).json,
+        ])
+        var project = try Project(name: "Talk", fps: FrameRate(30, 1)).applying(.group(label: "fixture", author: .user, ops: [
+            .addMedia(media), .insert(track: "v1", item: Item(id: "a", media: "m", at: 0, duration: 90, sourceIn: 30)),
+        ])).project
+        #expect(TimelineReview.speechCoverage(project) == 0)
+        // Words at 1.5–2.0 s and 3.0–3.5 s of the source: the clip plays from 1 s, so frames 15–75 are heard.
+        let words = [("xin", 1.5, 2.0), ("chào", 3.0, 3.5), ("muộn", 9.0, 9.5)].map {
+            CaptionWords.Timed(text: $0.0, start: $0.1, end: $0.2)
+        }
+        let transcripts = ["m": SourceTranscript(key: "k", language: "vi", provider: [:], transcribedAt: "", phrases: [], words: words)]
+        #expect(abs(TimelineReview.speechCoverage(project, transcripts: transcripts) - 60.0 / 90.0) < 0.0001)
+        let index = project.tracks.firstIndex { $0.id == "v1" }!
+        project.tracks[index].items[0]["muted"] = .bool(true)
+        #expect(TimelineReview.speechCoverage(project, transcripts: transcripts) == 0)
+    }
+}

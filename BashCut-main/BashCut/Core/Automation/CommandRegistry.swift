@@ -1,0 +1,336 @@
+import BashCutProject
+import Foundation
+
+public struct AuditEvent: Codable, Sendable {
+    public let date: Date
+    public let method: String
+    public let author: Author?
+    public let succeeded: Bool
+}
+
+/// The live session token of the command running on this task, so checks deeper in the app (the scope guard,
+/// #356) know which agent session made an edit. Nil outside a command or for a request without a live token.
+public enum CommandCaller {
+    @TaskLocal public static var token: String?
+    /// The command being handled, so an edit can say which command made it (P3-I1 verdicts).
+    @TaskLocal public static var method: String?
+}
+
+/// An agent's request as it starts and ends (#534), so the editor can show what the agent is doing without asking
+/// it for anything. `finished` is nil while it runs; `job` is the job a command started, when its result names one.
+public struct CommandActivity: Sendable {
+    public let id: UUID
+    public let method: String
+    public let mode: CommandMode
+    public let author: Author
+    public let token: String?
+    public var finished: Bool?
+    public var error: String?
+    public var job: String?
+}
+
+/// One failed request, kept for `context get` (the token only to tell sessions apart; never reported).
+struct FailedRequest {
+    let date: Date
+    let method: String
+    let code: Int
+    let category: RPCErrorCategory
+    let message: String
+    let token: String?
+}
+
+@MainActor public final class CommandRegistry {
+    public typealias Handler = @MainActor (CommandArguments, Author?) async throws -> JSONValue
+    private var handlers: [String: Handler] = [:]
+    private var tokens: [String: Author] = [:]
+    /// Tokens that have not read the project since it was switched, with the new project's name.
+    private var switchedProject: [String: String] = [:]
+    /// Reads that show an agent the open project; any one of them ends the gate after a switch.
+    static let projectReads: Set<String> = ["context.get", "timeline.get", "project.get"]
+    /// Reads that edit when the named flag is set; they then need a session token like any edit.
+    static let editingFlags: [String: String] = ["plan.check": "save"]
+
+    /// The mode `request` runs in: its spec's, except a read with its editing flag set runs as an edit (token check,
+    /// switch gate and the agent activity steps all see an edit).
+    static func mode(of spec: CommandSpec, _ request: RPCRequest) -> CommandMode {
+        guard spec.mode == .read, let flag = editingFlags[request.method], request.params[flag] == .bool(true) else {
+            return spec.mode
+        }
+        return .edit
+    }
+    /// Commands that switch the project; their result shows the new project to the caller.
+    static let projectSwitches: Set<String> = ["project.open", "project.create", "project.close", "edl.import"]
+    /// Commands that never edit the open project, so the read-after-switch gate does not hold them: a batch switches
+    /// projects for every item, and its caller must still be able to cancel or retry it, or save presets.
+    static let switchIndependent: Set<String> = ["batch.run", "batch.retry", "batch.cancel", "batch.presets"]
+    private let audit: @Sendable (AuditEvent) -> Void
+    /// The last failed requests, newest last (P2-G2), so `context get` can show an agent what keeps failing.
+    private var failures: [FailedRequest] = []
+    static let failureMemory = 30
+    private let logger: (@Sendable (String, String) -> Void)?
+    /// The open project's revision, set by the document; `baseRev: "last"` resolves against what each token saw.
+    public var currentRevision: (@MainActor () -> Int?)?
+    /// Turns a `track` argument that names a layer by its short label (`V2`, `A1`, #531) into the track ID; set by
+    /// the document.
+    public var resolveTrack: (@MainActor (String) -> String)?
+    /// Told when an agent's request starts and ends (#534); reads and requests without a live token are included.
+    public var onActivity: (@MainActor (CommandActivity) -> Void)?
+    /// The project revision as of each token's last successful command.
+    private var seenRevision: [String: Int] = [:]
+    public init(audit: @escaping @Sendable (AuditEvent) -> Void = { _ in }) {
+        logger = nil
+        self.audit = audit
+    }
+
+    init(logger: @escaping @Sendable (String, String) -> Void) {
+        self.logger = logger
+        audit = { _ in }
+    }
+
+    private func log(_ category: String, _ message: @autoclosure () -> String) {
+        if let logger { logger(category, message()) } else { DebugLog.write(category, message()) }
+    }
+
+    /// Registers the handler for a catalogued command. Requests reach it only after spec validation.
+    public func register(_ method: String, handler: @escaping Handler) {
+        assert(CommandCatalog.spec(named: method) != nil, "\(method) is not in CommandCatalog.specs")
+        handlers[method] = handler
+    }
+
+    /// Catalogued commands that have no handler yet.
+    public var unhandledCommands: [String] { CommandCatalog.specs.map(\.name).filter { handlers[$0] == nil } }
+
+    public func issueToken(author: Author) -> String {
+        let token = UUID().uuidString + UUID().uuidString
+        tokens[token] = author
+        return token
+    }
+    public func revoke(_ token: String) {
+        tokens.removeValue(forKey: token)
+        switchedProject.removeValue(forKey: token)
+        seenRevision.removeValue(forKey: token)
+    }
+
+    /// After the open project changes, every live token must read the new project (`context get`, `timeline get` or
+    /// `project get`) before it may edit, so an agent cannot apply what it remembers of the old project to the new
+    /// one. Sessions stay open across a switch; this is the boundary instead.
+    public func projectSwitched(to name: String) {
+        for token in tokens.keys { switchedProject[token] = name }
+    }
+
+    /// Whether `token` still has to read the project after a switch.
+    public func needsProjectRead(_ token: String) -> Bool { switchedProject[token] != nil }
+    /// The author a live token edits as, or nil for an unknown or revoked token.
+    public func author(for token: String) -> Author? { tokens[token] }
+    public func revokeAll() {
+        tokens.removeAll()
+        switchedProject.removeAll()
+        seenRevision.removeAll()
+    }
+
+    /// `baseRev: "last"` is the revision as of the caller's last successful command, so an agent need not read the
+    /// project just to learn the revision its own edit produced. A change by anyone else since then still makes the
+    /// edit stale.
+    private func resolvingLastRevision(_ params: [String: JSONValue], token: String?) throws -> [String: JSONValue] {
+        guard params["baseRev"] == .string(CommandCatalog.lastRevision) else { return params }
+        guard let token, let seen = seenRevision[token] else {
+            throw RPCFailure(-32602, "baseRev last needs an earlier command of this session; read context get first")
+        }
+        var params = params
+        params["baseRev"] = .integer(seen)
+        return params
+    }
+    /// A `track` given as a short label (`V2`) becomes the track ID it names.
+    private func resolvingTrack(_ params: [String: JSONValue]) -> [String: JSONValue] {
+        guard let track = params["track"]?.string, let resolveTrack else { return params }
+        var params = params
+        params["track"] = .string(resolveTrack(track))
+        return params
+    }
+    /// An app-internal change that does not touch what agents edit (a background AV1/VP9 conversion relinking its
+    /// media to the converted copy) moved the revision from `old` to `new`: callers whose `baseRev: "last"` was `old`
+    /// now see `new`, so the bump does not make their next edit stale. Anyone who had not caught up stays stale.
+    public func carrySeenRevisions(from old: Int, to new: Int) {
+        guard new != old else { return }
+        for (token, seen) in seenRevision where seen == old { seenRevision[token] = new }
+    }
+
+    /// `automatic` marks requests run without a prompt because the user turned confirmation off.
+    public func recordApproval(method: String, author: Author, approved: Bool, automatic: Bool = false) {
+        audit(
+            AuditEvent(
+                date: Date(), method: method + (automatic ? ".auto-approved" : approved ? ".approved" : ".denied"),
+                author: author, succeeded: approved))
+    }
+    /// Audits work that does not arrive as a command, such as plugin actions and hooks.
+    public func record(method: String, author: Author?, succeeded: Bool) {
+        audit(AuditEvent(date: Date(), method: method, author: author, succeeded: succeeded))
+    }
+
+    public func handle(_ request: RPCRequest) async -> RPCResponse {
+        let author = request.token.flatMap { tokens[$0] }
+        let started = Date()
+        let who = author.map { "\($0)" } ?? "anonymous"
+        let activity = startActivity(request, author: author)
+        do {
+            guard request.jsonrpc == "2.0" else { throw RPCFailure(-32600, "JSON-RPC 2.0 required") }
+            guard let spec = CommandCatalog.spec(named: request.method), let handler = handlers[request.method]
+            else {
+                throw RPCFailure(-32601, "Unknown command: \(request.method)")
+            }
+            if Self.mode(of: spec, request) != .read {
+                guard author != nil else {
+                    throw RPCFailure(-32001, "A live agent session token is required")
+                }
+                if let token = request.token, let name = switchedProject[token],
+                    !Self.switchIndependent.contains(request.method)
+                {
+                    throw RPCFailure(
+                        -32002, "The open project changed to \"\(name)\". Read it first (context get or timeline get), "
+                            + "then retry with its revision.")
+                }
+            }
+            if Self.projectReads.contains(request.method), let token = request.token {
+                switchedProject.removeValue(forKey: token)
+            }
+            let params = resolvingTrack(try resolvingLastRevision(request.params, token: request.token))
+            let arguments = CommandArguments(try spec.validate(params))
+            let result = try await CommandCaller.$token.withValue(author == nil ? nil : request.token) {
+                try await CommandCaller.$method.withValue(request.method) { try await handler(arguments, author) }
+            }
+            if let token = request.token, author != nil, let revision = currentRevision?() { seenRevision[token] = revision }
+            if Self.projectSwitches.contains(request.method), let token = request.token {
+                switchedProject.removeValue(forKey: token)
+            }
+            audit(AuditEvent(date: Date(), method: request.method, author: author, succeeded: true))
+            endActivity(activity, error: nil, result: result)
+            log(
+                "rpc", "\(request.method) by \(who) ok in \(Self.milliseconds(since: started)) ms "
+                    + "params=\(Self.summary(spec.logParameters(arguments.values)))")
+            return RPCResponse(id: request.id, result: result)
+        } catch {
+            audit(AuditEvent(date: Date(), method: request.method, author: author, succeeded: false))
+            endActivity(activity, error: error, result: nil)
+            let failure = RPCFailure.from(error, fallbackCode: -32602).typed
+            failures.append(
+                FailedRequest(
+                    date: Date(), method: request.method, code: failure.code, category: failure.category,
+                    message: String(failure.message.prefix(200)), token: request.token))
+            if failures.count > Self.failureMemory { failures.removeFirst(failures.count - Self.failureMemory) }
+            log(
+                "rpc", "\(CommandCatalog.spec(named: request.method)?.name ?? "unknown command") by \(who) "
+                    + "FAILED \(failure.code) in \(Self.milliseconds(since: started)) ms")
+            return RPCResponse(id: request.id, error: failure)
+        }
+    }
+
+    private func startActivity(_ request: RPCRequest, author: Author?) -> CommandActivity? {
+        guard let author, onActivity != nil, let spec = CommandCatalog.spec(named: request.method) else { return nil }
+        let activity = CommandActivity(id: UUID(), method: request.method, mode: Self.mode(of: spec, request), author: author, token: request.token)
+        onActivity?(activity)
+        return activity
+    }
+
+    private func endActivity(_ activity: CommandActivity?, error: (any Error)?, result: JSONValue?) {
+        guard var activity else { return }
+        activity.finished = error == nil
+        activity.error = error.map { String($0.localizedDescription.prefix(200)) }
+        activity.job = result?.object["job"]?.string
+        onActivity?(activity)
+    }
+
+    /// Failed requests of the last `window` seconds, newest first: those sent with `token` when given, else all; and
+    /// how many of them at the newest end in a row share a method and category (`repeated`).
+    public func recentFailures(token: String?, window: TimeInterval = 900, now: Date = Date()) -> JSONValue {
+        let mine = failures.filter { now.timeIntervalSince($0.date) <= window && (token == nil || $0.token == token) }
+        let newest = mine.last
+        let repeated = newest.map { last in
+            mine.reversed().prefix { $0.method == last.method && $0.category == last.category }.count
+        } ?? 0
+        return .object([
+            "count": .integer(mine.count), "repeated": .integer(repeated),
+            "items": .array(mine.suffix(10).reversed().map { failure in
+                .object([
+                    "method": .string(failure.method), "code": .integer(failure.code),
+                    "category": .string(failure.category.rawValue), "message": .string(failure.message),
+                    "secondsAgo": .integer(Int(now.timeIntervalSince(failure.date))),
+                ])
+            }),
+        ])
+    }
+
+    private static func milliseconds(since date: Date) -> Int { Int(Date().timeIntervalSince(date) * 1000) }
+
+    /// Compact JSON for the debug log, at most `limit` characters. It stops walking as soon as the limit is reached,
+    /// so a large result (project.get, timeline.get) costs no more than a small one on the main actor.
+    nonisolated static func summary(_ params: [String: JSONValue], limit: Int = 400) -> String {
+        summary(.object(params), limit: limit)
+    }
+
+    nonisolated static func summary(_ value: JSONValue, limit: Int = 400) -> String {
+        var writer = BoundedJSONWriter(limit: limit)
+        return writer.write(value) ? writer.text : String(writer.text.prefix(limit)) + "…"
+    }
+}
+
+/// Writes JSON until `limit` bytes; each call returns false once the limit is reached.
+private struct BoundedJSONWriter {
+    let limit: Int
+    var text = ""
+
+    mutating func write(_ value: JSONValue) -> Bool {
+        switch value {
+        case .null: append("null")
+        case .bool(let flag): append(flag ? "true" : "false")
+        case .integer(let number): append(String(number))
+        case .number(let number): append(String(number))
+        case .string(let string): append(quoted(string))
+        case .array(let values): write(values.lazy.map { (nil, $0) }, open: "[", close: "]")
+        case .object(let fields): write(fields.keys.sorted().lazy.map { ($0, fields[$0] ?? .null) }, open: "{", close: "}")
+        }
+    }
+
+    private mutating func write(_ entries: some Sequence<(String?, JSONValue)>, open: String, close: String) -> Bool {
+        guard append(open) else { return false }
+        var first = true
+        for (key, value) in entries {
+            if !first, !append(",") { return false }
+            first = false
+            if let key, !append(quoted(key) + ":") { return false }
+            if !write(value) { return false }
+        }
+        return append(close)
+    }
+
+    private mutating func append(_ piece: String) -> Bool {
+        text += piece
+        return text.utf8.count < limit
+    }
+
+    private func quoted(_ string: String) -> String {
+        let escaped = string.prefix(limit).replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+        return "\"" + escaped + "\""
+    }
+}
+
+public actor AuditStore {
+    private let url: URL
+    public init(url: URL) { self.url = url }
+    public func append(_ event: AuditEvent) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(
+                atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        var data = try JSONEncoder().encode(event)
+        data.append(10)
+        try handle.write(contentsOf: data)
+    }
+}

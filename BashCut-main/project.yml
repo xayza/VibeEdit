@@ -1,0 +1,241 @@
+name: BashCut
+options:
+  minimumXcodeGenVersion: "2.46.0"
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "14.0"
+configFiles:
+  Debug: Configs/Debug.xcconfig
+  Release: Configs/Release.xcconfig
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.20.0
+  ArgumentParser:
+    url: https://github.com/apple/swift-argument-parser
+    from: 1.5.0
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.17.0
+  Collections:
+    url: https://github.com/apple/swift-collections
+    from: 1.1.4
+  MCPSwiftSDK:
+    url: https://github.com/modelcontextprotocol/swift-sdk.git
+    exactVersion: 0.12.1
+  BashCutCore:
+    path: Packages/BashCutCore
+  # The root Package.swift is the single source of targets; Xcode links its library products.
+  BashCut:
+    path: .
+targets:
+  # The target name must differ from "BashCut" beyond case: on a case-insensitive disk both targets
+  # would share one intermediates folder and leak compiler flags into each other.
+  BashCutCLI:
+    type: tool
+    platform: macOS
+    sources: [CLI]
+    settings:
+      base:
+        PRODUCT_NAME: bashcut
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: BashCut/Helper.entitlements
+    dependencies:
+      - package: BashCut
+        product: BashCutAutomation
+      - package: BashCutCore
+        product: BashCutProject
+      - package: ArgumentParser
+        product: ArgumentParser
+  BashCutMCP:
+    type: tool
+    platform: macOS
+    sources: [MCPBridge]
+    settings:
+      base:
+        PRODUCT_NAME: bashcut-mcp
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: BashCut/Helper.entitlements
+    dependencies:
+      - package: BashCut
+        product: BashCutAutomation
+      - package: MCPSwiftSDK
+        product: MCP
+  # Core plugin: the provider executable of Plugins/audio-analysis (bin/bashcut-audio-analysis, its plugin.json
+  # entrypoint; each core plugin's executable has its own name, or an archive fails on two products named alike),
+  # embedded in Contents/Resources/Plugins
+  # (Contents/PlugIns is for code bundles; codesign rejects a plain plugin folder there).
+  AudioAnalysisProvider:
+    type: tool
+    platform: macOS
+    sources: [Plugins/audio-analysis/Sources/Provider]
+    settings:
+      base:
+        PRODUCT_NAME: bashcut-audio-analysis
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: BashCut/Helper.entitlements
+    dependencies:
+      - package: BashCut
+        product: BashCutAudioAnalysis
+  # Core plugin: the provider executable of Plugins/vision (Apple Vision faces, people and text).
+  VisionProvider:
+    type: tool
+    platform: macOS
+    sources: [Plugins/vision/Sources/Provider]
+    settings:
+      base:
+        PRODUCT_NAME: bashcut-vision
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: BashCut/Helper.entitlements
+    dependencies:
+      - package: BashCut
+        product: BashCutVisionAnalysis
+  BashCut:
+    type: application
+    platform: macOS
+    sources:
+      - path: BashCut
+        excludes: [Core/Engine, Core/Storage, Core/Agent, Core/Automation, Core/Plugins, Core/Services, Info.plist, BashCut.entitlements, Resources/en.lproj, Resources/vi.lproj]
+      - path: BashCut/Resources/en.lproj/InfoPlist.strings
+        buildPhase: resources
+      - path: BashCut/Resources/vi.lproj/InfoPlist.strings
+        buildPhase: resources
+      - path: Plugins/audio-analysis/plugin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Plugins/bashcut.audio-analysis
+      - path: Plugins/vision/plugin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Plugins/bashcut.vision
+    # The agent kit from a sibling checkout ($BASHCUT_AGENT_KIT); without one the app downloads kit releases.
+    postCompileScripts:
+      - name: Bundle the agent kit
+        basedOnDependencyAnalysis: false
+        script: scripts/bundle-agent-kit.sh "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AgentKit"
+    info:
+      path: BashCut/Info.plist
+      properties:
+        CFBundleExecutable: BashCutApp
+        CFBundleDevelopmentRegion: en
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleIconName: AppIcon
+        LSApplicationCategoryType: public.app-category.video
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSMicrophoneUsageDescription: BashCut records voiceover directly into the current project.
+        # Help menu and About panel links (MainMenu); an empty value hides the item.
+        BCRepositoryURL: https://github.com/dongnguyenvie/BashCut
+        BCIssuesURL: https://github.com/dongnguyenvie/BashCut/issues
+        BCContactEmail: dongnguyenvie@gmail.com
+        # YES in the Debug configuration (Configs/Debug.xcconfig): a build from Xcode is not a release, so it does not
+        # look for updates by itself. scripts/run.sh sets it too.
+        BCDevelopmentBuild: $(BC_DEVELOPMENT_BUILD)
+        # Finder "Open With" and Dock drops for project.bashcut.json or a project folder; never the default for JSON.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: BashCut Project
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.json, public.folder]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.bashcut
+        EXECUTABLE_NAME: BashCutApp
+        CODE_SIGN_ENTITLEMENTS: BashCut/BashCut.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - package: SwiftTerm
+        product: SwiftTerm
+      - target: BashCutCLI
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: BashCutMCP
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: AudioAnalysisProvider
+        embed: true
+        codeSign: true
+        copy:
+          destination: resources
+          subpath: Plugins/bashcut.audio-analysis/bin
+      - target: VisionProvider
+        embed: true
+        codeSign: true
+        copy:
+          destination: resources
+          subpath: Plugins/bashcut.vision/bin
+      - package: BashCut
+        product: BashCutEngine
+      - package: BashCut
+        product: BashCutStorage
+      - package: BashCut
+        product: BashCutAgent
+      - package: BashCut
+        product: BashCutAutomation
+      - package: BashCut
+        product: BashCutPlugins
+      - package: BashCut
+        product: BashCutDocument
+      - package: BashCutCore
+        product: BashCutProject
+      - package: BashCutCore
+        product: BashCutImport
+      - package: BashCutCore
+        product: BashCutInterchange
+      # Plugin types appear in app code directly; static products are not re-exported by frameworks.
+      - package: BashCutCore
+        product: BashCutPlugin
+      # BashCutProject's public history API exposes Deque, so the app links it directly in Xcode.
+      - package: Collections
+        product: DequeModule
+  # Runs every per-module test folder from Package.swift in one Xcode bundle.
+  BashCutTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        excludes: [BashCutTestSupport, "**/__Snapshots__"]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: BashCut
+        product: BashCutAudioAnalysis
+      - package: BashCut
+        product: BashCutEngine
+      - package: BashCut
+        product: BashCutStorage
+      - package: BashCut
+        product: BashCutAgent
+      - package: BashCut
+        product: BashCutAutomation
+      - package: BashCut
+        product: BashCutPlugins
+      - package: BashCut
+        product: BashCutDocument
+      - package: BashCut
+        product: BashCutTestSupport
+      - package: BashCutCore
+        product: BashCutProject
+      - package: BashCutCore
+        product: BashCutPlugin
+      - package: BashCutCore
+        product: BashCutInterchange
+      - package: Collections
+        product: DequeModule
+      - package: SnapshotTesting
+        product: SnapshotTesting
+schemes:
+  BashCut:
+    build:
+      targets:
+        BashCut: all
+    test:
+      targets: [BashCutTests]
