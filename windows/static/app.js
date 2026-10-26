@@ -152,6 +152,7 @@ function renderInspector() {
   $("inspVolume").value = item.volume || 0;
   $("inspText").value = item.text || "";
   $("inspLut").value = (item.color && item.color.lut) || "";
+  $("inspStrength").value = (item.color && item.color.strength !== undefined) ? item.color.strength : "";
   $("inspPreset").value = (item.color && item.color.preset) || "";
   renderKeyframes();
 }
@@ -178,7 +179,7 @@ $("btnRedo").addEventListener("click", async () => { try { await api("/api/redo"
 async function doExport(preset) {
   setStatus("Exporting (" + preset + ")… this can take a while.");
   try {
-    const data = await api("/api/export", { preset });
+    const data = await api("/api/export", { preset, normalize: $("exportNormalize") ? $("exportNormalize").checked : false });
     setStatus(`Export done: ${data.report.output} (${data.report.duration}s, ${data.report.width}x${data.report.height}).`);
     await load();
   } catch (err) { setStatus("Export failed: " + err.message, true); }
@@ -210,7 +211,7 @@ $("inspectorForm").addEventListener("submit", async (e) => {
     await api("/api/project", { op: "set_fade", item: $("inspId").value, fadeIn: Number($("inspFadeIn").value), fadeOut: Number($("inspFadeOut").value) });
     if ($("inspText").value) await api("/api/project", { op: "set_text", item: $("inspId").value, text: $("inspText").value });
     await api("/api/project", { op: "set_volume", item: $("inspId").value, volume: Number($("inspVolume").value) });
-    if ($("inspLut").value || $("inspPreset").value) await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null });
+    if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "") await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value) });
     setStatus("Clip updated."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
@@ -287,3 +288,24 @@ $("uploadForm").addEventListener("submit", async (e) => {
 });
 
 load().catch((err) => setStatus("Failed to load project: " + err.message, true));
+
+$("batchForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const folders = $("batchFolders").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  setStatus("Batch exporting… this can take a while.");
+  try {
+    const data = await api("/api/batch", { folders, preset: "full", normalize: $("batchNormalize").checked });
+    const ok = data.results.filter((r) => r.ok).length;
+    $("batchResult").textContent = `Batch done: ${ok}/${data.results.length} succeeded. ` + data.results.map((r) => `${r.project}: ${r.ok ? "OK" : "FAIL " + r.error}`).join(" | ");
+    setStatus(`Batch done: ${ok}/${data.results.length} succeeded.`);
+  } catch (err) { setStatus("Batch failed: " + err.message, true); }
+});
+$("btnOtio").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/otio", {});
+    const blob = new Blob([data.otio], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "timeline.otio"; a.click();
+    setStatus(`OTIO exported: ${data.report.tracks} tracks, ${data.report.clips} items.`);
+  } catch (err) { setStatus("OTIO failed: " + err.message, true); }
+});

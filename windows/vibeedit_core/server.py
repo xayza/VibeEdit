@@ -10,7 +10,9 @@ Stdlib only (http.server). Endpoints:
   GET  /api/project            project JSON + timeline text
   POST /api/project            {"op": ...} edit operation (see project.py)
   POST /api/undo  /api/redo     snapshot history (server session)
-  POST /api/export             {"preset": "draft"|"full"}
+  POST /api/export             {"preset": "draft"|"full", "normalize": bool}
+  POST /api/batch              {"folders": [...], "preset": ..., "normalize": bool}
+  POST /api/otio               {} -> writes render/timeline.otio, returns it
   GET  /api/preview             latest export file, if any
   POST /api/media/upload       multipart file -> project media/
   GET  /  /static/*            the web UI
@@ -116,7 +118,13 @@ class State:
                                            op["property"], float(op["value"]))
             elif kind == "set_color":
                 result = proj.set_color(op["item"], op.get("lut"),
-                                        op.get("preset"))
+                                        op.get("preset"),
+                                        op.get("strength"))
+            elif kind == "add_marker":
+                result = proj.add_marker(op["text"], int(op["at"]))
+            elif kind == "remove_marker":
+                proj.remove_marker(op["marker"])
+                result = {"deleted": op["marker"]}
             elif kind == "srt_import":
                 result = proj.import_srt(op.get("track", "t1"), op["srt"])
             elif kind == "set_project":
@@ -259,9 +267,32 @@ def make_handler(state: State):
                         out = os.path.join(state.project_dir, "render",
                                            f"export-{preset}.mp4")
                         report = render(state.project.data,
-                                        state.project_dir, out, preset=preset)
+                                        state.project_dir, out, preset=preset,
+                                        normalize_audio=bool(body.get("normalize", False)))
                         state.last_export = out
                         self._send_json({"ok": True, "report": report})
+                    elif parsed.path == "/api/batch":
+                        from .export_ops import batch_export
+                        body = self._read_json()
+                        folders = [state.project_dir] + [
+                            f for f in body.get("folders", [])
+                            if f != state.project_dir]
+                        results = batch_export(
+                            folders,
+                            preset=body.get("preset", "full"),
+                            normalize_audio=bool(body.get("normalize", False)))
+                        self._send_json({"ok": True, "results": results})
+                    elif parsed.path == "/api/otio":
+                        from .export_ops import export_otio
+                        self._read_json()
+                        out = os.path.join(state.project_dir, "render",
+                                           "timeline.otio")
+                        report = export_otio(state.project.data,
+                                             state.project_dir, out)
+                        with open(out, encoding="utf-8") as fh:
+                            otio_text = fh.read()
+                        self._send_json({"ok": True, "report": report,
+                                         "otio": otio_text})
                     elif parsed.path == "/api/media/upload":
                         length = int(self.headers.get("Content-Length") or 0)
                         body = self.rfile.read(length)

@@ -6,7 +6,7 @@ every edit is saved to the project file. Tool names mirror the
 original BashCut MCP tools (``bashcut_<group>_<command>``) with the
 ``vibeedit_`` prefix; the full original catalog has 249 tools, of
 which Phase 1 implements the core timeline/project subset below.
-The rest are documented as Phase 2 in VibeEdit/docs/windows-port.md.
+Phase 2 added 14 more tools and Phase 3 another 15 (38 total).
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -72,6 +72,37 @@ TOOLS = [
      "description": "Replace a clip's keyframes (or add one keyframe)."},
     {"name": "vibeedit_clip_color",
      "description": "Set a clip's LUT file and/or colour preset."},
+    # Phase 3 tools — each calls a real Project/export operation.
+    {"name": "vibeedit_markers_add",
+     "description": "Add a timeline marker."},
+    {"name": "vibeedit_markers_list",
+     "description": "List the project's markers."},
+    {"name": "vibeedit_markers_remove",
+     "description": "Remove a marker by id."},
+    {"name": "vibeedit_transitions_list",
+     "description": "List the project's transitions."},
+    {"name": "vibeedit_keyframes_get",
+     "description": "Read a clip's keyframes."},
+    {"name": "vibeedit_clip_color_get",
+     "description": "Read a clip's colour (LUT, preset, strength)."},
+    {"name": "vibeedit_clip_fade",
+     "description": "Set a clip's fade in/out (seconds)."},
+    {"name": "vibeedit_project_info",
+     "description": "Project name, revision, size, duration and counts."},
+    {"name": "vibeedit_media_metadata",
+     "description": "Stored + ffprobe metadata for one media entry."},
+    {"name": "vibeedit_project_duplicate",
+     "description": "Copy the open project folder under a new name."},
+    {"name": "vibeedit_otio_export",
+     "description": "Export the timeline as OpenTimelineIO JSON."},
+    {"name": "vibeedit_batch_queue",
+     "description": "Queue project folders for batch export."},
+    {"name": "vibeedit_batch_run",
+     "description": "Run the queued batch exports sequentially."},
+    {"name": "vibeedit_batch_status",
+     "description": "Report the queued batch and its last results."},
+    {"name": "vibeedit_export_normalized",
+     "description": "Export with single-pass loudnorm normalisation."},
 ]
 
 
@@ -81,6 +112,8 @@ class MCPServer:
         self.project: Project | None = None
         self.path: str | None = None
         self.last_export: dict | None = None
+        self.batch_queue: list[str] = []
+        self.batch_results: list[dict] = []
         if folder:
             self.open(folder)
 
@@ -181,7 +214,14 @@ class MCPServer:
                                                       op["keyframes"]))
                 elif kind == "set_color":
                     results.append(proj.set_color(op["item"], op.get("lut"),
-                                                  op.get("preset")))
+                                                  op.get("preset"),
+                                                  op.get("strength")))
+                elif kind == "add_marker":
+                    results.append(proj.add_marker(op["text"],
+                                                   int(op["at"])))
+                elif kind == "remove_marker":
+                    proj.remove_marker(op["marker"])
+                    results.append({"deleted": op["marker"]})
                 elif kind == "add_transition":
                     results.append(proj.add_transition(
                         op["from"], op["to"], op["kind"],
@@ -276,9 +316,87 @@ class MCPServer:
         if name == "vibeedit_clip_color":
             proj = self._require()
             result = proj.set_color(args["item"], args.get("lut"),
-                                    args.get("preset"))
+                                    args.get("preset"),
+                                    args.get("strength"))
             self._save()
             return result
+        if name == "vibeedit_markers_add":
+            proj = self._require()
+            result = proj.add_marker(args["text"], int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_markers_list":
+            return {"markers": self._require().data.get("markers", [])}
+        if name == "vibeedit_markers_remove":
+            proj = self._require()
+            proj.remove_marker(args["marker"])
+            self._save()
+            return {"deleted": args["marker"]}
+        if name == "vibeedit_transitions_list":
+            return {"transitions": self._require().data.get("transitions", [])}
+        if name == "vibeedit_keyframes_get":
+            _, item = self._require().item(args["item"])
+            return {"keyframes": item.get("keyframes") or []}
+        if name == "vibeedit_clip_color_get":
+            _, item = self._require().item(args["item"])
+            return {"color": item.get("color") or {}}
+        if name == "vibeedit_clip_fade":
+            proj = self._require()
+            result = proj.set_fade(args["item"], args.get("fadeIn"),
+                                   args.get("fadeOut"))
+            self._save()
+            return result
+        if name == "vibeedit_project_info":
+            proj = self._require()
+            return {"name": proj.data.get("name"), "rev": proj.rev,
+                    "width": proj.width, "height": proj.height,
+                    "duration_seconds": round(proj.duration_seconds(), 3),
+                    "media": len(proj.data["media"]),
+                    "tracks": len(proj.data["tracks"]),
+                    "transitions": len(proj.data.get("transitions", [])),
+                    "markers": len(proj.data.get("markers", []))}
+        if name == "vibeedit_media_metadata":
+            from .export_ops import media_metadata
+            proj = self._require()
+            return media_metadata(proj.data, proj.folder, args["media"])
+        if name == "vibeedit_project_duplicate":
+            from .export_ops import duplicate_project
+            import os
+            proj = self._require()
+            dest = os.path.join(
+                os.path.dirname(os.path.abspath(proj.folder)),
+                args["name"])
+            return {"path": duplicate_project(proj.folder, dest,
+                                              args["name"])}
+        if name == "vibeedit_otio_export":
+            from .export_ops import export_otio
+            import os
+            proj = self._require()
+            out = args.get("out") or os.path.join(
+                proj.folder, "render", "timeline.otio")
+            return export_otio(proj.data, proj.folder, out)
+        if name == "vibeedit_batch_queue":
+            self.batch_queue = list(args.get("folders", []))
+            self.batch_results = []
+            return {"queued": self.batch_queue}
+        if name == "vibeedit_batch_run":
+            from .export_ops import batch_export
+            self.batch_results = batch_export(
+                self.batch_queue, preset=args.get("preset", "full"),
+                normalize_audio=bool(args.get("normalize", False)))
+            return {"results": self.batch_results}
+        if name == "vibeedit_batch_status":
+            return {"queued": self.batch_queue,
+                    "results": self.batch_results}
+        if name == "vibeedit_export_normalized":
+            from .render import render
+            import os
+            proj = self._require()
+            out = os.path.join(proj.folder, "render", "export-normalized.mp4")
+            report = render(proj.data, proj.folder, out, preset="full",
+                            normalize_audio=True)
+            self.last_export = report
+            return report
         raise ValueError(f"Unknown tool: {name}")
 
 

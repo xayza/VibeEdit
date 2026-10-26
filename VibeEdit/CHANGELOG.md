@@ -1,5 +1,34 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 3
+
+- Full transition library (whip, iris open/close, zoom-in,
+  glitch, fadeblack/white, smooth, cover/reveal, diagonal,
+  slices, hblur, fadegrays, squeeze, vertical/horizontal open,
+  circlecrop, rectcrop, distance, wipe corners), rendered with
+  FFmpeg xfade; unknown kinds are rejected, never silently
+  replaced by dissolve.
+- Main-track keyframes now render (position/scale via zoompan,
+  opacity stepwise, volume via expression), with two honest
+  exceptions reported in the render `skipped` list (motion+
+  opacity combined; still-image clips).
+- LUT strength (0–1) renders for real via a per-render blended
+  .cube (strength 0 = no LUT, strength 1 = full LUT, verified by
+  mean colour); batch export (CLI + UI, per-project results);
+  OTIO export (real OpenTimelineIO JSON); overlay-item audio;
+  single-pass loudnorm normalisation on export.
+- MCP expanded from 23 to 38 real tools (markers, transitions
+  list, keyframes/colour get, project info/duplicate, OTIO,
+  batch queue/run/status, normalised export, media metadata).
+- Windows installer scripts (`windows/build_windows.bat` +
+  `vibeedit.spec` for a PyInstaller one-folder app, and
+  `windows/scripts/install_shortcuts.ps1` for Start Menu +
+  Desktop shortcuts); the exe itself must be built on Windows.
+- Minimal real plugin hook (`windows/plugins/` with two working
+  examples) and a transcription entry point that calls
+  faster-whisper only when installed, otherwise errors clearly.
+  See `VibeEdit/docs/windows-port.md` §7–§8.
+
 ## VibeEdit Windows port — Phase 2
 
 - Transitions between consecutive main-track clips (crossfade,

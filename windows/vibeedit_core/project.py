@@ -53,9 +53,43 @@ TRANSITION_XFADE = {
     "dissolve": "fade", "crossfade": "fade", "fade": "fade",
     "wipe": "wiperight", "wipe-left": "wipeleft", "wipe-right": "wiperight",
     "wipe-up": "wipeup", "wipe-down": "wipedown",
+    "wipe-tl": "wipetl", "wipe-tr": "wipetr",
+    "wipe-bl": "wipebl", "wipe-br": "wipebr",
     "slide": "slideleft", "slide-left": "slideleft",
     "slide-right": "slideright", "slide-up": "slideup",
     "slide-down": "slidedown",
+    # Phase 3: kinds from FFmpeg's xfade filter, verified against
+    # `ffmpeg -h filter=xfade` on FFmpeg 8.1. "whip" has no literal
+    # xfade name; the wind transitions are its honest equivalent
+    # (fast directional wipe). "glitch" maps to pixelize, the
+    # filter's pixelation transition. There is no literal "barn-door"
+    # either; vert/horz-open are the centre-open equivalents.
+    "whip": "hrwind", "whip-left": "hlwind", "whip-right": "hrwind",
+    "whip-up": "vuwind", "whip-down": "vdwind",
+    "iris": "circleopen", "iris-open": "circleopen",
+    "iris-close": "circleclose", "radial": "radial",
+    "circle-open": "circleopen", "circle-close": "circleclose",
+    "zoom": "zoomin", "zoom-in": "zoomin",
+    "glitch": "pixelize", "pixelize": "pixelize",
+    "fadeblack": "fadeblack", "fade-black": "fadeblack",
+    "fadewhite": "fadewhite", "fade-white": "fadewhite",
+    "fadefast": "fadefast", "fadeslow": "fadeslow",
+    "smooth-left": "smoothleft", "smooth-right": "smoothright",
+    "smooth-up": "smoothup", "smooth-down": "smoothdown",
+    "cover-left": "coverleft", "cover-right": "coverright",
+    "cover-up": "coverup", "cover-down": "coverdown",
+    "reveal-left": "revealleft", "reveal-right": "revealright",
+    "reveal-up": "revealup", "reveal-down": "revealdown",
+    "diag-tl": "diagtl", "diag-tr": "diagtr",
+    "diag-bl": "diagbl", "diag-br": "diagbr",
+    "hlslice": "hlslice", "hrslice": "hrslice",
+    "vuslice": "vuslice", "vdslice": "vdslice",
+    "hblur": "hblur", "fadegrays": "fadegrays",
+    "squeezeh": "squeezeh", "squeezev": "squeezev",
+    "vert-open": "vertopen", "vert-close": "vertclose",
+    "horz-open": "horzopen", "horz-close": "horzclose",
+    "barn-door": "horzopen", "rectcrop": "rectcrop",
+    "circlecrop": "circlecrop", "distance": "distance",
 }
 TRANSITION_KINDS = sorted(TRANSITION_XFADE)
 
@@ -569,8 +603,10 @@ class Project:
         return self.set_keyframes(item_id, existing)
 
     def set_color(self, item_id: str, lut: str | None = None,
-                  preset: str | None = None) -> dict:
-        """Set a clip's colour: a .cube LUT file and/or an eq preset.
+                  preset: str | None = None,
+                  strength: float | None = None) -> dict:
+        """Set a clip's colour: a .cube LUT file and/or an eq preset,
+        plus an optional LUT strength (0..1, default 1.0 = full LUT).
 
         A missing or invalid LUT is a hard error, never a silent skip.
         """
@@ -585,12 +621,37 @@ class Project:
                     f"Unknown colour preset: {preset!r} "
                     f"(choose one of {', '.join(sorted(COLOR_PRESETS))})")
             color["preset"] = preset
+        if strength is not None:
+            strength = float(strength)
+            if not 0.0 <= strength <= 1.0:
+                raise ValueError("LUT strength must be 0..1")
+            color["strength"] = strength
         if not color:
             raise ValueError("Provide a LUT path and/or a colour preset")
         color.setdefault("strength", 1.0)
         item["color"] = color
         self._bump()
         return item
+
+    # -- Phase 3: markers ---------------------------------------------
+    def add_marker(self, text: str, at_frame: int) -> dict:
+        """Add a timeline marker (stored in the project's markers[])."""
+        if not str(text).strip():
+            raise ValueError("Marker text must not be empty")
+        marker = {"id": _new_id("mk"), "text": str(text),
+                  "at": int(at_frame)}
+        self.data.setdefault("markers", []).append(marker)
+        self.data["markers"].sort(key=lambda m: m["at"])
+        self._bump()
+        return marker
+
+    def remove_marker(self, marker_id: str) -> None:
+        before = len(self.data.get("markers", []))
+        self.data["markers"] = [m for m in self.data.get("markers", [])
+                                if m["id"] != marker_id]
+        if len(self.data["markers"]) == before:
+            raise KeyError(f"Unknown marker: {marker_id}")
+        self._bump()
 
     def import_srt(self, track_id: str, text: str) -> list[dict]:
         """Import SRT cues onto a text track. All cues are validated

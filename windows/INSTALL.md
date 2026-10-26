@@ -34,11 +34,22 @@ python windows\vibeedit.py export <project> --preset draft
 python windows\vibeedit.py mcp <project>
 ```
 
+## Cài đặt như app thật (tùy chọn)
+
+1. Chạy `windows\build_windows.bat` (cần Python + PyInstaller; script sẽ tự tạo `.venv` và cài PyInstaller). Output là `windows\dist\VibeEdit\VibeEdit.exe` (one-folder).
+2. Copy `ffmpeg.exe` vào `windows\dist\VibeEdit\` nếu FFmpeg không có trong PATH.
+3. Chạy `windows\scripts\install_shortcuts.ps1` (bấm phải → Run with PowerShell) để tạo shortcut Start Menu + Desktop trỏ tới `run_vibeedit.bat`.
+4. Lưu ý: file exe **chưa được build sẵn trên máy Linux của Muse** (PyInstaller không build chéo Windows) — các script trên là deliverable và phải chạy trên Windows mới ra exe thật.
+
 ## Lưu ý
 
 - Bản xem trước trong giao diện web là video đã xuất gần nhất, chưa phải
-  xem trực tiếp timeline (giới hạn của Phase 2, xem `windows/README.md`).
+  xem trực tiếp timeline (giới hạn của Phase 3, xem `windows/README.md`).
 - File LUT `.cube` phải nằm trên máy bạn và đường dẫn phải đúng thì app mới
   áp dụng; đường dẫn sai sẽ báo lỗi rõ ràng chứ không tự bỏ qua.
+  LUT strength 0–1 (mục inspector) được render thật bằng cách trộn LUT.
 - Các model AI nặng (nhận diện, dịch, giọng nói) của bản macOS gốc chưa có
-  trong bản Windows Phase 2; danh sách còn thiếu xem `VibeEdit/docs/windows-port.md`.
+  trong bản Windows Phase 3; phiên âm chỉ chạy khi máy đã cài
+  faster-whisper (`pip install faster-whisper`), nếu chưa cài app báo
+  lỗi rõ ràng chứ không tự tạo phụ đề giả. Danh sách còn thiếu xem
+  `VibeEdit/docs/windows-port.md`.

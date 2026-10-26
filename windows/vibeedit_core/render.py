@@ -31,8 +31,13 @@ Phase 2 additions:
   faded/mono).
 - SRT is handled in project.py (import/export), not here.
 
+Phase 3 additions: full xfade transition kinds, main-track
+position/scale/opacity keyframes (zoompan / stepwise alpha),
+LUT strength via blended .cube files, overlay-item audio at its
+timeline position, and single-pass loudnorm on export.
+
 Out of scope (preserved in the project, reported as skipped, never
-silently baked): adjustment layers, beat grids, overlay-item audio.
+silently baked): adjustment layers, beat grids.
 """
 
 from __future__ import annotations
@@ -142,14 +147,91 @@ def _afade(filters: list[str], dur_s: float, fade_in: float, fade_out: float):
             f"afade=t=out:st={max(dur_s - fade_out, 0):.3f}:d={min(fade_out, dur_s):.3f}")
 
 
-def _color_filters(item: dict) -> list[str]:
-    """lut3d + eq filters for a clip. Raises on a bad LUT."""
+def blended_cube_path(lut: str, strength: float, out_dir: str) -> str:
+    """Write a .cube that blends the identity LUT with ``lut``.
+
+    Each grid point becomes (1-strength)*identity + strength*lut, so
+    strength 0 renders exactly the original picture and strength 1
+    renders the full LUT. Grid order in a .cube file is R fastest,
+    then G, then B; DOMAIN_MIN/MAX are honoured when present.
+    Raises ValueError on unparseable LUT data.
+    """
+    import hashlib
+    validate_cube(lut)
+    domain_min = [0.0, 0.0, 0.0]
+    domain_max = [1.0, 1.0, 1.0]
+    size = None
+    values: list[tuple[float, float, float]] = []
+    with open(lut, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("LUT_3D_SIZE"):
+                size = int(line.split()[1])
+            elif line.startswith("DOMAIN_MIN"):
+                domain_min = [float(v) for v in line.split()[1:4]]
+            elif line.startswith("DOMAIN_MAX"):
+                domain_max = [float(v) for v in line.split()[1:4]]
+            elif line.startswith(("TITLE", "DOMAIN_")):
+                continue
+            else:
+                parts = line.split()
+                if len(parts) != 3:
+                    raise ValueError(f"Invalid .cube data line: {line!r}")
+                values.append(tuple(float(v) for v in parts))
+    if size is None or len(values) != size ** 3:
+        raise ValueError(
+            f"LUT grid mismatch in {lut}: size {size}, "
+            f"{len(values)} data lines")
+    key = hashlib.sha256(
+        f"{lut}|{strength:.4f}".encode()).hexdigest()[:12]
+    out_path = os.path.join(out_dir, f"blended-{key}.cube")
+    if not os.path.isfile(out_path):
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write(f"# VibeEdit blended LUT (strength {strength:.4f})\n")
+            fh.write(f"LUT_3D_SIZE {size}\n")
+            fh.write("DOMAIN_MIN " + " ".join(f"{v:g}" for v in domain_min) + "\n")
+            fh.write("DOMAIN_MAX " + " ".join(f"{v:g}" for v in domain_max) + "\n")
+            idx = 0
+            for b in range(size):
+                for g in range(size):
+                    for r in range(size):
+                        ident = (
+                            domain_min[0] + r / (size - 1) * (domain_max[0] - domain_min[0]),
+                            domain_min[1] + g / (size - 1) * (domain_max[1] - domain_min[1]),
+                            domain_min[2] + b / (size - 1) * (domain_max[2] - domain_min[2]),
+                        )
+                        vals = values[idx]
+                        idx += 1
+                        blended = tuple(
+                            (1.0 - strength) * ident[c] + strength * vals[c]
+                            for c in range(3))
+                        fh.write(" ".join(f"{v:.6f}" for v in blended) + "\n")
+    return out_path
+
+
+def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
+    """lut3d + eq filters for a clip. Raises on a bad LUT.
+
+    LUT strength (0..1, default 1.0) is rendered honestly by blending
+    the LUT with the identity LUT into a temporary .cube file (see
+    blended_cube_path); strength 0 skips the LUT entirely.
+    """
     filters: list[str] = []
     color = item.get("color") or {}
     lut = color.get("lut")
     if lut:
-        validate_cube(lut)
-        filters.append(f"lut3d=file='{lut}'")
+        strength = float(color.get("strength", 1.0))
+        if strength > 0.0:
+            if strength < 1.0:
+                if lut_dir is None:
+                    raise ValueError(
+                        "LUT strength blending needs a render temp dir")
+                lut = blended_cube_path(lut, strength, lut_dir)
+            else:
+                validate_cube(lut)
+            filters.append(f"lut3d=file='{lut}'")
     preset = color.get("preset")
     if preset and preset != "none":
         if preset not in COLOR_PRESETS:
@@ -158,12 +240,27 @@ def _color_filters(item: dict) -> list[str]:
     return filters
 
 
-def render(project: dict, folder: str, output: str, preset: str = "full") -> dict:
+def render(project: dict, folder: str, output: str, preset: str = "full",
+           normalize_audio: bool = False) -> dict:
     """Render the project with FFmpeg. Returns a report dict.
 
     ``preset``: "full" (project resolution, fast preset) or "draft"
     (half resolution, veryfast preset, higher CRF).
+    ``normalize_audio``: single-pass EBU R128 loudnorm (I=-16, TP=-1.5,
+    LRA=11) applied to the final mixed audio.
     """
+    import tempfile
+    lut_dir = tempfile.mkdtemp(prefix="vibeedit-lut-")
+    try:
+        return _render_inner(project, folder, output, preset,
+                             normalize_audio, lut_dir)
+    finally:
+        import shutil
+        shutil.rmtree(lut_dir, ignore_errors=True)
+
+
+def _render_inner(project: dict, folder: str, output: str, preset: str,
+                  normalize_audio: bool, lut_dir: str) -> dict:
     fmt = project["format"]
     width, height = int(fmt["width"]), int(fmt["height"])
     fps = fps_value(fmt["fps"])
@@ -297,10 +394,37 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
                 f"[{achain}][{label}]concat=n=2:v=0:a=1[{out_label}]")
             achain, achain_dur = out_label, achain_dur + dur_s
 
-    def main_video_segment(item: dict, skip_fade_in: bool,
-                           skip_fade_out: bool) -> tuple[str, float]:
-        start_s = frames_to_seconds(item["at"], fmt["fps"])
-        dur_s = frames_to_seconds(item["dur"], fmt["fps"])
+    def _motion_filter(item: dict) -> str | None:
+        """zoompan filter for main-track x/y/scale keyframes.
+
+        zoompan's ``on`` variable is the output frame count, so
+        keyframe times (seconds, clip-local) are converted to frames.
+        Position fractions 0..1 become crop-window offsets.
+        Returns None when the item has no motion keyframes.
+        """
+        fps_f = fps_value(fmt["fps"])
+        x_pts = [(t * fps_f, v) for t, v in
+                 keyframe_points(item, "x", fmt["fps"])]
+        y_pts = [(t * fps_f, v) for t, v in
+                 keyframe_points(item, "y", fmt["fps"])]
+        s_pts = [(t * fps_f, v) for t, v in
+                 keyframe_points(item, "scale", fmt["fps"])]
+        if not (x_pts or y_pts or s_pts):
+            return None
+        z_expr = _piecewise_expr(s_pts, "on") if s_pts else "1"
+        x_expr = (f"(iw-ow)*({_piecewise_expr(x_pts, 'on')})"
+                  if x_pts else "(iw-ow)/2")
+        y_expr = (f"(ih-oh)*({_piecewise_expr(y_pts, 'on')})"
+                  if y_pts else "(ih-oh)/2")
+        return (f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d=1:"
+                f"s={out_w}x{out_h}:fps={fps_str}")
+
+    def _main_range_segment(item: dict, local_start: float, local_dur: float,
+                            alpha: float | None, fade_in: float,
+                            fade_out: float) -> tuple[str, float]:
+        """One main-track video segment (optionally a sub-range used
+        for stepwise opacity). Returns (label, duration)."""
+        dur_s = local_dur
         speed = float(item.get("speed", 1.0))
         medium = next((m for m in project["media"]
                        if m["id"] == item["media"]), None)
@@ -308,8 +432,8 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
             raise KeyError(f"Media not found: {item['media']}")
         src = media_path(item["media"])
         idx = add_input(src)
-        src_s = item.get("in", 0) / media_fps(medium)
-        src_dur_s = dur_s * speed
+        src_s = item.get("in", 0) / media_fps(medium) + local_start * speed
+        src_dur_s = local_dur * speed
         label = next_label("vseg")
         if medium.get("kind") == "image":
             filter_parts.append(
@@ -334,21 +458,93 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
         if speed != 1.0:
             vfilters.append(f"setpts=PTS/{speed:.4f}")
         vfilters.append(scale)
-        vfilters.extend(_color_filters(item))
-        vfilters.append(f"fps={fps_str}")
-        vfilters.append("format=yuv420p")
-        fade_in = 0.0 if skip_fade_in else float(item.get("fadeIn", 0) or 0)
-        fade_out = 0.0 if skip_fade_out else float(item.get("fadeOut", 0) or 0)
+        vfilters.extend(_color_filters(item, lut_dir))
+        motion = _motion_filter(item)
+        if motion is not None:
+            vfilters.append(motion)
+            # Do NOT append an fps filter after zoompan: zoompan's
+            # output timestamps use its own timebase, and a trailing
+            # fps filter duplicates frames ~512x (verified: 90 input
+            # frames became 46080). zoompan's own fps= option already
+            # sets the output rate, and the segment is exact without it.
+        else:
+            vfilters.append(f"fps={fps_str}")
+        if alpha is not None:
+            vfilters.append("format=yuva420p")
+            vfilters.append(f"colorchannelmixer=aa={_num(alpha)}")
+            vfilters.append("format=yuv420p")
+        else:
+            vfilters.append("format=yuv420p")
         if fade_in > 0:
             vfilters.append(f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
         if fade_out > 0:
             vfilters.append(
                 f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:d={min(fade_out, dur_s):.3f}")
-        if item.get("keyframes"):
-            skipped.append(f"main clip {item['id']} keyframes stored, "
-                           "not rendered in Phase 2")
         filter_parts.append(f"[{idx}:v]{','.join(vfilters)}[{label}]")
         return label, dur_s
+
+    def main_video_segment(item: dict, skip_fade_in: bool,
+                           skip_fade_out: bool) -> tuple[str, float]:
+        """Main-track video segment with Phase 3 keyframe rendering.
+
+        x/y/scale keyframes render via zoompan; volume keyframes
+        render in main_audio_segment (already in Phase 2). Opacity
+        keyframes render stepwise (see overlay note): the clip is
+        split at its opacity-keyframe times with a constant alpha per
+        segment. The rare combination of opacity segments AND motion
+        keyframes on one main clip skips the motion part (zoompan's
+        frame counter restarts per segment, so its timing would be
+        wrong); that case is reported in ``skipped``.
+        """
+        dur_s = frames_to_seconds(item["dur"], fmt["fps"])
+        fade_in = 0.0 if skip_fade_in else float(item.get("fadeIn", 0) or 0)
+        fade_out = 0.0 if skip_fade_out else float(item.get("fadeOut", 0) or 0)
+        _medium = next((m for m in project["media"]
+                        if m["id"] == item.get("media")), None)
+        if _medium is not None and _medium.get("kind") == "image" \
+                and item.get("keyframes"):
+            skipped.append(f"main image clip {item['id']} keyframes "
+                           "stored, not rendered")
+        op_pts = keyframe_points(item, "opacity", fmt["fps"])
+        has_motion = bool(keyframe_points(item, "x", fmt["fps"])
+                          or keyframe_points(item, "y", fmt["fps"])
+                          or keyframe_points(item, "scale", fmt["fps"]))
+        if len(op_pts) >= 2:
+            if has_motion:
+                skipped.append(
+                    f"main clip {item['id']} motion keyframes skipped "
+                    "(combined with opacity segments)")
+                # Temporarily drop motion for the segmented render.
+                item = dict(item)
+                item["keyframes"] = [kf for kf in item.get("keyframes") or []
+                                     if not any(p in kf for p in ("x", "y", "scale"))]
+            bounds = [0.0] + [t for t, _ in op_pts if 0.0 < t < dur_s] + [dur_s]
+            bounds = sorted(set(bounds))
+            seg_labels: list[str] = []
+            for i, (b0, b1) in enumerate(zip(bounds, bounds[1:])):
+                if b1 - b0 < 1e-6:
+                    continue
+                held = None
+                for t_kf, v_kf in op_pts:
+                    if t_kf <= b0 + 1e-9:
+                        held = v_kf
+                if held is None:
+                    held = op_pts[0][1]
+                label, _ = _main_range_segment(
+                    item, b0, b1 - b0, held,
+                    fade_in if i == 0 else 0.0,
+                    fade_out if i == len(bounds) - 2 else 0.0)
+                seg_labels.append(label)
+            if len(seg_labels) == 1:
+                return seg_labels[0], dur_s
+            out_label = next_label("vop")
+            inputs = "".join(f"[{lbl}]" for lbl in seg_labels)
+            filter_parts.append(
+                f"{inputs}concat=n={len(seg_labels)}:v=1:a=0[{out_label}]")
+            return out_label, dur_s
+        alpha = op_pts[0][1] if len(op_pts) == 1 else None
+        return _main_range_segment(item, 0.0, dur_s, alpha,
+                                   fade_in, fade_out)
 
     def main_audio_segment(item: dict, skip_fade_in: bool,
                            skip_fade_out: bool) -> tuple[str, float]:
@@ -436,6 +632,7 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
 
     # ---- overlay video tracks (position/scale/opacity keyframes) ------
     overlay_count = 0
+    overlay_audio: list[str] = []
     for track in project["tracks"]:
         if track["kind"] != "video" or track.get("role") == "main":
             continue
@@ -497,7 +694,7 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
                             f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
                             f"crop={out_w}:{out_h}")
                     ofilters.append(f"fps={fps_str}")
-                    ofilters.extend(_color_filters(item))
+                    ofilters.extend(_color_filters(item, lut_dir))
                     ofilters.append("format=yuva420p")
                     ofilters.append(f"colorchannelmixer=aa={_num(held)}")
                     olabel = next_label("ov")
@@ -526,7 +723,7 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
                         f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
                         f"crop={out_w}:{out_h}")
                 ofilters.append(f"fps={fps_str}")
-                ofilters.extend(_color_filters(item))
+                ofilters.extend(_color_filters(item, lut_dir))
                 ofilters.append("format=yuva420p")
                 if len(op_pts) == 1:
                     ofilters.append(f"colorchannelmixer=aa={_num(op_pts[0][1])}")
@@ -542,8 +739,23 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
                 current = out_label
                 overlay_count += 1
             if medium.get("hasAudio", True):
-                skipped.append(f"overlay {item['id']} audio (renders "
-                               "overlay picture only)")
+                # Phase 3: overlay audio renders at its timeline
+                # position, like main-track audio (delayed + padded).
+                oa_filters = [
+                    f"atrim=start={src_s:.3f}:end={src_s + dur_s * speed:.3f}",
+                    "asetpts=PTS-STARTPTS"]
+                if speed != 1.0:
+                    oa_filters.append(_atempo_chain(speed))
+                oa_filters.extend(volume_filters(item, dur_s))
+                oa_filters.append(
+                    f"adelay={int(adjust(start_s) * 1000)}:all=1")
+                oa_filters.append(f"apad=whole_dur={total_s:.3f}")
+                oa_filters.append("aresample=48000")
+                oa_filters.append("aformat=channel_layouts=stereo")
+                oa_label = next_label("aov")
+                filter_parts.append(
+                    f"[{idx}:a]{','.join(oa_filters)}[{oa_label}]")
+                overlay_audio.append(f"[{oa_label}]")
 
     # ---- text overlays (position/opacity/scale keyframes) -------------
     font = find_font()
@@ -628,7 +840,8 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
             label = next_label("aextra")
             filter_parts.append(f"[{idx}:a]{','.join(afilters)}[{label}]")
             extra_audio.append(f"[{label}]")
-    all_audio = ([f"[{achain}]"] if achain else []) + extra_audio
+    all_audio = ([f"[{achain}]"] if achain else []) + overlay_audio \
+        + extra_audio
     audio_map = None
     if all_audio:
         if len(all_audio) == 1:
@@ -637,6 +850,11 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
             filter_parts.append(
                 f"{''.join(all_audio)}amix=inputs={len(all_audio)}:normalize=0[aout]")
             audio_map = "[aout]"
+    if normalize_audio and audio_map is not None:
+        # Single-pass EBU R128 loudnorm on the final mix.
+        filter_parts.append(
+            f"{audio_map}loudnorm=I=-16:TP=-1.5:LRA=11[aoutn]")
+        audio_map = "[aoutn]"
 
     filter_complex = ";".join(filter_parts)
     cmd = ["ffmpeg", "-y"]
@@ -658,6 +876,8 @@ def render(project: dict, folder: str, output: str, preset: str = "full") -> dic
         "output": output, "preset": preset, "width": out_w, "height": out_h,
         "duration": round(total_s, 3), "fps": fps,
         "text_overlays": text_count, "overlay_clips": overlay_count,
+        "overlay_audio_clips": len(overlay_audio),
+        "loudness_normalized": bool(normalize_audio and audio_map),
         "warnings": warnings, "skipped": skipped,
         "segments": segment_count,
         "transitions": len(boundaries),

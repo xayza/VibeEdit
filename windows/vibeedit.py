@@ -176,7 +176,8 @@ def cmd_export(args) -> int:
     proj, path = _open(args.path)
     out = args.out or os.path.join(proj.folder, "render",
                                    f"export-{args.preset}.mp4")
-    report = render(proj.data, proj.folder, out, preset=args.preset)
+    report = render(proj.data, proj.folder, out, preset=args.preset,
+                    normalize_audio=args.normalize)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
@@ -200,7 +201,8 @@ def cmd_keyframe(args) -> int:
 
 def cmd_color(args) -> int:
     proj, path = _open(args.path)
-    item = proj.set_color(args.item, args.lut, args.preset)
+    item = proj.set_color(args.item, args.lut, args.preset,
+                          args.strength)
     _save_with_backup(proj, path)
     print(json.dumps(item.get("color", {}), ensure_ascii=False))
     return 0
@@ -221,6 +223,81 @@ def cmd_srt_export(args) -> int:
     with open(args.file, "w", encoding="utf-8") as fh:
         fh.write(text)
     print(f"exported {len(proj.data['tracks'])} tracks' captions to {args.file}")
+    return 0
+
+
+
+def cmd_marker_add(args) -> int:
+    proj, path = _open(args.path)
+    marker = proj.add_marker(args.text, args.at)
+    _save_with_backup(proj, path)
+    print(json.dumps(marker, ensure_ascii=False))
+    return 0
+
+
+def cmd_marker_list(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps(proj.data.get("markers", []), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_otio_export(args) -> int:
+    from vibeedit_core.export_ops import export_otio
+    proj, _ = _open(args.path)
+    out = args.out or os.path.join(proj.folder, "render", "timeline.otio")
+    report = export_otio(proj.data, proj.folder, out)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_batch(args) -> int:
+    from vibeedit_core.export_ops import batch_export
+    results = batch_export(args.projects, preset=args.preset,
+                           normalize_audio=args.normalize)
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+    return 0 if all(r.get("ok") for r in results) else 1
+
+
+def cmd_duplicate(args) -> int:
+    from vibeedit_core.export_ops import duplicate_project
+    dest = duplicate_project(args.path, args.dest, args.name)
+    print(dest)
+    return 0
+
+
+def cmd_media_metadata(args) -> int:
+    from vibeedit_core.export_ops import media_metadata
+    proj, _ = _open(args.path)
+    print(json.dumps(media_metadata(proj.data, proj.folder, args.media),
+                     indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_plugin_list(args) -> int:
+    from vibeedit_core.plugins import load_plugins
+    plugins = load_plugins()
+    print(json.dumps({k: v.get("description", "") for k, v in plugins.items()
+                      if not k.startswith("_")}, indent=2, ensure_ascii=False))
+    if plugins.get("_errors"):
+        print(json.dumps({"errors": plugins["_errors"]}, indent=2))
+    return 0
+
+
+def cmd_plugin_run(args) -> int:
+    from vibeedit_core.plugins import apply_plugin
+    proj, path = _open(args.path)
+    item = apply_plugin(proj, args.plugin, args.hook, args.item)
+    _save_with_backup(proj, path)
+    print(json.dumps(item, ensure_ascii=False))
+    return 0
+
+
+def cmd_transcribe(args) -> int:
+    from vibeedit_core.transcribe import transcribe_media
+    proj, path = _open(args.path)
+    added = transcribe_media(proj, args.media, args.track, args.model)
+    _save_with_backup(proj, path)
+    print(f"transcribed {len(added)} segments onto {args.track}")
     return 0
 
 
@@ -291,6 +368,7 @@ def main(argv=None) -> int:
     p.add_argument("path")
     p.add_argument("--preset", default="full", choices=["full", "draft"])
     p.add_argument("--out", default=None)
+    p.add_argument("--normalize", action="store_true")
     p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("transition")
@@ -306,6 +384,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("color")
     p.add_argument("path"); p.add_argument("item")
     p.add_argument("--lut", default=None); p.add_argument("--preset", default=None)
+    p.add_argument("--strength", type=float, default=None)
     p.set_defaults(fn=cmd_color)
 
     p = sub.add_parser("srt-import")
@@ -317,6 +396,44 @@ def main(argv=None) -> int:
     p.add_argument("path"); p.add_argument("file")
     p.add_argument("--track", default="t1")
     p.set_defaults(fn=cmd_srt_export)
+
+    p = sub.add_parser("marker-add")
+    p.add_argument("path"); p.add_argument("text"); p.add_argument("at", type=int)
+    p.set_defaults(fn=cmd_marker_add)
+
+    p = sub.add_parser("marker-list")
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_marker_list)
+
+    p = sub.add_parser("otio-export")
+    p.add_argument("path"); p.add_argument("--out", default=None)
+    p.set_defaults(fn=cmd_otio_export)
+
+    p = sub.add_parser("batch")
+    p.add_argument("projects", nargs="+")
+    p.add_argument("--preset", default="full", choices=["full", "draft"])
+    p.add_argument("--normalize", action="store_true")
+    p.set_defaults(fn=cmd_batch)
+
+    p = sub.add_parser("duplicate")
+    p.add_argument("path"); p.add_argument("dest"); p.add_argument("--name", default=None)
+    p.set_defaults(fn=cmd_duplicate)
+
+    p = sub.add_parser("media-metadata")
+    p.add_argument("path"); p.add_argument("media")
+    p.set_defaults(fn=cmd_media_metadata)
+
+    p = sub.add_parser("plugin-list")
+    p.set_defaults(fn=cmd_plugin_list)
+
+    p = sub.add_parser("plugin-run")
+    p.add_argument("path"); p.add_argument("plugin"); p.add_argument("hook"); p.add_argument("item")
+    p.set_defaults(fn=cmd_plugin_run)
+
+    p = sub.add_parser("transcribe")
+    p.add_argument("path"); p.add_argument("media")
+    p.add_argument("--model", default="small"); p.add_argument("--track", default="t1")
+    p.set_defaults(fn=cmd_transcribe)
 
     p = sub.add_parser("serve")
     p.add_argument("--project", default=None)

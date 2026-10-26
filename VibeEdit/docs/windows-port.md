@@ -50,7 +50,7 @@ fields round-trip unchanged):
 | `contentLanguage` | BCP 47 language of speech/captions (default `vi`) |
 | `media[]` | `{id, path (relative), kind, fps, frames, width, height, hasAudio}` |
 | `tracks[]` | Ordered back-to-front: visual tracks first, then audio |
-| `transitions[]` | `{id, kind, from, to, duration}` (frames; rendered since Phase 2: crossfade/wipe/slide) |
+| `transitions[]` | `{id, kind, from, to, duration}` (frames; rendered since Phase 2: crossfade/wipe/slide; full library since Phase 3: whip, iris, zoom, glitch, etc.) |
 | `markers[]` | `{id, at, kind, label}` (sections) |
 | `luts[]`, `providers`, `audio`, `beatGrid` | Preserved; Phase 1 does not apply LUTs/beat grids |
 
@@ -104,7 +104,7 @@ Windows CLI: `python windows/vibeedit.py <command>` (see
 `windows/README.md` for the full list). Windows MCP:
 `windows/vibeedit_core/mcp.py`, stdio JSON-RPC 2.0, server name
 `vibeedit-mcp`, with real tools that call the same Project
-operations as the CLI and web UI — 23 tools after Phase 2 (see
+operations as the CLI and web UI — 38 tools after Phase 3 (see
 `windows/README.md` for the list).
 
 Not yet ported (Phase 3): the remaining ~226 tools (review, beats,
@@ -118,11 +118,11 @@ is single-project and edits the project file directly).
 | macOS layer | Windows Phase 1 replacement | Limit |
 |---|---|---|
 | SwiftUI + AppKit UI, timeline, viewer | Web UI (`windows/static/`): preview top, editor panel, multi-track timeline strip bottom, CapCut-style | Preview plays the latest export only; no live timeline scrub |
-| AVFoundation + Core Image/Metal render | FFmpeg (`windows/vibeedit_core/render.py`): concat/xfade segments, scale/crop fill, drawtext, setpts/atempo, fade/afade, amix, lut3d, eq presets, keyframe expressions | No full transitions library, no main-track keyframes, overlay audio not rendered, no Metal effects |
+| AVFoundation + Core Image/Metal render | FFmpeg (`windows/vibeedit_core/render.py`): concat/xfade segments, scale/crop fill, drawtext, setpts/atempo, fade/afade, amix, lut3d, eq presets, keyframe expressions, zoompan main-track keyframes, blended-LUT strength, overlay audio, loudnorm | No Metal effects; main-track motion+opacity combined and still-image keyframes not rendered (see §7) |
 | AVFoundation preview proxies | Draft export (half resolution, veryfast) | No per-clip proxy generation |
 | Core Text captions | FFmpeg drawtext (DejaVu on Linux, Arial/Segoe UI on Windows) | One style per caption item; no word-by-word karaoke |
 | SwiftTerm agent dock (Claude/Codex terminals) | Not ported | Agents use the MCP server / CLI from their own terminal |
-| Plugins (out-of-process, versioned API) | Not ported | Plugin results are preserved as project data only |
+| Plugins (out-of-process, versioned API) | Minimal in-process hook in Phase 3 (`windows/plugins/`, `transform_text`/`apply_color`) — NOT the original plugin system | Plugin results are preserved as project data only |
 | macOS Keychain secrets, Application Support paths | Plain project folder on Windows; no secrets are stored by the MVP | Do not put API keys in project JSON |
 
 ## 6. Phase 2 — DONE (what Phase 1 did not do, now implemented)
@@ -166,18 +166,92 @@ is single-project and edits the project file directly).
   (check Python + FFmpeg, start server, poll port, open browser)
   and `windows/INSTALL.md` (Vietnamese).
 
-## 7. Phase 3 list (explicitly NOT in Phase 2)
+## 7. Phase 3 — DONE (what Phase 2 did not do, now implemented)
 
-- Full original transitions library beyond crossfade/wipe/slide
-  (whip, iris, zoom, glitch, etc.) and transition preview stills.
-- Keyframes on main-track clips; tilt keyframes; karaoke captions.
-- Adjustment layers; LUT strength blending (strength is stored).
-- Transcription and voice providers; beat grid, audio
-  measurement/loudness, ducking automation.
-- Plugins, agent dock terminal, knowledge/skills, review panel.
-- Resolve/OTIO export; batch processing.
-- Overlay-item audio in renders.
+- Full transitions library (all verified against FFmpeg 8.1.2's
+  xfade list, never silently replaced by dissolve): whip
+  (wind left/right/up/down), iris open/close (circleopen/
+  circleclose), zoom-in (zoomin), glitch (pixelize), fadeblack,
+  fadewhite, fadefast, fadeslow, smooth left/right/up/down,
+  cover/reveal left/right/up/down, diagonal TL/TR/BL/BR,
+  horizontal/vertical slices, hblur, fadegrays, squeeze
+  horizontal/vertical, vertical/horizontal open (barn-door
+  equivalent), circlecrop, rectcrop, distance, wipe-tl/tr/bl/br.
+  NOT implemented (no such xfade effect in this FFmpeg build):
+  a true lens iris with mask animation, a glitch with RGB
+  channel shift, and zoom-out (`zoom` maps to zoomin only).
+  Transition preview stills from the original are NOT ported.
+- Main-track keyframes now render: position/scale via zoompan
+  (linear interpolation; a trailing fps filter after zoompan is
+  deliberately omitted because it duplicated frames ~512x on
+  this FFmpeg build — verified 90 input frames became 46080),
+  opacity stepwise (as Phase 2 overlays), volume via a volume
+  expression. Exceptions, reported in the render `skipped` list:
+  a main clip with BOTH motion and opacity keyframes renders
+  opacity only (zoompan's frame counter restarts per segment),
+  and main-track image (still) clips with keyframes are stored
+  but not rendered.
+- LUT strength blending (0–1) renders for real: a blended .cube
+  is written per render by linearly mixing an identity LUT with
+  the user's LUT at the given strength (grid order R fastest,
+  then G, then B; DOMAIN_MIN/MAX honoured). Verified: strength 0
+  renders identically to no LUT (mean VAVG 127.3 = source) and
+  strength 1 is the full LUT (mean VAVG 240.0 for a red LUT).
+  Strength 0 skips the lut3d filter entirely. eq presets are not
+  strength-blended. Adjustment layers are NOT ported.
+- Batch export: `vibeedit.py batch <folder...>` (CLI) and the
+  web UI Batch & OTIO panel (the open project is exported
+  first); projects export sequentially, one failure never stops
+  the others, and each result reports ok/output/duration or an
+  error.
+- OTIO export: `vibeedit.py otio-export` writes a real
+  OpenTimelineIO JSON file (Timeline.1 → Stack.1 → one Track.1
+  per project track; Clip.1 with source_range RationalTime at
+  the project rate and ExternalReference to the media file;
+  Transition.1 with SMPTE_Dissolve for dissolve/crossfade/fade
+  and Custom otherwise, VibeEdit kind/id/from/to in metadata;
+  Marker.1 on the Stack; per-clip id/at/speed/keyframes/colour/
+  volume/fades in metadata). OTIO import is NOT included.
+- Overlay-item audio renders at its timeline position, mixed
+  with main-track audio and music. Loudness normalisation:
+  `export --normalize` (or the UI checkbox) applies single-pass
+  loudnorm (I=-16, TP=-1.5, LRA=11) when audio exists.
+- MCP: 38 real tools (was 23). New: markers_add/list/remove,
+  transitions_list, keyframes_get, clip_color_get, clip_fade,
+  project_info, media_metadata, project_duplicate, otio_export,
+  batch_queue/run/status, export_normalized.
+- Windows installer: `windows/build_windows.bat` +
+  `vibeedit.spec` (PyInstaller one-folder, same `vibeedit.py`
+  entry point; FFmpeg still required separately) and
+  `windows/scripts/install_shortcuts.ps1` (Start Menu + Desktop
+  shortcuts to `run_vibeedit.bat`). The exe was NOT built on the
+  Linux VM (PyInstaller cannot cross-build Windows) — the
+  scripts are the deliverable and must run on Windows.
+- Plugins (minimal, real, Windows-port-only hook — NOT a port
+  of the original macOS plugin system): `windows/plugins/`
+  modules with `register()` returning named hooks
+  (`transform_text`, `apply_color`); two working examples ship
+  (`uppercase_text`, `vivid_color`); CLI `plugin-list` /
+  `plugin-run`.
+- Transcription entry point (real local provider only):
+  `vibeedit.py transcribe <project> <media> [--model small]`
+  calls faster-whisper when installed and adds segments as
+  captions; when faster-whisper is absent it errors clearly
+  with the install command and writes nothing. No other
+  provider is bundled or stubbed. A new provider implements
+  `transcribe(path, model) -> [(start_s, end_s, text)]` in
+  `vibeedit_core/transcribe.py`.
+
+## 8. Phase 4 list (explicitly NOT in Phase 3)
+
+- Tilt keyframes; karaoke captions; adjustment layers.
+- Additional transcription providers behind the `transcribe.py`
+  interface; voice providers; beat grid, ducking automation.
+- Main-track motion+opacity combined rendering; LUT strength
+  blending for eq presets; OTIO import.
+- Agent dock terminal, knowledge/skills, review panel,
+  transition preview stills.
+- The remaining ~211 original MCP tools; a Windows .exe built
+  and tested on Windows.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
   Swift 6, macOS 14) and a VibeEdit logo/splash replacement.
-- A real Windows installer (the port runs from source with Python +
-  FFmpeg, or via the launcher scripts; see `windows/INSTALL.md`).
