@@ -372,6 +372,76 @@ def export_karaoke_ass(project: dict, out_path: str) -> dict:
     return {"ass": out_path, "karaoke_items": len(items)}
 
 
+def transition_preview(project: dict, folder: str,
+                       transition_id: str) -> dict:
+    """Render a still previewing one transition (Phase 8).
+
+    Builds a temporary two-clip project (only the transition's
+    from/to clips, trimmed to a short window around the cut so a
+    long source clip does not make the preview slow), renders it
+    at draft resolution with the real renderer, then grabs one
+    frame at the transition midpoint. Returns the PNG path plus
+    the draft video it was grabbed from, so the UI can show the
+    still without re-rendering. Raises ValueError for an unknown
+    transition or clips that are not consecutive on the main track.
+    """
+    import re
+    import subprocess
+    from .render import find_tool, render
+    trans = next((t for t in project.get("transitions", [])
+                  if t["id"] == transition_id), None)
+    if trans is None:
+        raise ValueError(f"Unknown transition: {transition_id!r}")
+    items = {}
+    for track in project["tracks"]:
+        for item in track["items"]:
+            items[item["id"]] = item
+    if trans["from"] not in items or trans["to"] not in items:
+        raise ValueError("Transition references an unknown clip")
+    from_item, to_item = items[trans["from"]], items[trans["to"]]
+    if int(from_item["at"]) + int(from_item["dur"]) != int(to_item["at"]):
+        raise ValueError("Transition clips are not consecutive")
+    rate = fps_value(project["format"]["fps"])
+    trans_frames = int(trans["duration"])
+    window = trans_frames + 15  # 0.5 s of context on each side
+    from_copy = copy.deepcopy(from_item)
+    if int(from_copy["dur"]) > window:
+        from_copy["in"] = int(from_copy.get("in", 0)) + (
+            int(from_copy["dur"]) - window)
+        from_copy["dur"] = window
+    from_copy["at"] = 0
+    to_copy = copy.deepcopy(to_item)
+    if int(to_copy["dur"]) > window:
+        to_copy["dur"] = window
+    to_copy["at"] = int(from_copy["dur"])
+    temp = copy.deepcopy(project)
+    main = next(t for t in temp["tracks"]
+                if t.get("role") == "main" and t["kind"] == "video")
+    temp["tracks"] = [dict(main, items=[from_copy, to_copy])]
+    temp["transitions"] = [copy.deepcopy(trans)]
+    temp["markers"] = []
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", transition_id)
+    previews = os.path.join(folder, "render", "previews")
+    os.makedirs(previews, exist_ok=True)
+    video = os.path.join(previews, f"transition-{safe}.mp4")
+    png = os.path.join(previews, f"transition-{safe}.png")
+    render(temp, folder, video, preset="draft")
+    midpoint = (int(from_copy["dur"]) - trans_frames / 2.0) / rate
+    proc = subprocess.run(
+        [find_tool("ffmpeg"), "-y", "-v", "error",
+         "-ss", f"{max(midpoint, 0):.3f}", "-i", video,
+         "-frames:v", "1", png],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not os.path.isfile(png):
+        raise RuntimeError(f"Transition preview frame grab failed: "
+                           f"{proc.stderr[-500:]}")
+    return {"transition": trans["id"], "kind": trans["kind"],
+            "midpoint_seconds": round(midpoint, 3),
+            "image": png, "video": video,
+            "width": max(int(project["format"]["width"]) // 2, 2),
+            "height": max(int(project["format"]["height"]) // 2, 2)}
+
+
 def batch_export(folders: list[str], preset: str = "full",
                  out_dir: str | None = None,
                  normalize_audio: bool = False) -> list[dict]:

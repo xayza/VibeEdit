@@ -785,6 +785,30 @@ class Project:
             raise KeyError(f"Unknown marker: {marker_id}")
         self._bump()
 
+    def move_marker(self, marker_id: str, at_frame: int) -> dict:
+        """Move a marker to a new timeline frame (Phase 8)."""
+        for marker in self.data.get("markers", []):
+            if marker["id"] == marker_id:
+                marker["at"] = int(at_frame)
+                self._bump()
+                return marker
+        raise KeyError(f"Unknown marker: {marker_id}")
+
+    def clip_at_time(self, frame: int) -> dict | None:
+        """The main-track clip covering ``frame``, or None (Phase 8).
+
+        Used by the review panel and the clip_at_time MCP tool; it
+        reads the project document only and never renders anything.
+        """
+        for track in self.data["tracks"]:
+            if track.get("role") != "main" or track["kind"] != "video":
+                continue
+            for item in sorted(track["items"], key=lambda i: i["at"]):
+                if int(item["at"]) <= int(frame) < \
+                        int(item["at"]) + int(item["dur"]):
+                    return {"track": track["id"], "item": item}
+        return None
+
     def import_srt(self, track_id: str, text: str) -> list[dict]:
         """Import SRT cues onto a text track. All cues are validated
         (including overlap) before any of them is added."""

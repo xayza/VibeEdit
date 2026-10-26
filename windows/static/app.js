@@ -390,3 +390,42 @@ $("btnOtio").addEventListener("click", async () => {
     setStatus(`OTIO exported: ${data.report.tracks} tracks, ${data.report.clips} items.`);
   } catch (err) { setStatus("OTIO failed: " + err.message, true); }
 });
+
+/* Phase 8: review panel + transition preview still. Both are fenced
+   like the agent dock: a failure here never breaks the editor. */
+$("btnReview").addEventListener("click", async () => {
+  const box = $("reviewResult");
+  try {
+    const data = await api("/api/review");
+    const v = data.validation;
+    const lines = [];
+    lines.push(`Validation: ${v.ok ? "OK" : "ISSUES — " + v.errors.join("; ")}`);
+    lines.push(`Stats: ${data.stats.items} items, ${data.stats.clips} clips, ${data.stats.transitions} transitions, ${data.stats.markers} markers, ${data.stats.duration_seconds}s.`);
+    lines.push(`Last export: ${data.last_export || "none"}`);
+    if (data.last_export_report && data.last_export_report.duration !== undefined)
+      lines.push(`Last export duration: ${data.last_export_report.duration}s, skipped: ${(data.skipped || []).join(", ") || "none"}, warnings: ${(data.warnings || []).join("; ") || "none"}.`);
+    else
+      lines.push("No export yet, so there are no skipped items to report.");
+    box.textContent = lines.join(" ");
+    setStatus("Review refreshed.");
+  } catch (err) { box.textContent = "Review failed: " + err.message; setStatus(err.message, true); }
+});
+$("btnTransitionPreview").addEventListener("click", async () => {
+  const found = selectedId ? findItem(selectedId) : null;
+  if (!found) { setStatus("Select the clip on the left of the cut first.", true); return; }
+  const main = project.tracks.find((t) => t.role === "main");
+  const items = [...main.items].sort((a, b) => a.at - b.at);
+  const idx = items.findIndex((i) => i.id === found.item.id);
+  const next = items[idx + 1];
+  const trans = (project.transitions || []).find((t) => t.from === found.item.id && next && t.to === next.id);
+  if (!trans) { setStatus("No transition after the selected clip yet — add one first.", true); return; }
+  setStatus("Rendering transition preview… (draft render of the cut window)");
+  try {
+    const data = await api("/api/transition-preview", { transition: trans.id });
+    const box = $("transitionPreviewBox");
+    box.hidden = false;
+    $("transitionPreviewImg").src = "/api/transition-preview?transition=" + encodeURIComponent(trans.id) + "&t=" + Date.now();
+    $("transitionPreviewLabel").textContent = `${data.preview.kind} at ${data.preview.midpoint_seconds}s (draft ${data.preview.width}x${data.preview.height}).`;
+    setStatus("Transition preview ready.");
+  } catch (err) { setStatus("Transition preview failed: " + err.message, true); }
+});

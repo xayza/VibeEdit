@@ -838,8 +838,90 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         for item in sorted(track["items"], key=lambda i: i["at"]):
             medium = next((m for m in project["media"]
                            if m["id"] == item.get("media")), None)
-            if medium is None or medium.get("kind") == "image":
-                skipped.append(f"overlay {item['id']} (no video media)")
+            if medium is None:
+                skipped.append(f"overlay {item['id']} (no media)")
+                continue
+            if medium.get("kind") == "image":
+                # Phase 8: overlay still images now render (previously
+                # skipped entirely). The single frame is looped for
+                # the item duration, scaled to the project frame,
+                # with scale keyframes via zoompan, tilt, colour and
+                # stepwise opacity exactly like the main-track still
+                # path; position keyframes drive the overlay x/y.
+                # Images carry no audio, so no audio branch follows.
+                start_s = frames_to_seconds(item["at"], fmt["fps"])
+                dur_s = frames_to_seconds(item["dur"], fmt["fps"])
+                src = media_path(item["media"])
+                idx = add_input(src)
+                x_pts = [(t, v) for t, v in
+                         keyframe_points(item, "x", fmt["fps"])]
+                y_pts = [(t, v) for t, v in
+                         keyframe_points(item, "y", fmt["fps"])]
+                scale_pts = keyframe_points(item, "scale", fmt["fps"])
+                op_pts = keyframe_points(item, "opacity", fmt["fps"])
+                start_adj = adjust(start_s)
+
+                def _pos(points):
+                    if not points:
+                        return None
+                    return _piecewise_expr(
+                        [(t + start_adj, v) for t, v in points], "t")
+
+                x_expr = _pos(x_pts)
+                y_expr = _pos(y_pts)
+                if len(op_pts) >= 2:
+                    bounds = [0.0] + [t for t, _ in op_pts
+                                      if 0.0 < t < dur_s] + [dur_s]
+                    bounds = sorted(set(bounds))
+                else:
+                    bounds = [0.0, dur_s]
+                for b0, b1 in zip(bounds, bounds[1:]):
+                    if b1 - b0 < 1e-6:
+                        continue
+                    held = None
+                    for t_kf, v_kf in op_pts:
+                        if t_kf <= b0 + 1e-9:
+                            held = v_kf
+                    if held is None:
+                        held = op_pts[0][1] if op_pts else 1.0
+                    ofilters = [
+                        "loop=loop=-1:size=1:start=0",
+                        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+                        f"crop={out_w}:{out_h}",
+                        "setsar=1",
+                    ]
+                    if scale_pts:
+                        fps_f = fps_value(fmt["fps"])
+                        s_pts = [(t * fps_f - b0 * fps_f, v)
+                                 for t, v in scale_pts]
+                        ofilters.append(
+                            f"zoompan=z='{_piecewise_expr(s_pts, 'on')}':"
+                            f"x='(iw-ow)/2':y='(ih-oh)/2':d=1:"
+                            f"s={out_w}x{out_h}:fps={fps_str}")
+                    else:
+                        ofilters.append(f"fps={fps_str}")
+                    _tilt = _tilt_filter(item, b0)
+                    if _tilt is not None:
+                        ofilters.append(_tilt)
+                    ofilters.extend(_color_filters(item, lut_dir))
+                    ofilters.append("format=yuva420p")
+                    ofilters.append(f"colorchannelmixer=aa={_num(held)}")
+                    ofilters.append(f"trim=end={b1 - b0:.3f}")
+                    ofilters.append("setpts=PTS-STARTPTS")
+                    olabel = next_label("ovimg")
+                    filter_parts.append(
+                        f"[{idx}:v]{','.join(ofilters)}[{olabel}]")
+                    out_label = next_label("vov")
+                    x_arg = (f"(main_w-overlay_w)*({x_expr})"
+                             if x_expr else "0")
+                    y_arg = (f"(main_h-overlay_h)*({y_expr})"
+                             if y_expr else "0")
+                    filter_parts.append(
+                        f"[{current}][{olabel}]overlay={x_arg}:{y_arg}:"
+                        f"enable='between(t,{adjust(start_s + b0):.3f},"
+                        f"{adjust(start_s + b1):.3f})'[{out_label}]")
+                    current = out_label
+                    overlay_count += 1
                 continue
             start_s = frames_to_seconds(item["at"], fmt["fps"])
             dur_s = frames_to_seconds(item["dur"], fmt["fps"])

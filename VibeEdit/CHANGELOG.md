@@ -1,5 +1,31 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 8 (final planned phase)
+
+- Overlay still images now render (looped still, zoompan scale
+  keyframes, tilt, colour, stepwise opacity, position-driven
+  overlay x/y); previously skipped entirely. Verified with a
+  red still over a 3 s main clip (centre pixel red at 2 s).
+- Transition preview stills: draft render of the cut window
+  plus a frame grab at the transition midpoint, via
+  `POST /api/transition-preview` and a UI button.
+- Review panel: `GET /api/review` plus a UI panel showing
+  validation, stats, last export report and its skipped/
+  warnings lists, all from live data.
+- UI beautified further (user priority): centred preview
+  stage with proper aspect framing, gradient top-bar hairline
+  and larger logo, gradient panel section bars, reflowing
+  panels, labelled track cards, gradient type-coloured clips,
+  highlighted selection, playhead handle, ruler/beat ticks,
+  hover/focus controls. CSS only; no `app.js` id renamed or
+  removed (test-enforced); logo data URI untouched.
+- MCP expanded from 90 to 106 real tools (transition preview,
+  review get, overlay items, position/scale/opacity setters,
+  fades/speed getters, marker move, beat grid get, ducking
+  toggle, keyframes clear, media kind list, timeline gaps,
+  duration in frames, clip at time). See
+  `VibeEdit/docs/windows-port.md` §7f–§8.
+
 ## VibeEdit Windows port — Phase 7
 
 - Windows export bugfix (real user failure): FFmpeg's filter

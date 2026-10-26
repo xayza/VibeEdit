@@ -1,4 +1,49 @@
-# VibeEdit — Windows (Phase 7)
+# VibeEdit — Windows (Phase 8, final planned phase)
+
+## What Phase 8 adds (on top of Phase 7) — final planned phase
+
+- **Overlay still images now render:** overlay-track still-image
+  items were skipped entirely before. Now the single frame is
+  looped for the item duration, scaled to the project frame,
+  with scale keyframes via zoompan, tilt, colour and stepwise
+  opacity, and position keyframes driving the overlay x/y.
+  Verified: a red still over a 3 s main clip renders 3.0 s with
+  `overlay_clips: 1`, `skipped: []`, and the centre pixel at 2 s
+  is red (249, 0, 0).
+- **Transition preview stills:** the Transition panel has a
+  "Preview selected transition (still)" button. It renders a
+  short draft window around the cut with the real renderer and
+  grabs one frame at the transition midpoint
+  (`POST /api/transition-preview`, served at
+  `GET /api/transition-preview?transition=<id>`), so you can
+  see what a transition looks like before a full export.
+- **Review panel:** a new panel with a "Refresh review" button
+  (`GET /api/review`) listing project validation issues,
+  project stats, the last export path and report, and the
+  skipped/warnings lists from that real export — never
+  invented data. No export is run by the review endpoint.
+- **UI beautified further (user priority):** the Phase 7 dark
+  theme is kept, but the preview stage is now centred with
+  proper aspect framing (the old full-width video stretched
+  vertical 1080x1920 projects), the top bar has a gradient
+  hairline and larger logo, panels have gradient section bars
+  and reflow with the window, the timeline has labelled
+  track cards, type-coloured gradient clips, a highlighted
+  selection, a playhead with a handle, ruler ticks and beat
+  ticks, and controls have hover/focus states. CSS only: no
+  `app.js` id was renamed or removed (test-enforced), and the
+  logo data URI in `index.html` is untouched.
+- **MCP expanded from 90 to 106 real tools:** transition
+  preview, review get, overlay items, clip position/scale/
+  opacity keyframe setters, clip fades/speed getters, marker
+  move, beat grid get, ducking toggle, clip keyframes clear,
+  media kind list, timeline gaps, project duration in
+  frames, clip at time. Every tool calls real Project/export
+  code.
+- 122 tests OK (113 Phase 1–7 + 9 Phase 8), plus a web-server
+  smoke test (HTTP 200 for `/`, `/api/project`, `/api/review`
+  and the transition-preview PNG, valid PNG magic) and an
+  MCP stdio smoke test (`tools/list` count 106).
 
 ## What Phase 7 adds (on top of Phase 6)
 
@@ -329,11 +374,14 @@ timeline model in Python and renders with FFmpeg. See
 Agent dock terminals (the Phase 5 dock is a documented panel +
 live tool list, not a terminal emulator), a Windows .exe actually
 built and downloaded from a green Actions run (the workflow
-exists but has not run yet), voice providers, additional
-transcription providers, or the remaining ~171 original MCP
-tools (78 of 249 ported). Still open: a visual UI check in a
-real browser on Windows. See the Phase 6/7 lists in
-`VibeEdit/docs/windows-port.md`.
+exists but has not run yet — it can only run on GitHub after
+the user pushes the workflow file, which the GitHub App
+connection cannot write), voice providers, additional
+transcription providers, or the remaining ~143 original MCP
+tools (106 of 249 ported). Still open: a visual UI check in a
+real browser on Windows. See the Phase 8 list in
+`VibeEdit/docs/windows-port.md` for what is left, all of which
+needs the user's Windows or macOS machine.
 
 ## Requirements
 
@@ -408,14 +456,10 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-78 tools (Phase 6 total) — Phase 5's 66 plus:
-`vibeedit_clip_copy`, `vibeedit_clip_paste_cross_project`,
-`vibeedit_text_preset_list`, `vibeedit_text_preset_apply`,
-`vibeedit_export_preset_list`, `vibeedit_timeline_duration`,
-`vibeedit_media_duration`, `vibeedit_project_backup`,
-`vibeedit_project_rename`, `vibeedit_clip_volume`,
-`vibeedit_text_set`, `vibeedit_media_add`. Every tool calls a
-real Project or export operation; none is a stub.
+106 tools (Phase 8 total) — see the Phase 8 section above for
+the newest 16, Phase 7 for the previous 12, and Phase 6 for the
+12 before those. Every tool calls a real Project or export
+operation; none is a stub.
 
 ## Tests
 

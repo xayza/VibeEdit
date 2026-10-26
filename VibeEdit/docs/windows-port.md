@@ -484,16 +484,66 @@ is single-project and edits the project file directly).
   smoke test and a full draft export smoke (540x960, 3.003 s,
   H.264/AAC, 1 Vietnamese text overlay, no skips).
 
-## 8. Phase 8 list (explicitly NOT in Phase 7)
+## 7f. Phase 8 — DONE (final planned phase: overlay stills, transition previews, review, UI polish, MCP 106)
 
-- Additional transcription providers behind the `transcribe.py`
-  interface; voice providers.
-- Agent dock terminal emulator, knowledge/skills, review panel,
-  transition preview stills.
-- The remaining ~159 original MCP tools; a Windows .exe
-  downloaded from a green Actions run and tested on Windows;
-  a visual UI check in a real browser on Windows.
-- macOS build verification of the renamed Swift tree (Xcode 16+,
-  Swift 6, macOS 14) and a VibeEdit logo/splash replacement
-  beyond the web header.
-- Overlay still-image items (currently skipped entirely).
+- **Overlay still images render:** overlay-track still items
+  were skipped entirely before. Now the single frame is looped
+  for the item duration, scaled to the project frame, with
+  scale keyframes via zoompan, tilt, colour and stepwise
+  opacity, and position keyframes driving overlay x/y.
+  Verified: red still over a 3 s main clip renders 3.0 s with
+  `overlay_clips: 1`, `skipped: []`, centre pixel at 2 s red
+  (249, 0, 0). Still images carry no audio, so no audio branch
+  is claimed for them.
+- **Transition preview stills:** `transition_preview` in
+  `export_ops.py` builds a two-clip draft project trimmed to a
+  short window around the cut, renders it with the real
+  renderer, and grabs one frame at the transition midpoint
+  (draft 160x90 for a 320x180 project in tests). Served via
+  `POST /api/transition-preview` and
+  `GET /api/transition-preview?transition=<id>`; the UI has a
+  "Preview selected transition (still)" button. Unknown or
+  non-consecutive transitions raise ValueError, never a
+  silently wrong still.
+- **Review panel:** `GET /api/review` returns project
+  validation, project stats, the last export path/report and
+  its skipped/warnings lists — all from live project and
+  render data. The UI panel ("Review", "Refresh review")
+  displays exactly that; no export is run by the endpoint.
+- **UI beautified further (user priority, Phase 8):** Phase 7
+  dark theme kept, but the preview stage is now centred with
+  proper aspect framing (old full-width video stretched
+  vertical projects), the top bar has a gradient hairline and
+  a larger logo, panels have gradient section bars and reflow
+  (`repeat(auto-fit, minmax(320px, 1fr))`), the timeline has
+  labelled track cards, gradient type-coloured clips, a
+  highlighted selection, a playhead handle, ruler ticks and
+  beat ticks, and controls have hover/focus states. CSS only:
+  no `app.js` id renamed or removed (test-enforced, every
+  `$("...")` id asserted present in `index.html`), and the
+  logo data URI is untouched. Verified by code + server smoke
+  test only; a visual check in a real browser on Windows is
+  still a user check.
+- **MCP: 106 real tools** (was 90). New: transition_preview,
+  review_get, overlay_items, clip_position_set,
+  clip_scale_set, clip_opacity_set, clip_fades_get,
+  clip_speed_get, marker_move, beat_grid_get, ducking_toggle,
+  clip_keyframes_clear, media_kind_list, timeline_gaps,
+  project_duration_frames, clip_at_time. Plus two new
+  Project methods (move_marker, clip_at_time).
+- Tests + smoke: see windows/README.md Phase 8 section.
+
+## 8. What remains — all of it needs the user's own machine
+
+- A Windows .exe downloaded from a green GitHub Actions run:
+  the workflow file exists but the GitHub App connection
+  cannot write `.github/workflows/`, so the user must add it
+  (via a real git push or the GitHub web UI) before Actions
+  can run; the workflow smoke test is `--help` only.
+- A visual UI check in a real browser on Windows (including
+  the Phase 8 polish and the logo in the dark top bar).
+- macOS build verification of the renamed Swift tree
+  (Xcode 16+, Swift 6, macOS 14).
+- Anything beyond the planned scope: additional transcription
+  providers, voice providers, an agent-dock terminal emulator,
+  and the remaining ~143 of the original 249 MCP tools.

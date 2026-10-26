@@ -130,9 +130,9 @@ class TestPhase6Mcp(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count_and_names(self):
-        self.assertEqual(len(TOOLS), 90)
+        self.assertEqual(len(TOOLS), 106)  # Phase 8: 90 -> 106
         names = {t["name"] for t in TOOLS}
-        self.assertEqual(len(names), 90)
+        self.assertEqual(len(names), 106)  # Phase 8: 90 -> 106
         for name in ("vibeedit_clip_copy",
                      "vibeedit_clip_paste_cross_project",
                      "vibeedit_text_preset_list",

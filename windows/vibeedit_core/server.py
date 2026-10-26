@@ -86,6 +86,7 @@ class State:
         self.undo_stack: list[dict] = []
         self.redo_stack: list[dict] = []
         self.last_export: str | None = None
+        self.last_report: dict | None = None
         self.project, self.path = self._load_or_create()
 
     def _load_or_create(self) -> tuple[Project, str]:
@@ -283,6 +284,37 @@ def make_handler(state: State):
                     self._serve_file(state.last_export)
                 else:
                     self._send_json({"error": "No export yet"}, 404)
+            elif parsed.path == "/api/review":
+                # Phase 8 review panel: validation + stats from the
+                # live project document, plus the last export report
+                # (its skipped/warnings lists are real render data,
+                # never invented). No export is run by this endpoint.
+                with state.lock:
+                    report = state.last_report or {}
+                    self._send_json({
+                        "validation": state.project.validate(),
+                        "stats": state.project.project_stats(),
+                        "last_export": state.last_export,
+                        "last_export_report": report,
+                        "skipped": report.get("skipped", []),
+                        "warnings": report.get("warnings", []),
+                    })
+            elif parsed.path == "/api/transition-preview":
+                # GET serves a previously generated preview PNG;
+                # POST generates one (see do_POST).
+                query = urllib.parse.parse_qs(parsed.query)
+                trans_id = (query.get("transition") or [""])[0]
+                import re
+                safe = re.sub(r"[^A-Za-z0-9_-]+", "_", trans_id)
+                path = os.path.join(state.project_dir, "render",
+                                    "previews",
+                                    f"transition-{safe}.png")
+                if trans_id and os.path.isfile(path):
+                    self._serve_file(path)
+                else:
+                    self._send_json(
+                        {"error": "No preview yet for this transition; "
+                         "generate it first"}, 404)
             elif parsed.path == "/":
                 self._serve_file(os.path.join(STATIC_DIR, "index.html"))
             elif parsed.path.startswith("/static/"):
@@ -339,6 +371,7 @@ def make_handler(state: State):
                                         state.project_dir, out, preset=preset,
                                         normalize_audio=bool(body.get("normalize", False)))
                         state.last_export = out
+                        state.last_report = report
                         self._send_json({"ok": True, "report": report})
                     elif parsed.path == "/api/batch":
                         from .export_ops import batch_export
@@ -382,6 +415,13 @@ def make_handler(state: State):
                         self._read_json()
                         self._send_json({"ok": True,
                                          "stats": state.project.project_stats()})
+                    elif parsed.path == "/api/transition-preview":
+                        from .export_ops import transition_preview
+                        body = self._read_json()
+                        result = transition_preview(
+                            state.project.data, state.project_dir,
+                            body["transition"])
+                        self._send_json({"ok": True, "preview": result})
                     elif parsed.path == "/api/media/upload":
                         length = int(self.headers.get("Content-Length") or 0)
                         body = self.rfile.read(length)

@@ -102,6 +102,11 @@
       <button type="submit" class="primary">Add transition after selected clip</button>
     </form>
     <ul id="transitionList"></ul>
+    <button id="btnTransitionPreview" class="secondary">Preview selected transition (still)</button>
+    <div id="transitionPreviewBox" hidden>
+      <img id="transitionPreviewImg" alt="Transition preview" style="max-width:100%">
+      <div id="transitionPreviewLabel"></div>
+    </div>
     <h3>Subtitles (SRT)</h3>
     <form id="srtImportForm">
       <label>Paste SRT <textarea id="srtText" rows="4" placeholder="1&#10;00:00:01,000 --> 00:00:03,000&#10;Hello"></textarea></label>
@@ -203,6 +208,12 @@
       <button type="submit" class="primary">Save ducking</button>
     </form>
     <div id="phase4Result"></div>
+  </div>
+  <div class="panel">
+    <h3>Review (Phase 8)</h3>
+    <p>Validation issues, export history and skipped items — all from the live project and the last export report.</p>
+    <button id="btnReview" class="secondary">Refresh review</button>
+    <div id="reviewResult"></div>
   </div>
   <div class="panel">
     <h3>Agent dock (Phase 5)</h3>

@@ -181,6 +181,12 @@ a writable folder or pass `--project` to a writable folder.
       and an export renders (needs FFmpeg in PATH).
 - [ ] The web UI looks right in a real browser (preview top,
       editor panel, timeline strip bottom, agent dock panel).
+      Phase 8 polish to check: centred preview stage (not a
+      stretched full-width video), gradient top-bar hairline,
+      panel section bars, highlighted selected clip, playhead
+      handle, ruler/beat ticks.
+- [ ] Transition preview still (Transition panel button) and
+      Review panel ("Refresh review") show real data.
 - [ ] `build_windows.bat` produces `dist\VibeEdit\VibeEdit.exe`
       and the exe starts and exports.
 - [ ] A text overlay renders (needs a font: any `.ttf` in the

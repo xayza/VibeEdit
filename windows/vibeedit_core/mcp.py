@@ -212,6 +212,38 @@ TOOLS = [
      "description": "Export a draft preview (half resolution) and report its output path."},
     {"name": "vibeedit_project_rev",
      "description": "Read the project name, revision and format in one call."},
+    {"name": "vibeedit_transition_preview",
+     "description": "Render a still previewing one transition (draft render, frame at the transition midpoint)."},
+    {"name": "vibeedit_review_get",
+     "description": "Review panel data: project validation, stats, last export report, skipped and warnings."},
+    {"name": "vibeedit_overlay_items",
+     "description": "List overlay-track items, including still-image overlays, with their media kind."},
+    {"name": "vibeedit_clip_position_set",
+     "description": "Set a clip's position keyframes (x and/or y fractions) at a time in seconds."},
+    {"name": "vibeedit_clip_scale_set",
+     "description": "Set a clip's scale keyframe at a time in seconds."},
+    {"name": "vibeedit_clip_opacity_set",
+     "description": "Set a clip's opacity keyframe at a time in seconds."},
+    {"name": "vibeedit_clip_fades_get",
+     "description": "Read a clip's fade-in and fade-out durations."},
+    {"name": "vibeedit_clip_speed_get",
+     "description": "Read a clip's speed multiplier."},
+    {"name": "vibeedit_marker_move",
+     "description": "Move a marker to a new timeline frame."},
+    {"name": "vibeedit_beat_grid_get",
+     "description": "Read the project's detected beat grid (source media, beat times, method)."},
+    {"name": "vibeedit_ducking_toggle",
+     "description": "Flip music ducking on/off, keeping its amount and threshold."},
+    {"name": "vibeedit_clip_keyframes_clear",
+     "description": "Remove all keyframes from a clip."},
+    {"name": "vibeedit_media_kind_list",
+     "description": "List media entries filtered by kind (video, audio, image)."},
+    {"name": "vibeedit_timeline_gaps",
+     "description": "List gaps (black/silence stretches) on the main track."},
+    {"name": "vibeedit_project_duration_frames",
+     "description": "Read the project duration in frames and seconds."},
+    {"name": "vibeedit_clip_at_time",
+     "description": "Find the main-track clip covering a timeline frame, or null."},
 ]
 
 
@@ -930,6 +962,108 @@ class MCPServer:
             return {"name": proj.data.get("name"), "rev": proj.rev,
                     "format": proj.data.get("format"),
                     "path": self.path}
+        if name == "vibeedit_transition_preview":
+            from .export_ops import transition_preview
+            proj = self._require()
+            return transition_preview(proj.data, proj.folder,
+                                      args["transition"])
+        if name == "vibeedit_review_get":
+            proj = self._require()
+            report = self.last_export or {}
+            return {"validation": proj.validate(),
+                    "stats": proj.project_stats(),
+                    "last_export": report,
+                    "skipped": report.get("skipped", []),
+                    "warnings": report.get("warnings", [])}
+        if name == "vibeedit_overlay_items":
+            proj = self._require()
+            media = {m["id"]: m for m in proj.data["media"]}
+            out = []
+            for track in proj.data["tracks"]:
+                if track["kind"] != "video" or track.get("role") == "main":
+                    continue
+                for item in track["items"]:
+                    medium = media.get(item.get("media"))
+                    out.append({"track": track["id"], "item": item,
+                                "media_kind": medium["kind"]
+                                if medium else None})
+            return {"overlay_items": out}
+        if name == "vibeedit_clip_position_set":
+            proj = self._require()
+            result = {}
+            if "x" in args:
+                result["x"] = proj.add_keyframe(
+                    args["item"], float(args["at"]), "x", float(args["x"]))
+            if "y" in args:
+                result["y"] = proj.add_keyframe(
+                    args["item"], float(args["at"]), "y", float(args["y"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_scale_set":
+            proj = self._require()
+            result = proj.add_keyframe(args["item"], float(args["at"]),
+                                       "scale", float(args["scale"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_opacity_set":
+            proj = self._require()
+            result = proj.add_keyframe(args["item"], float(args["at"]),
+                                       "opacity", float(args["opacity"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_fades_get":
+            _, item = self._require().item(args["item"])
+            return {"fadeIn": item.get("fadeIn", 0),
+                    "fadeOut": item.get("fadeOut", 0)}
+        if name == "vibeedit_clip_speed_get":
+            _, item = self._require().item(args["item"])
+            return {"speed": float(item.get("speed", 1.0))}
+        if name == "vibeedit_marker_move":
+            proj = self._require()
+            result = proj.move_marker(args["marker"], int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_beat_grid_get":
+            return {"beatGrid": self._require().data.get("beatGrid"),
+                    "beats": self._require().beat_list()}
+        if name == "vibeedit_ducking_toggle":
+            proj = self._require()
+            current = proj.ducking_get()
+            result = proj.set_ducking(not bool(current.get("enabled")),
+                                      amount_db=float(
+                                          current.get("amountDb", 6.0)))
+            self._save()
+            return result
+        if name == "vibeedit_clip_keyframes_clear":
+            proj = self._require()
+            result = proj.set_keyframes(args["item"], [])
+            self._save()
+            return result
+        if name == "vibeedit_media_kind_list":
+            kind = args.get("kind")
+            media = self._require().data["media"]
+            return {"media": [m for m in media
+                              if kind is None or m.get("kind") == kind]}
+        if name == "vibeedit_timeline_gaps":
+            proj = self._require()
+            gaps = []
+            cursor = 0
+            for track in proj.data["tracks"]:
+                if track.get("role") != "main" or track["kind"] != "video":
+                    continue
+                for item in sorted(track["items"], key=lambda i: i["at"]):
+                    if int(item["at"]) > cursor:
+                        gaps.append({"start": cursor, "end": int(item["at"]),
+                                     "frames": int(item["at"]) - cursor})
+                    cursor = max(cursor,
+                                 int(item["at"]) + int(item["dur"]))
+            return {"gaps": gaps}
+        if name == "vibeedit_project_duration_frames":
+            proj = self._require()
+            return {"frames": proj.duration_frames(),
+                    "seconds": round(proj.duration_seconds(), 3)}
+        if name == "vibeedit_clip_at_time":
+            return {"clip": self._require().clip_at_time(int(args["frame"]))}
         raise ValueError(f"Unknown tool: {name}")
 
 
