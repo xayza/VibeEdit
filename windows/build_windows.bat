@@ -44,5 +44,14 @@ if errorlevel 1 (
 echo.
 echo [VibeEdit] Built: dist\VibeEdit\VibeEdit.exe
 echo [VibeEdit] Copy ffmpeg.exe into dist\VibeEdit\ if FFmpeg is not in PATH.
-echo [VibeEdit] Then run: scripts\install_shortcuts.ps1  (creates Start Menu + Desktop shortcuts)
+REM Path check (Phase 5): this script runs from windows\ (cd /d
+REM "%~dp0" above), so the shortcut installer is
+REM windows\scripts\install_shortcuts.ps1, addressed here as
+REM scripts\install_shortcuts.ps1. It creates shortcuts to
+REM run_vibeedit.bat (not to the exe); see INSTALL.md.
+if not exist scripts\install_shortcuts.ps1 (
+  echo [VibeEdit] WARNING: scripts\install_shortcuts.ps1 not found; skipping shortcut step.
+) else (
+  echo [VibeEdit] Then run: scripts\install_shortcuts.ps1  (creates Start Menu + Desktop shortcuts to run_vibeedit.bat)
+)
 pause

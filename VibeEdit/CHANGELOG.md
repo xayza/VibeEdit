@@ -1,5 +1,43 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 5
+
+- Windows compatibility audit + fixes: FFmpeg filter-embedded
+  paths (lut3d, drawtext fontfile, subtitles) go through
+  `render._filter_path()` (forward slashes, escaped quotes);
+  fonts resolve from `%SystemRoot%\Fonts\` first with a
+  `VIBEEDIT_FONT` override and a clear error when no font is
+  found; FFmpeg/FFprobe resolve via `render.find_tool()`
+  (`VIBEEDIT_FFMPEG_DIR`, PATH, next to the script/exe) with a
+  clear "not found" error; launchers run `vibeedit.py` from
+  their own folder so a copied `windows\` folder works; the
+  frozen app resolves `static/` from `sys._MEIPASS` and stores
+  its default project next to the exe. New
+  `windows/CHECK_WINDOWS.md` checklist; no Windows exe was built
+  on the Linux VM and the UI was not visually checked on
+  Windows (user checks).
+- Eq preset strength (`color["preset_strength"]` 0–1, default
+  1.0): each eq parameter blends toward neutral; strength 0
+  skips the eq filter. Verified: vivid at 0.5 =
+  brightness 0.01, contrast 1.075, saturation 1.125; strength 0
+  renders identically to no preset.
+- Main-track motion+opacity combined rendering FIXED: opacity
+  sub-segments shift their zoompan expression by the segment
+  start frame, so motion and opacity keyframes on one main clip
+  now render together (verified: combined frame differs from
+  motion-only, opacity-only and plain renders; duration exact).
+- Karaoke by syllable: optional `syllables` per word (validated
+  to join to the word and lie inside its range); the `.ass`
+  builder emits one `\k` tag per syllable.
+- Agent dock panel in the web UI (no fake terminal): MCP launch
+  command, example agent commands, and a live tool list from
+  `GET /api/mcp-tools`.
+- MCP expanded from 54 to 66 real tools (preset strength, tool
+  status, Windows check, karaoke syllables, agent dock info,
+  project validation, track/clip/text lists, preset list, tool
+  list, project format). 79 tests OK.
+  See `VibeEdit/docs/windows-port.md` §7c–§8.
+
 ## VibeEdit Windows port — Phase 4
 
 - OTIO import (new project or `--merge` into an existing project):

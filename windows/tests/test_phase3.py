@@ -140,11 +140,17 @@ class TestMainTrackKeyframes(unittest.TestCase):
         self._render("vol.mp4")
 
     def test_motion_plus_opacity_reports_skip(self):
+        # Phase 5: this used to assert that motion keyframes were
+        # skipped when combined with opacity keyframes. That
+        # limitation is FIXED in Phase 5 (opacity sub-segments shift
+        # their zoompan expression by the segment start frame), so
+        # the test now asserts the opposite: nothing motion-related
+        # is skipped. Frame-level proof lives in test_phase5.py.
         self.proj.set_keyframes(self.item["id"], [
             {"at": 0, "scale": 1.0, "opacity": 0.2},
             {"at": 90, "scale": 1.5, "opacity": 0.9}])
         report = self._render("both.mp4")
-        self.assertTrue(any("motion" in s for s in report["skipped"]))
+        self.assertFalse(any("motion" in s for s in report["skipped"]))
 
 
 class TestLutStrength(unittest.TestCase):

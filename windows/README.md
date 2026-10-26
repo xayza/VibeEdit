@@ -1,4 +1,55 @@
-# VibeEdit — Windows (Phase 4)
+# VibeEdit — Windows (Phase 5)
+
+## What Phase 5 adds (on top of Phase 4)
+
+- Windows compatibility audit + fixes (the main Phase 5 work):
+  every FFmpeg filter-embedded path (lut3d `.cube`, drawtext
+  `fontfile`, subtitles `.ass`) now goes through
+  `render._filter_path()`, which converts backslashes to forward
+  slashes and escapes single quotes, so Windows paths with a
+  drive-letter colon no longer break the filter parser. Fonts
+  resolve from `%SystemRoot%\Fonts\` first (any drive), with a
+  `VIBEEDIT_FONT` override, and a missing font is now a clear
+  error naming the fix instead of silently skipped text.
+  FFmpeg/FFprobe resolve via `render.find_tool()`:
+  `VIBEEDIT_FFMPEG_DIR`, then PATH, then next to the script/exe,
+  with a clear "not found" error instead of a bare traceback.
+  The launchers (`run_vibeedit.bat`, `run_vibeedit.ps1`) now run
+  `vibeedit.py` from their own folder, so copying only `windows\`
+  elsewhere works (the old `cd ..` + `windows\vibeedit.py` only
+  worked for a full repo checkout). The frozen app resolves
+  `static/` from `sys._MEIPASS` (or next to the exe) and stores
+  its default project next to the exe, not inside bundled data.
+  A grep audit found the rest already clean: no hardcoded `/tmp`,
+  no `shell=True`, no `os.symlink`, and `os.path.join` throughout
+  (see `windows/CHECK_WINDOWS.md` for the full Windows checklist).
+- Eq preset strength: `color["preset_strength"]` (0–1, default
+  1.0) blends each eq parameter toward neutral (brightness 0,
+  contrast 1, saturation 1); strength 0 skips the eq filter.
+  Verified: vivid at 0.5 renders exactly
+  `brightness=0.01:contrast=1.075:saturation=1.125`, strength 0
+  renders identically to no preset, and saturation rises
+  monotonically 0 → 0.5 → 1. CLI: `color … --preset-strength N`;
+  server/MCP `set_color` pass it through; adjustment layers too.
+- Main-track motion+opacity combined rendering FIXED: opacity
+  sub-segments now shift their zoompan expression by the segment
+  start frame, so a main clip with motion (x/y/scale) AND opacity
+  keyframes renders both. Verified with a real render: the
+  combined frame at 2.5 s (inside the second opacity segment)
+  differs from the motion-only, opacity-only and plain renders,
+  duration stays exact (3.0 s), and nothing is reported skipped.
+- Karaoke by syllable: a word may carry
+  `syllables: [{text, start, end}]`; syllables must join
+  (concatenated) to the word text and lie inside the word's time
+  range (hard errors otherwise), and the `.ass` builder emits one
+  `\k` tag per syllable instead of per word. `karaoke-add` (CLI
+  JSON) and MCP pass syllables through unchanged.
+- Agent dock: a documented panel in the web UI (no fake
+  terminal) with the MCP launch command
+  (`python windows\vibeedit.py mcp <project-folder>`), example
+  agent commands, and a LIVE tool list fetched from the new
+  `GET /api/mcp-tools` endpoint (real registry from `mcp.py`).
+- MCP expanded from 54 to 66 real tools (see below).
 
 ## What Phase 4 adds (on top of Phase 3)
 
@@ -174,15 +225,15 @@ timeline model in Python and renders with FFmpeg. See
   `bashcut.project/1` / `project.bashcut.json` files. Unknown
   fields round-trip unchanged.
 
-## What Phase 4 does NOT do yet
+## What Phase 5 does NOT do yet
 
-Agent dock terminals, a Windows .exe built and tested on Windows,
-voice providers, additional transcription providers, or the
-remaining ~195 original MCP tools (54 of 249 ported). Still open
-from earlier phases: main-track motion+opacity combined rendering,
-LUT strength blending for eq presets, karaoke word timing by
-syllable (words only in Phase 4), and a checked PyInstaller build.
-See the Phase 4/5 lists in `VibeEdit/docs/windows-port.md`.
+Agent dock terminals (the Phase 5 dock is a documented panel +
+live tool list, not a terminal emulator), a Windows .exe built
+and tested on Windows, voice providers, additional transcription
+providers, or the remaining ~183 original MCP tools (66 of 249
+ported). Still open: a checked PyInstaller build on Windows and a
+visual UI check in a real browser on Windows. See the Phase 5/6
+lists in `VibeEdit/docs/windows-port.md`.
 
 ## Requirements
 
@@ -257,12 +308,13 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-54 tools (Phase 4 total) — Phase 3's 38 plus:
-`vibeedit_otio_import`, `vibeedit_karaoke_add/get`,
-`vibeedit_karaoke_export_ass`, `vibeedit_adjustment_add/remove/list`,
-`vibeedit_beat_detect/list/snap`, `vibeedit_beats_to_markers`,
-`vibeedit_ducking_set/get`, `vibeedit_project_stats`,
-`vibeedit_export_ducked`, `vibeedit_clip_tilt`. Every tool calls a
+66 tools (Phase 5 total) — Phase 4's 54 plus:
+`vibeedit_clip_color_preset_strength`, `vibeedit_tool_status`,
+`vibeedit_windows_check`, `vibeedit_karaoke_syllable_add`,
+`vibeedit_agent_dock_info`, `vibeedit_project_validate`,
+`vibeedit_track_list`, `vibeedit_clip_list`,
+`vibeedit_color_preset_list`, `vibeedit_mcp_tools_list`,
+`vibeedit_text_list`, `vibeedit_project_format`. Every tool calls a
 real Project or export operation; none is a stub.
 
 ## Tests

@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VibeEdit — Windows MVP</title>
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">VibeEdit <span class="tag">Windows MVP</span></div>
+  <div class="brand"><img class="brand-logo" src="/static/logo.png" alt="" onerror="this.style.display='none'"><span class="brand-text">VibeEdit</span> <span class="tag">Windows MVP</span></div>
   <div class="top-actions">
     <label>Project <input id="projectName" type="text"></label>
     <button id="btnUndo">Undo</button>
@@ -201,6 +202,19 @@
       <button type="submit" class="primary">Save ducking</button>
     </form>
     <div id="phase4Result"></div>
+  </div>
+  <div class="panel">
+    <h3>Agent dock (Phase 5)</h3>
+    <p>Point an AI agent at this project's MCP server (from the agent's own terminal — there is no terminal emulator here):</p>
+    <pre id="agentDockCommand">python windows\vibeedit.py mcp &lt;project-folder&gt;</pre>
+    <p>Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout (<code>initialize</code>, <code>ping</code>, <code>tools/list</code>, <code>tools/call</code>). Example agent commands:</p>
+    <ul>
+      <li><code>tools/call vibeedit_project_get</code> — read the whole open project.</li>
+      <li><code>tools/call vibeedit_timeline_apply {"ops": [{"op": "add_text", "track": "t1", "text": "Hello", "at": 0, "dur": 90}]}</code> — add a caption.</li>
+      <li><code>tools/call vibeedit_project_validate</code> — check the project for overlaps and dangling references.</li>
+    </ul>
+    <p>Live tool registry from this server (<span id="mcpToolCount">…</span> tools):</p>
+    <ul id="mcpTools"><li>Loading…</li></ul>
   </div>
 <!-- Timeline strip at the bottom, CapCut-style -->
 <section class="timeline-wrap">

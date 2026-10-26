@@ -6,6 +6,8 @@ This module turns a project's karaoke items into one .ass file whose
 Dialogue lines use libass ``\\k`` tags: the sung part renders in the
 primary colour (yellow) and the not-yet-sung part in the secondary
 colour (white). Burned with FFmpeg's subtitles filter (libass).
+Phase 5: a word may carry ``syllables: [{text, start, end}]``; the
+builder then emits one ``\\k`` tag per syllable instead of per word.
 """
 
 from __future__ import annotations
@@ -55,8 +57,18 @@ def build_ass(karaoke_items: list[dict], width: int, height: int) -> str:
         margin_v = int((1.0 - float(item.get("position_y", 0.8))) * height)
         parts = []
         for word in item["words"]:
-            cs = max(int(round((word["end"] - word["start"]) * 100)), 1)
-            parts.append(f"{{\\k{cs}}}{_escape_ass(word['text'])} ")
+            # Phase 5: when a word carries syllables, emit one \k
+            # tag per syllable (concatenated, no space between
+            # syllables of one word); otherwise one \k per word.
+            syllables = word.get("syllables")
+            if syllables:
+                for syl in syllables:
+                    cs = max(int(round((syl["end"] - syl["start"]) * 100)), 1)
+                    parts.append(f"{{\\k{cs}}}{_escape_ass(syl['text'])}")
+                parts.append(" ")
+            else:
+                cs = max(int(round((word["end"] - word["start"]) * 100)), 1)
+                parts.append(f"{{\\k{cs}}}{_escape_ass(word['text'])} ")
         text = "".join(parts).rstrip()
         lines.append(
             f"Dialogue: 0,{ass_timestamp(item['start_s'])},"

@@ -49,24 +49,121 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 
 from .project import (frames_to_seconds, fps_value, COLOR_PRESETS,
-                      validate_cube, keyframe_points, TRANSITION_XFADE)
+                      validate_cube, keyframe_points, TRANSITION_XFADE,
+                      eq_preset_filter)
 
-FONT_CANDIDATES = [
-    # Windows
-    r"C:\Windows\Fonts\arial.ttf",
-    r"C:\Windows\Fonts\segoeui.ttf",
-    # Linux (dev/test machine)
+# Fallback fonts on the Linux build/test machine. Windows fonts are
+# resolved first from the SystemRoot environment variable in
+# font_candidates() below — never from a hardcoded drive letter, so
+# a Windows install on any drive works.
+LINUX_FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 ]
 
+# Backwards-compatible alias (Phase 1-4 name); the full candidate
+# list, including the Windows SystemRoot entries, is font_candidates().
+FONT_CANDIDATES = LINUX_FONT_CANDIDATES
+
+
+def _filter_path(path: str) -> str:
+    """Make a filesystem path safe inside a single-quoted FFmpeg
+    filter argument (lut3d file, drawtext fontfile, subtitles
+    filename, .ass/.cube paths).
+
+    FFmpeg's filter parser treats a backslash as an escape and an
+    unquoted colon as an option separator, so a raw Windows path
+    (backslashes plus a drive-letter colon) is mangled inside a
+    filter graph. Converting to forward slashes and escaping single
+    quotes keeps the path intact inside '...' quoting. On Linux
+    this is a no-op for ordinary paths (no backslashes, no quotes).
+    Plain ``-i`` input files are NOT passed through here — they are
+    subprocess arguments and need no filter escaping.
+    """
+    return str(path).replace("\\", "/").replace("'", "\\'")
+
+
+def find_tool(name: str) -> str:
+    """Locate an FFmpeg tool (``ffmpeg`` or ``ffprobe``).
+
+    Search order: the VIBEEDIT_FFMPEG_DIR environment variable, then
+    PATH (shutil.which), then a binary next to the running script /
+    next to the frozen executable. Raises FileNotFoundError with a
+    clear fix (install FFmpeg / set VIBEEDIT_FFMPEG_DIR / place the
+    binary next to the app) instead of surfacing a bare traceback
+    from subprocess.
+    """
+    exe_names = [name] if name.endswith(".exe") else [name, name + ".exe"]
+    candidates: list[str] = []
+    ffmpeg_dir = os.environ.get("VIBEEDIT_FFMPEG_DIR")
+    if ffmpeg_dir:
+        for exe in exe_names:
+            candidates.append(os.path.join(ffmpeg_dir, exe))
+    for exe in exe_names:
+        found = shutil.which(exe)
+        if found:
+            candidates.append(found)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dirs = [os.path.dirname(sys.executable),
+                 os.path.dirname(script_dir), script_dir]
+    if getattr(sys, "frozen", False):
+        base_dirs.insert(0, getattr(sys, "_MEIPASS",
+                                    os.path.dirname(sys.executable)))
+    for base in base_dirs:
+        for exe in exe_names:
+            candidates.append(os.path.join(base, exe))
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    raise FileNotFoundError(
+        f"FFmpeg tool {name!r} not found. Install FFmpeg and add it "
+        f"to PATH, set the VIBEEDIT_FFMPEG_DIR environment variable "
+        f"to the folder containing {name}, or place {name} next to "
+        f"the VibeEdit script/executable.")
+
+
+def font_candidates() -> list[str]:
+    """Font search order: VIBEEDIT_FONT is handled in find_font();
+    otherwise the Windows fonts folder derived from SystemRoot (or
+    SystemDrive) first, then the Linux fallbacks. No drive letter
+    is hardcoded here, so Windows on any drive is covered."""
+    candidates: list[str] = []
+    system_root = os.environ.get("SystemRoot")
+    if system_root:
+        candidates.append(os.path.join(system_root, "Fonts", "arial.ttf"))
+        candidates.append(os.path.join(system_root, "Fonts", "segoeui.ttf"))
+    else:
+        drive = os.environ.get("SystemDrive")
+        if drive:
+            base = drive.rstrip("\\/")
+            candidates.append(base + "\\Fonts\\arial.ttf")
+            candidates.append(base + "\\Fonts\\segoeui.ttf")
+    candidates.extend(LINUX_FONT_CANDIDATES)
+    return candidates
+
 
 def find_font() -> str | None:
-    for path in FONT_CANDIDATES:
+    """First existing font, or None when none is found.
+
+    VIBEEDIT_FONT overrides the search: when it is set it must
+    point at an existing font file, otherwise a clear error is
+    raised instead of silently falling back to a different font.
+    """
+    override = os.environ.get("VIBEEDIT_FONT")
+    if override:
+        if os.path.isfile(override):
+            return override
+        raise FileNotFoundError(
+            f"VIBEEDIT_FONT points at a missing font file: {override!r}. "
+            f"Point it at an existing .ttf file or unset it to use "
+            f"the automatic font search.")
+    for path in font_candidates():
         if os.path.isfile(path):
             return path
     return None
@@ -74,7 +171,7 @@ def find_font() -> str | None:
 
 def probe_media(path: str) -> dict:
     """ffprobe a file; returns width/height/fps/frames/duration/hasAudio."""
-    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json",
+    cmd = [find_tool("ffprobe"), "-v", "quiet", "-print_format", "json",
            "-show_streams", "-show_format", path]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True)
     data = json.loads(out.stdout)
@@ -236,12 +333,17 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
                 lut = blended_cube_path(lut, strength, lut_dir)
             else:
                 validate_cube(lut)
-            filters.append(f"lut3d=file='{lut}'")
+            filters.append(f"lut3d=file='{_filter_path(lut)}'")
     preset = color.get("preset")
     if preset and preset != "none":
         if preset not in COLOR_PRESETS:
             raise ValueError(f"Unknown colour preset: {preset!r}")
-        filters.append(COLOR_PRESETS[preset])
+        # Phase 5: eq presets honour preset_strength (0..1, default
+        # 1.0); strength 0 skips the eq filter entirely.
+        eq_filter = eq_preset_filter(
+            preset, float(color.get("preset_strength", 1.0)))
+        if eq_filter:
+            filters.append(eq_filter)
     return filters
 
 
@@ -402,20 +504,26 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 f"[{achain}][{label}]concat=n=2:v=0:a=1[{out_label}]")
             achain, achain_dur = out_label, achain_dur + dur_s
 
-    def _motion_filter(item: dict) -> str | None:
+    def _motion_filter(item: dict, frame_offset: float = 0.0) -> str | None:
         """zoompan filter for main-track x/y/scale keyframes.
 
         zoompan's ``on`` variable is the output frame count, so
         keyframe times (seconds, clip-local) are converted to frames.
         Position fractions 0..1 become crop-window offsets.
+        ``frame_offset`` shifts the keyframe times for segments
+        whose frame counter restarts (Phase 5: opacity sub-segments
+        pass their start frame here, which is what makes motion +
+        opacity on one main clip render together — the piecewise
+        expression is time-shift invariant, so shifting every point
+        by the segment start keeps the motion exact).
         Returns None when the item has no motion keyframes.
         """
         fps_f = fps_value(fmt["fps"])
-        x_pts = [(t * fps_f, v) for t, v in
+        x_pts = [(t * fps_f - frame_offset, v) for t, v in
                  keyframe_points(item, "x", fmt["fps"])]
-        y_pts = [(t * fps_f, v) for t, v in
+        y_pts = [(t * fps_f - frame_offset, v) for t, v in
                  keyframe_points(item, "y", fmt["fps"])]
-        s_pts = [(t * fps_f, v) for t, v in
+        s_pts = [(t * fps_f - frame_offset, v) for t, v in
                  keyframe_points(item, "scale", fmt["fps"])]
         if not (x_pts or y_pts or s_pts):
             return None
@@ -486,7 +594,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             vfilters.append(f"setpts=PTS/{speed:.4f}")
         vfilters.append(scale)
         vfilters.extend(_color_filters(item, lut_dir))
-        motion = _motion_filter(item)
+        motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
         if motion is not None:
             vfilters.append(motion)
             # Do NOT append an fps filter after zoompan: zoompan's
@@ -521,10 +629,10 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         render in main_audio_segment (already in Phase 2). Opacity
         keyframes render stepwise (see overlay note): the clip is
         split at its opacity-keyframe times with a constant alpha per
-        segment. The rare combination of opacity segments AND motion
-        keyframes on one main clip skips the motion part (zoompan's
-        frame counter restarts per segment, so its timing would be
-        wrong); that case is reported in ``skipped``.
+        segment. Phase 5: motion keyframes are NOT dropped for
+        opacity-segmented clips any more — each segment's zoompan
+        expression is shifted by the segment start frame (see
+        _motion_filter), so motion + opacity render together.
         """
         dur_s = frames_to_seconds(item["dur"], fmt["fps"])
         fade_in = 0.0 if skip_fade_in else float(item.get("fadeIn", 0) or 0)
@@ -536,18 +644,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             skipped.append(f"main image clip {item['id']} keyframes "
                            "stored, not rendered")
         op_pts = keyframe_points(item, "opacity", fmt["fps"])
-        has_motion = bool(keyframe_points(item, "x", fmt["fps"])
-                          or keyframe_points(item, "y", fmt["fps"])
-                          or keyframe_points(item, "scale", fmt["fps"]))
         if len(op_pts) >= 2:
-            if has_motion:
-                skipped.append(
-                    f"main clip {item['id']} motion keyframes skipped "
-                    "(combined with opacity segments)")
-                # Temporarily drop motion for the segmented render.
-                item = dict(item)
-                item["keyframes"] = [kf for kf in item.get("keyframes") or []
-                                     if not any(p in kf for p in ("x", "y", "scale"))]
             bounds = [0.0] + [t for t, _ in op_pts if 0.0 < t < dur_s] + [dur_s]
             bounds = sorted(set(bounds))
             seg_labels: list[str] = []
@@ -818,6 +915,20 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
 
     # ---- text overlays (position/opacity/scale keyframes) -------------
     font = find_font()
+    # A missing font used to leave text overlays silently skipped
+    # (or, worse, a broken drawtext filter). Fail loudly instead,
+    # naming the fix, but only when the project actually has text
+    # to draw — a text-free project renders fine without any font.
+    _has_text = any(
+        (item.get("text") and "karaoke" not in item)
+        for track in project["tracks"] if track["kind"] == "text"
+        for item in track["items"])
+    if _has_text and font is None:
+        raise RuntimeError(
+            "No font found for text overlays. Install a font (on "
+            "Windows: any .ttf in the system Fonts folder) or set "
+            "the VIBEEDIT_FONT environment variable to a .ttf file, "
+            "then export again.")
     text_count = 0
     karaoke_rendered = 0
     for track in project["tracks"]:
@@ -831,9 +942,12 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             if not text:
                 continue
             if font is None:
-                warnings.append("No drawtext font found; text overlays skipped")
-                skipped.append(f"text {item['id']} (no font)")
-                continue
+                # Unreachable after the upfront check above; kept as
+                # a defensive guard so a missing font can never
+                # silently produce a broken drawtext filter.
+                raise RuntimeError(
+                    "No font found for text overlays. Install a font "
+                    "or set VIBEEDIT_FONT to a .ttf file.")
             style = item.get("textStyle") or {}
             size_frac = float(style.get("size", 0.062))
             fontsize = max(int(size_frac * out_h), 12)
@@ -864,7 +978,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 alpha_arg = _piecewise_expr(
                     [(t + start_adj, v) for t, v in op_pts], "t")
             out_label = next_label("vtxt")
-            parts = (f"[{current}]drawtext=fontfile='{font}':"
+            parts = (f"[{current}]drawtext=fontfile='{_filter_path(font)}':"
                      f"text='{_escape_drawtext(text)}':fontsize={fs_arg}:"
                      f"fontcolor=white:borderw=2:bordercolor=black:"
                      f"x={x_arg}:y={y_arg}:")
@@ -904,7 +1018,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             fh.write(build_ass(karaoke_items, out_w, out_h))
         out_label = next_label("vkar")
         filter_parts.append(
-            f"[{current}]subtitles=filename='{ass_path}'[{out_label}]")
+            f"[{current}]subtitles=filename='{_filter_path(ass_path)}'"
+            f"[{out_label}]")
         current = out_label
         karaoke_rendered = len(karaoke_items)
 
@@ -984,7 +1099,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         audio_map = "[aoutn]"
 
     filter_complex = ";".join(filter_parts)
-    cmd = ["ffmpeg", "-y"]
+    cmd = [find_tool("ffmpeg"), "-y"]
     for path in inputs:
         cmd += ["-i", path]
     cmd += ["-filter_complex", filter_complex,

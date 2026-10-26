@@ -298,15 +298,105 @@ is single-project and edits the project file directly).
   panel cover the same features.
 - 55 tests OK (5 Phase 1 + 14 Phase 2 + 17 Phase 3 + 19 Phase 4).
 
-## 8. Phase 5 list (explicitly NOT in Phase 4)
+## 7c. Phase 5 — DONE (what Phase 4 did not do, now implemented)
+
+- Windows compatibility audit + fixes, done first and in full:
+  (a) one helper, `render._filter_path()`, converts every
+  filter-embedded path (lut3d `.cube`, drawtext `fontfile`,
+  subtitles `.ass`, including blended `.cube` files from the temp
+  dir) to forward slashes with escaped single quotes, so Windows
+  backslashes and drive-letter colons no longer break FFmpeg's
+  filter parser; plain `-i` inputs stay plain subprocess args.
+  (b) Font selection: `render.find_font()` checks
+  `%SystemRoot%\Fonts\arial.ttf` and `segoeui.ttf` first (via the
+  SystemRoot/SystemDrive environment variables, any drive — no
+  hardcoded drive letter remains in production code), then Linux
+  fallbacks; `VIBEEDIT_FONT` overrides the search (a missing
+  override file is a clear error); a project with text but no
+  font now raises a clear error naming the fix (install a font /
+  set `VIBEEDIT_FONT`) instead of silently skipped text.
+  (c) Tool discovery: `render.find_tool()` checks
+  `VIBEEDIT_FFMPEG_DIR`, then PATH, then next to the script /
+  frozen exe, and raises a clear "not found" error; it is used
+  by `probe_media`, the render command, beat decoding
+  (`beats.decode_mono`) and therefore media metadata.
+  (d) Launchers fixed: `run_vibeedit.bat` and `run_vibeedit.ps1`
+  run `vibeedit.py` from their own folder (`%~dp0` /
+  `$PSScriptRoot`) with a clear error if it is missing, instead
+  of `cd`-ing to a repo root that does not exist when only
+  `windows/` is copied elsewhere. `build_windows.bat` paths were
+  verified correct as written (`.venv` under `windows/`,
+  PyInstaller run from `windows/`, final message pointing at
+  `scripts\install_shortcuts.ps1` relative to `windows/`); only a
+  clarifying note and a missing-script guard were added.
+  `scripts/install_shortcuts.ps1` was verified correct as written
+  (`$PSScriptRoot` parent = `windows/`, targets
+  `run_vibeedit.bat`). (e) Grep audit: production code already
+  had no hardcoded `/tmp`, no `shell=True`, no `os.symlink`, and
+  used `os.path.join` throughout — nothing to fix there, and a
+  regression test now enforces it. (f) New
+  `windows/CHECK_WINDOWS.md`: step-by-step Windows checklist
+  (clone, Python 3.10+ with PATH, FFmpeg install + PATH checks,
+  optional venv, launcher run, exe build, common errors + fixes),
+  stating explicitly that no Windows exe was built on the Linux
+  VM and the UI was not visually checked on Windows.
+  (g) New `windows/tests/test_windows_compat.py` (11 tests):
+  code-property checks, not Windows execution.
+- Frozen-app paths fixed in `server.py`: `static/` resolves from
+  `sys._MEIPASS` (or next to the exe) instead of the archived
+  module's file-relative path, which 404'd the whole UI in a
+  frozen build; the default project folder resolves next to the
+  executable instead of inside bundled data (same fix applied to
+  `plugins.py`).
+- Eq preset strength: `project.eq_preset_filter(preset, strength)`
+  interpolates each eq parameter toward neutral (brightness 0,
+  contrast 1, saturation 1); stored as
+  `color["preset_strength"]` (0..1, default 1.0) via
+  `Project.set_color` / `add_adjustment`, CLI
+  `color --preset-strength`, server and MCP passthrough; strength
+  0 skips the eq filter. Verified: vivid at 0.5 gives exactly
+  brightness 0.01, contrast 1.075, saturation 1.125; strength 0
+  renders identically to no preset; saturation rises monotonically
+  0 → 0.5 → 1 in real renders.
+- Main-track motion+opacity combined rendering FIXED (the Phase
+  3 limitation is gone): each opacity sub-segment's zoompan
+  expression is shifted by the segment start frame
+  (`_motion_filter(..., frame_offset)`), which is exact because
+  the piecewise expression is time-shift invariant. Verified with
+  a real render: a main clip with scale/x + opacity keyframes
+  renders a frame at 2.5 s (inside the second opacity segment)
+  that differs from the motion-only, opacity-only and plain
+  renders, duration stays exact, and nothing is reported skipped.
+  Still-image clips with keyframes remain stored-not-rendered.
+- Karaoke by syllable: `add_karaoke` accepts optional
+  `syllables: [{text, start, end}]` per word, validated (join to
+  the word text, inside the word range, in order, non-overlapping)
+  as hard errors; `karaoke.build_ass` emits one `\k` tag per
+  syllable when present. CLI `karaoke-add` JSON and MCP pass
+  syllables through unchanged.
+- Agent dock (panel, not a terminal emulator): a documented panel
+  in the web UI with the MCP launch command
+  (`python windows\vibeedit.py mcp <project-folder>`), 3 example
+  agent commands, and a live tool list from the new server
+  endpoint `GET /api/mcp-tools` (the real `mcp.py` registry).
+- MCP: 66 real tools (was 54). New: clip_color_preset_strength,
+  tool_status, windows_check, karaoke_syllable_add,
+  agent_dock_info, project_validate (new `Project.validate()`
+  reporting overlaps/dangling references as data, not
+  exceptions), track_list, clip_list, color_preset_list,
+  mcp_tools_list, text_list, project_format.
+- 79 tests OK (55 Phase 1–4 + 11 Windows-compat + 13 Phase 5),
+  plus a web-server smoke test (HTTP 200 for `/`, `/api/project`
+  and `/api/mcp-tools`).
+
+## 8. Phase 6 list (explicitly NOT in Phase 5)
 
 - Additional transcription providers behind the `transcribe.py`
-  interface; voice providers; karaoke by syllable (words only now).
-- Main-track motion+opacity combined rendering; LUT strength
-  blending for eq presets.
-- Agent dock terminal, knowledge/skills, review panel,
+  interface; voice providers.
+- Agent dock terminal emulator, knowledge/skills, review panel,
   transition preview stills.
-- The remaining ~195 original MCP tools; a Windows .exe built
-  and tested on Windows.
+- The remaining ~183 original MCP tools; a Windows .exe built
+  and tested on Windows; a visual UI check in a real browser on
+  Windows.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
   Swift 6, macOS 14) and a VibeEdit logo/splash replacement.

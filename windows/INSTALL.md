@@ -1,5 +1,9 @@
 # Cài đặt và chạy VibeEdit trên Windows
 
+> Checklist đầy đủ từng bước cho Windows (kiểm tra Python/FFmpeg,
+> chạy bằng launcher, build exe, lỗi thường gặp): xem
+> `windows/CHECK_WINDOWS.md`.
+
 ## Yêu cầu
 
 - Python 3.10 trở lên (khi cài đặt nhớ tick **Add python.exe to PATH**).
@@ -44,7 +48,11 @@ python windows\vibeedit.py mcp <project>
 ## Lưu ý
 
 - Bản xem trước trong giao diện web là video đã xuất gần nhất, chưa phải
-  xem trực tiếp timeline (giới hạn của Phase 3, xem `windows/README.md`).
+  xem trực tiếp timeline (giới hạn còn lại ở Phase 5, xem `windows/README.md`).
+- Từ Phase 5: launcher chạy `vibeedit.py` từ chính thư mục `windows\`
+  (copy riêng thư mục `windows\` sang chỗ khác vẫn chạy được); đường dẫn
+  trong filter FFmpeg, font và FFmpeg/FFprobe đều đã xử lý cho Windows
+  (xem `windows/CHECK_WINDOWS.md` và `VibeEdit/docs/windows-port.md` §7c).
 - File LUT `.cube` phải nằm trên máy bạn và đường dẫn phải đúng thì app mới
   áp dụng; đường dẫn sai sẽ báo lỗi rõ ràng chứ không tự bỏ qua.
   LUT strength 0–1 (mục inspector) được render thật bằng cách trộn LUT.

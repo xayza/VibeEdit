@@ -20,7 +20,8 @@ SAMPLE_RATE = 11025
 
 def decode_mono(path: str, sample_rate: int = SAMPLE_RATE) -> list[float]:
     """Decode ``path`` to mono float32 samples via FFmpeg."""
-    cmd = ["ffmpeg", "-v", "error", "-i", path, "-ac", "1",
+    from .render import find_tool  # local import: render never imports beats
+    cmd = [find_tool("ffmpeg"), "-v", "error", "-i", path, "-ac", "1",
            "-ar", str(sample_rate), "-f", "f32le", "-"]
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:

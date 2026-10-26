@@ -28,8 +28,26 @@ import importlib.util
 import os
 import sys
 
-PLUGINS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "..", "plugins")
+def _plugins_dir() -> str:
+    """plugins/ folder: bundled data under _MEIPASS (or next to the
+    executable) for a frozen app, file-relative in a source checkout
+    — same frozen-app reasoning as server._static_dir()."""
+    if getattr(sys, "frozen", False):
+        for base in (getattr(sys, "_MEIPASS", None),
+                     os.path.dirname(os.path.abspath(sys.executable))):
+            if base:
+                candidate = os.path.join(base, "plugins")
+                if os.path.isdir(candidate):
+                    return candidate
+        return os.path.join(getattr(sys, "_MEIPASS",
+                                    os.path.dirname(
+                                        os.path.abspath(sys.executable))),
+                            "plugins")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "plugins")
+
+
+PLUGINS_DIR = _plugins_dir()
 
 
 def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:

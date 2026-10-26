@@ -9,7 +9,8 @@ button:disabled { opacity: .5; cursor: default; }
 input, select { background: #171614; color: #f2efe9; border: 1px solid #48423a; border-radius: 8px; padding: 6px 8px; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #b8b1a6; margin: 6px 0; }
 .topbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: #161513; border-bottom: 1px solid #332f2a; flex-wrap: wrap; }
-.brand { font-size: 20px; font-weight: 700; }
+.brand { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.brand-logo { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
 .tag { font-size: 12px; background: #33271d; color: #e2b47f; padding: 2px 8px; border-radius: 12px; }
 .top-actions { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 .status { font-size: 13px; color: #b8b1a6; }

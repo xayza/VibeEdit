@@ -6,8 +6,8 @@ every edit is saved to the project file. Tool names mirror the
 original BashCut MCP tools (``bashcut_<group>_<command>``) with the
 ``vibeedit_`` prefix; the full original catalog has 249 tools, of
 which Phase 1 implements the core timeline/project subset below.
-Phase 2 added 14 more tools, Phase 3 another 15 (38 total), and
-Phase 4 another 16 (54 total).
+Phase 2 added 14 more tools, Phase 3 another 15 (38 total),
+Phase 4 another 16 (54 total), and Phase 5 another 12 (66 total).
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -137,6 +137,31 @@ TOOLS = [
      "description": "Export with music ducking forced on for this render."},
     {"name": "vibeedit_clip_tilt",
      "description": "Set tilt (rotation, degrees) keyframes on a clip."},
+    # Phase 5 tools — each calls a real Project/render operation.
+    {"name": "vibeedit_clip_color_preset_strength",
+     "description": "Set a clip's eq colour preset strength (0..1); also sets the preset when given."},
+    {"name": "vibeedit_tool_status",
+     "description": "Report FFmpeg/FFprobe/font discovery status (paths found or missing, with the fix)."},
+    {"name": "vibeedit_windows_check",
+     "description": "Windows-readiness checks: Python version, FFmpeg/FFprobe, font, static UI, launcher and build scripts present."},
+    {"name": "vibeedit_karaoke_syllable_add",
+     "description": "Attach karaoke timings with per-syllable timings to a text item (syllables must join to the word)."},
+    {"name": "vibeedit_agent_dock_info",
+     "description": "Agent dock info: MCP launch command, tool count and tool names."},
+    {"name": "vibeedit_project_validate",
+     "description": "Validate the open project; returns ok plus an error list (content errors never raise)."},
+    {"name": "vibeedit_track_list",
+     "description": "List the project's tracks with item counts."},
+    {"name": "vibeedit_clip_list",
+     "description": "List clips/items, optionally on one track."},
+    {"name": "vibeedit_color_preset_list",
+     "description": "List eq colour presets with their filter strings."},
+    {"name": "vibeedit_mcp_tools_list",
+     "description": "List this server's MCP tools (names and descriptions)."},
+    {"name": "vibeedit_text_list",
+     "description": "List text items, optionally on one track."},
+    {"name": "vibeedit_project_format",
+     "description": "Read the open project's format (width, height, fps, sample rate)."},
 ]
 
 
@@ -249,7 +274,8 @@ class MCPServer:
                 elif kind == "set_color":
                     results.append(proj.set_color(op["item"], op.get("lut"),
                                                   op.get("preset"),
-                                                  op.get("strength")))
+                                                  op.get("strength"),
+                                                  op.get("preset_strength")))
                 elif kind == "add_marker":
                     results.append(proj.add_marker(op["text"],
                                                    int(op["at"])))
@@ -351,7 +377,8 @@ class MCPServer:
             proj = self._require()
             result = proj.set_color(args["item"], args.get("lut"),
                                     args.get("preset"),
-                                    args.get("strength"))
+                                    args.get("strength"),
+                                    args.get("preset_strength"))
             self._save()
             return result
         if name == "vibeedit_markers_add":
@@ -512,6 +539,117 @@ class MCPServer:
                                            "tilt", float(kf["tilt"]))
             self._save()
             return result
+        if name == "vibeedit_clip_color_preset_strength":
+            proj = self._require()
+            result = proj.set_color(args["item"],
+                                    preset=args.get("preset"),
+                                    preset_strength=float(
+                                        args["preset_strength"]))
+            self._save()
+            return result
+        if name == "vibeedit_tool_status":
+            from .render import find_font, find_tool
+            import os
+            status: dict = {"ffmpeg_dir_env": os.environ.get(
+                "VIBEEDIT_FFMPEG_DIR"),
+                "font_env": os.environ.get("VIBEEDIT_FONT")}
+            for tool in ("ffmpeg", "ffprobe"):
+                try:
+                    status[tool] = find_tool(tool)
+                except FileNotFoundError as exc:
+                    status[tool] = None
+                    status[tool + "_error"] = str(exc)
+            try:
+                status["font"] = find_font()
+            except FileNotFoundError as exc:
+                status["font"] = None
+                status["font_error"] = str(exc)
+            return status
+        if name == "vibeedit_windows_check":
+            from .render import find_font, find_tool
+            import os
+            import sys
+            windows_dir = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))
+            checks: dict = {"python": sys.version.split()[0]}
+            for tool in ("ffmpeg", "ffprobe"):
+                try:
+                    checks[tool] = find_tool(tool)
+                except FileNotFoundError:
+                    checks[tool] = None
+            try:
+                checks["font"] = find_font()
+            except FileNotFoundError:
+                checks["font"] = None
+            for rel in ("run_vibeedit.bat", "run_vibeedit.ps1",
+                        "build_windows.bat", "vibeedit.spec",
+                        "vibeedit.py",
+                        os.path.join("scripts", "install_shortcuts.ps1"),
+                        os.path.join("static", "index.html")):
+                checks["file:" + rel] = os.path.isfile(
+                    os.path.join(windows_dir, rel))
+            checks["ok"] = bool(
+                checks["ffmpeg"] and checks["ffprobe"]
+                and all(v for k, v in checks.items()
+                        if k.startswith("file:")))
+            return checks
+        if name == "vibeedit_karaoke_syllable_add":
+            proj = self._require()
+            result = proj.add_karaoke(args["item"], args["words"])
+            self._save()
+            return result
+        if name == "vibeedit_agent_dock_info":
+            return {
+                "command": "python windows/vibeedit.py mcp "
+                           "<project-folder>",
+                "protocol": "newline-delimited JSON-RPC 2.0 on "
+                            "stdin/stdout (initialize, ping, "
+                            "tools/list, tools/call)",
+                "tool_count": len(TOOLS),
+                "tools": [t["name"] for t in TOOLS]}
+        if name == "vibeedit_project_validate":
+            return self._require().validate()
+        if name == "vibeedit_track_list":
+            proj = self._require()
+            return {"tracks": [
+                {"id": t["id"], "kind": t["kind"],
+                 "role": t.get("role"), "name": t.get("name"),
+                 "items": len(t["items"])}
+                for t in proj.data["tracks"]]}
+        if name == "vibeedit_clip_list":
+            proj = self._require()
+            track_id = args.get("track")
+            items = []
+            for track in proj.data["tracks"]:
+                if track_id and track["id"] != track_id:
+                    continue
+                for item in track["items"]:
+                    items.append({"track": track["id"], "id": item["id"],
+                                  "at": item["at"], "dur": item["dur"],
+                                  "media": item.get("media"),
+                                  "text": item.get("text")})
+            return {"items": items}
+        if name == "vibeedit_color_preset_list":
+            from .project import COLOR_PRESETS
+            return {"presets": dict(COLOR_PRESETS)}
+        if name == "vibeedit_mcp_tools_list":
+            return {"tools": TOOLS, "count": len(TOOLS)}
+        if name == "vibeedit_text_list":
+            proj = self._require()
+            track_id = args.get("track")
+            items = []
+            for track in proj.data["tracks"]:
+                if track_id and track["id"] != track_id:
+                    continue
+                for item in track["items"]:
+                    if "text" in item:
+                        items.append({"track": track["id"],
+                                      "id": item["id"], "at": item["at"],
+                                      "dur": item["dur"],
+                                      "text": item["text"]})
+            return {"items": items}
+        if name == "vibeedit_project_format":
+            return {"format": self._require().data["format"]}
         raise ValueError(f"Unknown tool: {name}")
 
 

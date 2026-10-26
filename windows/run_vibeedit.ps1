@@ -1,11 +1,27 @@
 # VibeEdit Windows launcher (right-click -> Run with PowerShell).
 # Checks Python + FFmpeg, starts the web server, opens the browser.
-Set-Location (Split-Path $MyInvocation.MyCommand.Path -Parent) | Out-Null
-Set-Location ..
+#
+# Layout fix (Phase 5): this script runs vibeedit.py from its OWN
+# folder ($PSScriptRoot). It used to change directory to the parent
+# and run windows\vibeedit.py, which only worked for a full repo
+# checkout and broke when only the windows\ folder was copied
+# elsewhere (the parent then has no windows\ subfolder). vibeedit.py
+# sits next to this launcher in both layouts, so no directory change
+# is needed, and the server resolves its project/static folders
+# relative to its own files, not to the working directory.
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir) { $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent }
+$app = Join-Path $scriptDir "vibeedit.py"
 Write-Host "============================================"
 Write-Host " VibeEdit - Dang khoi dong..."
 Write-Host "============================================"
 
+if (-not (Test-Path $app)) {
+  Write-Host "[LOI] Khong tim thay vibeedit.py cung thu muc voi run_vibeedit.ps1: $app"
+  Write-Host "Hay copy ca thu muc windows\ (gom vibeedit.py, vibeedit_core\, static\) roi chay lai."
+  Read-Host "Nhan Enter de thoat"
+  exit 1
+}
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
   Write-Host "[LOI] Khong tim thay Python. Vui long cai Python 3.10+ va tick 'Add python.exe to PATH' khi cai dat."
   Read-Host "Nhan Enter de thoat"
@@ -18,7 +34,7 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "[OK] Da thay Python va FFmpeg."
-Start-Process -FilePath "python" -ArgumentList "windows\vibeedit.py", "serve", "--port", "8000" -WindowStyle Minimized -PassThru | Out-Null
+Start-Process -FilePath "python" -ArgumentList $app, "serve", "--port", "8000" -WindowStyle Minimized -PassThru | Out-Null
 Write-Host "Dang cho server khoi dong (toi da 30 giay)..."
 $ok = $false
 for ($i = 0; $i -lt 30; $i++) {

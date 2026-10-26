@@ -19,7 +19,7 @@ Usage (run from the repo root, or from windows/ with adjusted paths):
     python windows/vibeedit.py mcp [project]
     python windows/vibeedit.py transition <project> <from> <to> <kind> <dur_s>
     python windows/vibeedit.py keyframe <project> <item> <at_s> <property> <value>
-    python windows/vibeedit.py color <project> <item> [--lut FILE] [--preset NAME]
+    python windows/vibeedit.py color <project> <item> [--lut FILE] [--preset NAME] [--preset-strength 0..1]
     python windows/vibeedit.py srt-import <project> <file> [--track t1]
     python windows/vibeedit.py srt-export <project> <file> [--track t1]
 
@@ -203,7 +203,7 @@ def cmd_keyframe(args) -> int:
 def cmd_color(args) -> int:
     proj, path = _open(args.path)
     item = proj.set_color(args.item, args.lut, args.preset,
-                          args.strength)
+                          args.strength, args.preset_strength)
     _save_with_backup(proj, path)
     print(json.dumps(item.get("color", {}), ensure_ascii=False))
     return 0
@@ -490,6 +490,8 @@ def main(argv=None) -> int:
     p.add_argument("path"); p.add_argument("item")
     p.add_argument("--lut", default=None); p.add_argument("--preset", default=None)
     p.add_argument("--strength", type=float, default=None)
+    p.add_argument("--preset-strength", type=float, default=None,
+                   help="eq preset strength 0..1 (default 1.0, 0 skips preset)")
     p.set_defaults(fn=cmd_color)
 
     p = sub.add_parser("srt-import")

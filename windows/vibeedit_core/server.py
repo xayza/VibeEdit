@@ -8,6 +8,7 @@ documented in windows/README.md).
 
 Stdlib only (http.server). Endpoints:
   GET  /api/project            project JSON + timeline text
+  GET  /api/mcp-tools          live MCP tool registry (agent dock)
   POST /api/project            {"op": ...} edit operation (see project.py)
   POST /api/undo  /api/redo     snapshot history (server session)
   POST /api/export             {"preset": "draft"|"full", "normalize": bool}
@@ -25,6 +26,7 @@ import json
 import mimetypes
 import os
 import shutil
+import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,10 +35,48 @@ from .project import (Project, load_project, save_project, new_project,
                       find_project_file, PROJECT_FILENAME)
 from .render import render, probe_media
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "..", "static")
-DEFAULT_PROJECT_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "projects", "default")
+
+def _source_base() -> str:
+    """windows/ folder in a source checkout (parent of vibeedit_core)."""
+    return os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), ".."))
+
+
+def _static_dir() -> str:
+    """Resolve static/ for both layouts. In a PyInstaller frozen
+    app the web UI files are bundled data: they live under
+    sys._MEIPASS (one-folder builds) or next to the executable, NOT
+    next to the archived server module — the old file-relative
+    path silently 404'd every UI file in the frozen app. In a
+    source checkout the file-relative folder is used."""
+    if getattr(sys, "frozen", False):
+        for base in (getattr(sys, "_MEIPASS", None),
+                     os.path.dirname(os.path.abspath(sys.executable))):
+            if base:
+                candidate = os.path.join(base, "static")
+                if os.path.isdir(candidate):
+                    return candidate
+        return os.path.join(getattr(sys, "_MEIPASS",
+                                    os.path.dirname(
+                                        os.path.abspath(sys.executable))),
+                            "static")
+    return os.path.join(_source_base(), "static")
+
+
+def _default_project_dir() -> str:
+    """Default project folder. Frozen apps must NOT store projects
+    under _MEIPASS (bundled data, wiped on update and often
+    read-only): they go next to the executable instead. Source
+    checkouts keep windows/projects/default."""
+    if getattr(sys, "frozen", False):
+        return os.path.join(
+            os.path.dirname(os.path.abspath(sys.executable)),
+            "projects", "default")
+    return os.path.join(_source_base(), "projects", "default")
+
+
+STATIC_DIR = _static_dir()
+DEFAULT_PROJECT_DIR = _default_project_dir()
 
 
 class State:
@@ -119,7 +159,8 @@ class State:
             elif kind == "set_color":
                 result = proj.set_color(op["item"], op.get("lut"),
                                         op.get("preset"),
-                                        op.get("strength"))
+                                        op.get("strength"),
+                                        op.get("preset_strength"))
             elif kind == "add_marker":
                 result = proj.add_marker(op["text"], int(op["at"]))
             elif kind == "remove_marker":
@@ -132,7 +173,8 @@ class State:
             elif kind == "adjustment_add":
                 result = proj.add_adjustment(int(op["at"]), int(op["dur"]),
                                              op.get("preset"), op.get("lut"),
-                                             op.get("strength"))
+                                             op.get("strength"),
+                                             op.get("preset_strength"))
             elif kind == "adjustment_remove":
                 proj.remove_adjustment(op["item"])
                 result = {"deleted": op["item"]}
@@ -231,6 +273,11 @@ def make_handler(state: State):
             if parsed.path == "/api/project":
                 with state.lock:
                     self._send_json(self._project_view())
+            elif parsed.path == "/api/mcp-tools":
+                # Phase 5 agent dock: the live tool registry from
+                # mcp.py (names + descriptions), not a hardcoded list.
+                from .mcp import TOOLS
+                self._send_json({"tools": TOOLS, "count": len(TOOLS)})
             elif parsed.path == "/api/preview":
                 if state.last_export and os.path.isfile(state.last_export):
                     self._serve_file(state.last_export)

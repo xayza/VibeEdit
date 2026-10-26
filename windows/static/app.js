@@ -293,6 +293,24 @@ $("uploadForm").addEventListener("submit", async (e) => {
 
 load().catch((err) => setStatus("Failed to load project: " + err.message, true));
 
+/* Phase 5 agent dock: live MCP tool list from /api/mcp-tools. A
+   failure here must never break the editor above, so it is fenced
+   off from load(). */
+async function loadMcpTools() {
+  const list = $("mcpTools");
+  if (!list) return;
+  try {
+    const data = await api("/api/mcp-tools");
+    $("mcpToolCount").textContent = data.count;
+    list.innerHTML = data.tools.map((t) =>
+      `<li><code>${t.name}</code> — ${t.description}</li>`).join("");
+  } catch (err) {
+    $("mcpToolCount").textContent = "?";
+    list.innerHTML = `<li>MCP tool list unavailable: ${err.message}</li>`;
+  }
+}
+loadMcpTools();
+
 $("batchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const folders = $("batchFolders").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);

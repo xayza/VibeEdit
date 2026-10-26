@@ -110,6 +110,49 @@ COLOR_PRESETS = {
 # rendered with FFmpeg's rotate filter, angle expression in radians).
 KEYFRAME_PROPS = ("x", "y", "scale", "opacity", "volume", "tilt")
 
+# Neutral eq values: interpolating a preset's parameters toward
+# these at strength s gives the Phase 5 preset-strength blend
+# (strength 1 = full preset, strength 0 = unadjusted colour).
+_EQ_NEUTRAL = {"brightness": 0.0, "contrast": 1.0, "saturation": 1.0}
+
+
+def eq_preset_filter(preset: str, strength: float = 1.0) -> str:
+    """eq filter string for ``preset`` at ``strength`` (0..1).
+
+    Each eq parameter is interpolated toward its neutral value:
+    vivid at 0.5 gives brightness 0.01, contrast 1.075, saturation
+    1.125. Strength 0 (or preset "none") returns "" so the caller
+    skips the eq filter entirely; strength 1 returns the preset's
+    stored string verbatim. Raises ValueError on an unknown preset
+    or an out-of-range strength.
+    """
+    if preset in (None, "none"):
+        return ""
+    if preset not in COLOR_PRESETS:
+        raise ValueError(f"Unknown colour preset: {preset!r}")
+    strength = float(strength)
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("Colour preset strength must be 0..1")
+    if strength == 0.0:
+        return ""
+    if strength == 1.0:
+        return COLOR_PRESETS[preset]
+    params: dict[str, float] = {}
+    body = COLOR_PRESETS[preset]
+    if body.startswith("eq="):
+        body = body[3:]
+    for part in body.split(":"):
+        if "=" in part:
+            key, value = part.split("=", 1)
+            params[key] = float(value)
+    blended = []
+    for key in ("brightness", "contrast", "saturation"):
+        if key in params:
+            neutral = _EQ_NEUTRAL[key]
+            value = neutral + strength * (params[key] - neutral)
+            blended.append(f"{key}={value:.6g}")
+    return "eq=" + ":".join(blended) if blended else ""
+
 
 def validate_cube(path: str) -> int:
     """Validate a .cube LUT file. Returns LUT_3D_SIZE. Raises ValueError."""
@@ -607,9 +650,12 @@ class Project:
 
     def set_color(self, item_id: str, lut: str | None = None,
                   preset: str | None = None,
-                  strength: float | None = None) -> dict:
+                  strength: float | None = None,
+                  preset_strength: float | None = None) -> dict:
         """Set a clip's colour: a .cube LUT file and/or an eq preset,
-        plus an optional LUT strength (0..1, default 1.0 = full LUT).
+        plus an optional LUT strength (0..1, default 1.0 = full LUT)
+        and an optional eq preset strength (0..1, default 1.0 = full
+        preset, 0 = preset skipped; see eq_preset_filter).
 
         A missing or invalid LUT is a hard error, never a silent skip.
         """
@@ -629,9 +675,16 @@ class Project:
             if not 0.0 <= strength <= 1.0:
                 raise ValueError("LUT strength must be 0..1")
             color["strength"] = strength
+        if preset_strength is not None:
+            preset_strength = float(preset_strength)
+            if not 0.0 <= preset_strength <= 1.0:
+                raise ValueError("Colour preset strength must be 0..1")
+            color["preset_strength"] = preset_strength
         if not color:
             raise ValueError("Provide a LUT path and/or a colour preset")
         color.setdefault("strength", 1.0)
+        if "preset" in color:
+            color.setdefault("preset_strength", 1.0)
         item["color"] = color
         self._bump()
         return item
@@ -712,7 +765,8 @@ class Project:
 
     def add_adjustment(self, at: int, dur: int, preset: str | None = None,
                        lut: str | None = None,
-                       strength: float | None = None) -> dict:
+                       strength: float | None = None,
+                       preset_strength: float | None = None) -> dict:
         """Add an adjustment layer: a colour preset and/or .cube LUT
         applied to the main-track picture for [at, at+dur) only.
 
@@ -735,9 +789,16 @@ class Project:
             if not 0.0 <= strength <= 1.0:
                 raise ValueError("LUT strength must be 0..1")
             color["strength"] = strength
+        if preset_strength is not None:
+            preset_strength = float(preset_strength)
+            if not 0.0 <= preset_strength <= 1.0:
+                raise ValueError("Colour preset strength must be 0..1")
+            color["preset_strength"] = preset_strength
         if not color:
             raise ValueError("Provide a LUT path and/or a colour preset")
         color.setdefault("strength", 1.0)
+        if "preset" in color:
+            color.setdefault("preset_strength", 1.0)
         track = self.adjustment_track()
         item = {"id": _new_id("adj"), "at": int(at), "dur": int(dur),
                 "color": color}
@@ -766,7 +827,12 @@ class Project:
         relative to the item start. Words must be non-overlapping, in
         order, inside the item, and must join (with single spaces) to
         the item's own text — otherwise the highlight would drift
-        from the words on screen, so that is a hard error.
+        from the words on screen, so that is a hard error. Phase 5:
+        a word may carry an optional ``syllables`` list of
+        {text, start, end} (same time base); syllables must join
+        (concatenated) to the word text and lie inside the word's
+        range, and the .ass builder then emits one ``\\k`` tag per
+        syllable instead of per word.
         """
         _, item = self.item(item_id)
         if "text" not in item:
@@ -785,7 +851,45 @@ class Project:
             if start < prev_end - 1e-9:
                 raise ValueError("Karaoke words must be in order "
                                  "and non-overlapping")
-            cleaned.append({"text": text, "start": start, "end": end})
+            entry: dict = {"text": text, "start": start, "end": end}
+            # Phase 5: optional per-syllable timings. Syllables must
+            # join (concatenated, no separator) to the word text,
+            # lie inside the word's time range, and be in order
+            # without overlapping — otherwise the highlight would
+            # drift, so that is a hard error like the word rules.
+            syllables = word.get("syllables")
+            if syllables is not None:
+                if not isinstance(syllables, list) or not syllables:
+                    raise ValueError(
+                        f"Karaoke syllables for {text!r} must be a "
+                        f"non-empty list")
+                cleaned_syl: list[dict] = []
+                prev_syl_end = start
+                for syl in syllables:
+                    syl_text = str(syl.get("text", ""))
+                    syl_start, syl_end = float(syl["start"]), float(syl["end"])
+                    if not syl_text:
+                        raise ValueError(
+                            "Karaoke syllable text must not be empty")
+                    if not (start - 1e-9 <= syl_start < syl_end
+                            <= end + 1e-9):
+                        raise ValueError(
+                            f"Karaoke syllable {syl_text!r} falls "
+                            f"outside word {text!r}")
+                    if syl_start < prev_syl_end - 1e-9:
+                        raise ValueError(
+                            "Karaoke syllables must be in order and "
+                            "non-overlapping")
+                    cleaned_syl.append({"text": syl_text,
+                                        "start": syl_start,
+                                        "end": syl_end})
+                    prev_syl_end = syl_end
+                if "".join(s["text"] for s in cleaned_syl) != text:
+                    raise ValueError(
+                        f"Karaoke syllables {''.join(s['text'] for s in cleaned_syl)!r} "
+                        f"do not join to word {text!r}")
+                entry["syllables"] = cleaned_syl
+            cleaned.append(entry)
             prev_end = end
         if not cleaned:
             raise ValueError("Karaoke needs at least one word")
@@ -894,6 +998,53 @@ class Project:
             "beats": len(self.beat_list()),
             "ducking": self.ducking_get(),
         }
+
+    # -- Phase 5: validation ----------------------------------------
+    def validate(self) -> dict:
+        """Check the project document and report problems without
+        raising for content errors (unknown ids, overlaps, dangling
+        transitions are returned as ``errors``, not exceptions, so
+        an agent can read them and fix the project)."""
+        errors: list[str] = []
+        data = self.data
+        if data.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
+            errors.append(f"Unsupported schema: {data.get('schema')!r}")
+        mains = [t for t in data["tracks"]
+                 if t.get("role") == "main" and t["kind"] == "video"]
+        if not mains:
+            errors.append("Project has no main video track")
+        media_ids = {m["id"] for m in data["media"]}
+        items_by_id: dict[str, dict] = {}
+        for track in data["tracks"]:
+            seen: list[dict] = []
+            for item in track["items"]:
+                items_by_id[item["id"]] = item
+                if "media" in item and item["media"] not in media_ids:
+                    errors.append(
+                        f"Item {item['id']} references unknown media "
+                        f"{item['media']!r}")
+                if int(item.get("dur", 0)) <= 0:
+                    errors.append(f"Item {item['id']} has no duration")
+                for other in seen:
+                    o_start = int(other["at"])
+                    o_end = o_start + int(other["dur"])
+                    start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
+                    if start < o_end and o_start < end:
+                        errors.append(
+                            f"Item {item['id']} overlaps {other['id']} "
+                            f"on track {track['id']}")
+                seen.append(item)
+        for trans in data.get("transitions", []):
+            if trans.get("kind") not in TRANSITION_XFADE:
+                errors.append(
+                    f"Transition {trans.get('id')} has unknown kind "
+                    f"{trans.get('kind')!r}")
+            for key in ("from", "to"):
+                if trans.get(key) not in items_by_id:
+                    errors.append(
+                        f"Transition {trans.get('id')} references "
+                        f"unknown clip {trans.get(key)!r}")
+        return {"ok": not errors, "errors": errors}
 
     # -- readouts -----------------------------------------------------
     def timeline_text(self) -> str:
