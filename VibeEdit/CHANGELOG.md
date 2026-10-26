@@ -1,5 +1,32 @@
 # Changelog
 
+## VibeEdit Windows port — Phase 4
+
+- OTIO import (new project or `--merge` into an existing project):
+  reads the Phase 3 OTIO export back into a VibeEdit project, with
+  missing media reported in the import report — never dropped or
+  invented. Round-trip verified (clip counts, timings,
+  transitions, and a 5.5 s render of the imported project).
+- Karaoke captions: per-word timings on text items, burned as one
+  .ass track with libass `\k` tags (sung = yellow, unsung = white);
+  standalone `karaoke-export` writes `render/karaoke.ass`.
+- Adjustment layers: colour preset and/or .cube LUT applied to the
+  main-track picture for a time range only (eq/lut3d with an
+  `enable` window); overlap rejected, bad LUTs are hard errors.
+- Beat grid: energy-onset detection from decoded audio (no ML
+  model), stored in `beatGrid`, drawn as ticks on the web UI ruler,
+  with beat snap and beats-to-markers. Measured 5/5 synthetic
+  bursts within 0.05 s; silence yields no beats.
+- Music ducking: sidechaincompress on music items with main-track
+  audio as sidechain (asplit); amount sets ratio as
+  10 ** (amount / 20). Isolated test: music during dialogue more
+  than 3 dB quieter than during silence.
+- Tilt keyframes (-180–180 degrees) render via FFmpeg's rotate
+  filter on main-track and overlay clips.
+- MCP expanded from 38 to 54 real tools; CLI, server ops and a web
+  UI Phase 4 panel cover the same features. 55 tests OK.
+  See `VibeEdit/docs/windows-port.md` §7b–§8.
+
 ## VibeEdit Windows port — Phase 3
 
 - Full transition library (whip, iris open/close, zoom-in,

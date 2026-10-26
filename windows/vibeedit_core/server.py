@@ -127,6 +127,28 @@ class State:
                 result = {"deleted": op["marker"]}
             elif kind == "srt_import":
                 result = proj.import_srt(op.get("track", "t1"), op["srt"])
+            elif kind == "karaoke_add":
+                result = proj.add_karaoke(op["item"], op["words"])
+            elif kind == "adjustment_add":
+                result = proj.add_adjustment(int(op["at"]), int(op["dur"]),
+                                             op.get("preset"), op.get("lut"),
+                                             op.get("strength"))
+            elif kind == "adjustment_remove":
+                proj.remove_adjustment(op["item"])
+                result = {"deleted": op["item"]}
+            elif kind == "beat_detect":
+                result = proj.detect_beats(op["media"],
+                                           min_gap_s=float(op.get("min_gap", 0.3)))
+            elif kind == "beats_to_markers":
+                result = proj.beats_to_markers()
+            elif kind == "ducking_set":
+                result = proj.set_ducking(
+                    bool(op.get("enabled", True)),
+                    amount_db=float(op.get("amount_db", 6.0)),
+                    threshold=float(op.get("threshold", 0.02)),
+                    ratio=op.get("ratio"))
+            elif kind == "project_stats":
+                result = proj.project_stats()
             elif kind == "set_project":
                 proj.data["name"] = op.get("name", proj.data["name"])
                 fmt = proj.data["format"]
@@ -293,6 +315,26 @@ def make_handler(state: State):
                             otio_text = fh.read()
                         self._send_json({"ok": True, "report": report,
                                          "otio": otio_text})
+                    elif parsed.path == "/api/otio-import":
+                        from .export_ops import import_otio
+                        body = self._read_json()
+                        report = import_otio(body["otio"], body["dest"],
+                                             merge=bool(body.get("merge", False)))
+                        self._send_json({"ok": True, "report": report})
+                    elif parsed.path == "/api/karaoke-ass":
+                        from .export_ops import export_karaoke_ass
+                        self._read_json()
+                        out = os.path.join(state.project_dir, "render",
+                                           "karaoke.ass")
+                        report = export_karaoke_ass(state.project.data, out)
+                        with open(out, encoding="utf-8") as fh:
+                            ass_text = fh.read()
+                        self._send_json({"ok": True, "report": report,
+                                         "ass": ass_text})
+                    elif parsed.path == "/api/stats":
+                        self._read_json()
+                        self._send_json({"ok": True,
+                                         "stats": state.project.project_stats()})
                     elif parsed.path == "/api/media/upload":
                         length = int(self.headers.get("Content-Length") or 0)
                         body = self.rfile.read(length)

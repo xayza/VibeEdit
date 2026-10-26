@@ -6,7 +6,8 @@ every edit is saved to the project file. Tool names mirror the
 original BashCut MCP tools (``bashcut_<group>_<command>``) with the
 ``vibeedit_`` prefix; the full original catalog has 249 tools, of
 which Phase 1 implements the core timeline/project subset below.
-Phase 2 added 14 more tools and Phase 3 another 15 (38 total).
+Phase 2 added 14 more tools, Phase 3 another 15 (38 total), and
+Phase 4 another 16 (54 total).
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -103,6 +104,39 @@ TOOLS = [
      "description": "Report the queued batch and its last results."},
     {"name": "vibeedit_export_normalized",
      "description": "Export with single-pass loudnorm normalisation."},
+    # Phase 4 tools — each calls a real Project/export operation.
+    {"name": "vibeedit_otio_import",
+     "description": "Import an OTIO JSON timeline into a new project folder (or merge into an existing project). Missing media is reported, never invented."},
+    {"name": "vibeedit_karaoke_add",
+     "description": "Attach per-word timings to a text item (karaoke)."},
+    {"name": "vibeedit_karaoke_get",
+     "description": "Read a text item's karaoke word timings."},
+    {"name": "vibeedit_karaoke_export_ass",
+     "description": "Export all karaoke items as a standalone .ass file."},
+    {"name": "vibeedit_adjustment_add",
+     "description": "Add an adjustment layer (colour preset and/or LUT) for a time range."},
+    {"name": "vibeedit_adjustment_remove",
+     "description": "Remove an adjustment layer by id."},
+    {"name": "vibeedit_adjustment_list",
+     "description": "List the project's adjustment layers."},
+    {"name": "vibeedit_beat_detect",
+     "description": "Detect beats from a media file's audio (energy-onset) and store the beat grid."},
+    {"name": "vibeedit_beat_list",
+     "description": "List the stored beat grid (seconds)."},
+    {"name": "vibeedit_beat_snap",
+     "description": "Snap a timeline frame to the nearest detected beat."},
+    {"name": "vibeedit_beats_to_markers",
+     "description": "Copy the stored beat grid into timeline markers."},
+    {"name": "vibeedit_ducking_set",
+     "description": "Configure music ducking (enabled, amount in dB, threshold, ratio)."},
+    {"name": "vibeedit_ducking_get",
+     "description": "Read the current music ducking configuration."},
+    {"name": "vibeedit_project_stats",
+     "description": "Counts for tracks, items, karaoke, adjustments, transitions, markers, beats."},
+    {"name": "vibeedit_export_ducked",
+     "description": "Export with music ducking forced on for this render."},
+    {"name": "vibeedit_clip_tilt",
+     "description": "Set tilt (rotation, degrees) keyframes on a clip."},
 ]
 
 
@@ -397,6 +431,87 @@ class MCPServer:
                             normalize_audio=True)
             self.last_export = report
             return report
+        if name == "vibeedit_otio_import":
+            from .export_ops import import_otio
+            return import_otio(args["otio"], args["dest"],
+                               merge=bool(args.get("merge", False)))
+        if name == "vibeedit_karaoke_add":
+            proj = self._require()
+            result = proj.add_karaoke(args["item"], args["words"])
+            self._save()
+            return result
+        if name == "vibeedit_karaoke_get":
+            return self._require().karaoke_get(args["item"])
+        if name == "vibeedit_karaoke_export_ass":
+            from .export_ops import export_karaoke_ass
+            import os
+            proj = self._require()
+            out = args.get("out") or os.path.join(
+                proj.folder, "render", "karaoke.ass")
+            return export_karaoke_ass(proj.data, out)
+        if name == "vibeedit_adjustment_add":
+            proj = self._require()
+            result = proj.add_adjustment(int(args["at"]), int(args["dur"]),
+                                         args.get("preset"), args.get("lut"),
+                                         args.get("strength"))
+            self._save()
+            return result
+        if name == "vibeedit_adjustment_remove":
+            proj = self._require()
+            proj.remove_adjustment(args["item"])
+            self._save()
+            return {"deleted": args["item"]}
+        if name == "vibeedit_adjustment_list":
+            return {"adjustments": self._require().list_adjustments()}
+        if name == "vibeedit_beat_detect":
+            proj = self._require()
+            result = proj.detect_beats(args["media"],
+                                       min_gap_s=float(args.get("min_gap", 0.3)))
+            self._save()
+            return result
+        if name == "vibeedit_beat_list":
+            return {"beats": self._require().beat_list()}
+        if name == "vibeedit_beat_snap":
+            proj = self._require()
+            return {"frame": int(args["frame"]),
+                    "snapped": proj.snap_frame(int(args["frame"]))}
+        if name == "vibeedit_beats_to_markers":
+            proj = self._require()
+            result = proj.beats_to_markers()
+            self._save()
+            return {"markers": result}
+        if name == "vibeedit_ducking_set":
+            proj = self._require()
+            result = proj.set_ducking(
+                bool(args.get("enabled", True)),
+                amount_db=float(args.get("amount_db", 6.0)),
+                threshold=float(args.get("threshold", 0.02)),
+                ratio=args.get("ratio"),
+                attack=float(args.get("attack", 20.0)),
+                release=float(args.get("release", 250.0)))
+            self._save()
+            return result
+        if name == "vibeedit_ducking_get":
+            return self._require().ducking_get()
+        if name == "vibeedit_project_stats":
+            return self._require().project_stats()
+        if name == "vibeedit_export_ducked":
+            from .render import render
+            import os
+            proj = self._require()
+            out = os.path.join(proj.folder, "render", "export-ducked.mp4")
+            report = render(proj.data, proj.folder, out, preset="full",
+                            ducking=True)
+            self.last_export = report
+            return report
+        if name == "vibeedit_clip_tilt":
+            proj = self._require()
+            result = None
+            for kf in args["keyframes"]:
+                result = proj.add_keyframe(args["item"], float(kf["at"]),
+                                           "tilt", float(kf["tilt"]))
+            self._save()
+            return result
         raise ValueError(f"Unknown tool: {name}")
 
 

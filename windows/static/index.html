@@ -146,6 +146,7 @@
           <option value="scale">Scale (&gt;0)</option>
           <option value="opacity">Opacity (0–1)</option>
           <option value="volume">Volume (dB)</option>
+          <option value="tilt">Tilt (degrees, -180–180)</option>
         </select></label>
         <label>Value <input id="kfValue" type="number" step="0.1" value="1"></label>
         <button type="submit" class="primary">Add keyframe</button>
@@ -166,6 +167,40 @@
     <button id="btnOtio" class="secondary">Export timeline as OTIO</button>
     <label><input type="checkbox" id="exportNormalize"> Normalize loudness on next export</label>
     <div id="batchResult"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Phase 4: OTIO import, karaoke, adjustment, beats, ducking</h3>
+    <form id="otioImportForm">
+      <label>OTIO file (full path) <input id="otioImportPath" placeholder="D:\projects\other\timeline.otio" required></label>
+      <label>Destination project folder (full path) <input id="otioImportDest" placeholder="D:\projects\imported" required></label>
+      <label><input type="checkbox" id="otioImportMerge"> Merge into existing project in that folder</label>
+      <button type="submit" class="primary">Import OTIO</button>
+    </form>
+    <form id="karaokeForm">
+      <label>Selected text item is used. Words JSON: [{"text":"Hello","start":0,"end":1}] <textarea id="karaokeWords" rows="2" placeholder='[{"text":"Hello","start":0,"end":1}]'></textarea></label>
+      <button type="submit" class="primary">Add karaoke timings to selected item</button>
+    </form>
+    <button id="btnKaraokeAss" class="secondary">Export karaoke as .ass</button>
+    <form id="adjustmentForm">
+      <label>Start (frames) <input id="adjAt" type="number" value="0" min="0"></label>
+      <label>Duration (frames) <input id="adjDur" type="number" value="90" min="1"></label>
+      <label>Colour preset <select id="adjPreset"><option value="">(none)</option><option value="vivid">vivid</option><option value="warm">warm</option><option value="cool">cool</option><option value="faded">faded</option><option value="mono">mono</option></select></label>
+      <label>LUT file (.cube, full path) <input id="adjLut" placeholder="C:\luts\my.cube"></label>
+      <button type="submit" class="primary">Add adjustment layer</button>
+    </form>
+    <form id="beatForm">
+      <label>Media <select id="beatMedia" required></select></label>
+      <button type="submit" class="primary">Detect beats (energy-onset)</button>
+    </form>
+    <button id="btnBeatsMarkers" class="secondary">Copy beats to markers</button>
+    <button id="btnSnap" class="secondary">Snap playhead to nearest beat</button>
+    <form id="duckingForm">
+      <label>Duck amount (dB) <input id="duckAmount" type="number" step="1" min="1" max="24" value="6"></label>
+      <label><input type="checkbox" id="duckEnabled" checked> Enable music ducking</label>
+      <button type="submit" class="primary">Save ducking</button>
+    </form>
+    <div id="phase4Result"></div>
   </div>
 <!-- Timeline strip at the bottom, CapCut-style -->
 <section class="timeline-wrap">

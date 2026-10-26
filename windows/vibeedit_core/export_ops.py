@@ -129,6 +129,249 @@ def export_otio(project: dict, folder: str, out_path: str) -> dict:
             "markers": len(markers_json)}
 
 
+def import_otio(otio_path: str, dest_folder: str,
+                merge: bool = False) -> dict:
+    """Import a .otio JSON file written by export_otio (Phase 3) into a
+    VibeEdit project.
+
+    New-project mode (default) creates ``dest_folder`` with a fresh
+    project file. Merge mode appends the OTIO tracks to an existing
+    project in ``dest_folder`` (track/item ids are regenerated on
+    collision, and transition from/to references are remapped).
+
+    Media paths are resolved relative to the .otio file first, then
+    exactly as stored; a file that cannot be found is still imported
+    (its clip keeps the stored path) and is listed in ``missing`` —
+    never silently dropped and never replaced with invented media.
+    Unknown OTIO objects are listed in ``warnings``.
+    Returns a report: project path, track/clip/transition/marker
+    counts, missing files, warnings.
+    """
+    from .project import Project
+    with open(otio_path, encoding="utf-8") as fh:
+        timeline = json.load(fh)
+    if timeline.get("OTIO_SCHEMA") != "Timeline.1":
+        raise ValueError("Not an OpenTimelineIO Timeline.1 JSON file")
+    otio_dir = os.path.dirname(os.path.abspath(otio_path))
+    meta = (timeline.get("metadata") or {}).get("VibeEdit") or {}
+    fmt = meta.get("format") or {"width": 1080, "height": 1920,
+                                 "fps": [30, 1], "sampleRate": 48000}
+    rate = fps_value(fmt["fps"])
+    if merge:
+        found = find_project_file(dest_folder)
+        if not found:
+            raise FileNotFoundError(
+                f"No project file in folder for merge: {dest_folder}")
+        data = load_project(found)
+        proj = Project(data, dest_folder)
+    else:
+        if os.path.exists(os.path.join(dest_folder, PROJECT_FILENAME)):
+            raise ValueError(
+                f"Destination already has a project: {dest_folder}")
+        os.makedirs(dest_folder, exist_ok=True)
+        data = new_project(timeline.get("name") or "Imported OTIO",
+                           width=int(fmt["width"]), height=int(fmt["height"]),
+                           fps=tuple(fmt["fps"]) if isinstance(fmt["fps"], list)
+                           else fmt["fps"])
+        if meta.get("contentLanguage"):
+            data["contentLanguage"] = meta["contentLanguage"]
+        # new_project ships default tracks; the OTIO tracks replace them.
+        data["tracks"] = []
+        proj = Project(data, dest_folder)
+    missing: list[str] = []
+    warnings: list[str] = []
+    n_clips = n_trans = 0
+    existing_ids = {i["id"] for t in data["tracks"] for i in t["items"]}
+    existing_track_ids = {t["id"] for t in data["tracks"]}
+    id_map: dict[str, str] = {}
+
+    def fresh_id(old: str, prefix: str) -> str:
+        if old and old not in existing_ids:
+            existing_ids.add(old)
+            return old
+        new = f"{prefix}-{uuid.uuid4().hex[:8]}"
+        existing_ids.add(new)
+        if old:
+            id_map[old] = new
+        return new
+
+    stack = timeline.get("tracks") or {}
+    otio_tracks = stack.get("children") or []
+    imported_transitions: list[dict] = []
+    for otio_track in otio_tracks:
+        if otio_track.get("OTIO_SCHEMA") != "Track.1":
+            warnings.append(
+                f"Skipped non-Track object: {otio_track.get('OTIO_SCHEMA')}")
+            continue
+        tmeta = (otio_track.get("metadata") or {}).get("VibeEdit") or {}
+        kind = otio_track.get("kind", "Video")
+        track_id = tmeta.get("id") or f"track-{uuid.uuid4().hex[:8]}"
+        if track_id in existing_track_ids:
+            track_id = f"track-{uuid.uuid4().hex[:8]}"
+        existing_track_ids.add(track_id)
+        role = tmeta.get("role")
+        if not role:
+            if kind == "Audio":
+                role = "dialogue"
+            elif data["tracks"] or merge:
+                role = "overlay"
+            else:
+                role = "main"
+        track = {"id": track_id,
+                 "kind": "audio" if kind == "Audio" else "video",
+                 "role": role,
+                 "name": otio_track.get("name") or track_id, "items": []}
+        prev_clip_id: str | None = None
+        for child in otio_track.get("children") or []:
+            schema = child.get("OTIO_SCHEMA")
+            if schema == "Transition.1":
+                tmeta2 = (child.get("metadata") or {}).get("VibeEdit") or {}
+                if prev_clip_id is None:
+                    warnings.append("Transition with no preceding clip skipped")
+                    continue
+                # The following clip is not known yet; stash it and
+                # resolve it when the next clip arrives.
+                imported_transitions.append({
+                    "pending_from": prev_clip_id,
+                    "kind": tmeta2.get("kind"),
+                    "transition_type": child.get("transition_type"),
+                    "duration": int((child.get("in_offset") or {}).get("value", 0))
+                    + int((child.get("out_offset") or {}).get("value", 0)),
+                    "id": tmeta2.get("id")})
+                continue
+            if schema != "Clip.1":
+                warnings.append(f"Skipped OTIO object: {schema}")
+                continue
+            cmeta = (child.get("metadata") or {}).get("VibeEdit") or {}
+            src_range = child.get("source_range") or {}
+            start = (src_range.get("start_time") or {}).get("value", 0)
+            dur = (src_range.get("duration") or {}).get("value", 0)
+            at = int(cmeta.get("at", 0))
+            if dur <= 0:
+                warnings.append(f"Clip {cmeta.get('id')} has no duration, skipped")
+                continue
+            clip_id = fresh_id(cmeta.get("id") or "", "c")
+            ref = child.get("media_reference") or {}
+            target = ref.get("target_url")
+            if target:
+                resolved = target if os.path.isabs(target) else \
+                    os.path.join(otio_dir, target)
+                if not os.path.isfile(resolved):
+                    if os.path.isfile(target):
+                        resolved = target
+                    else:
+                        missing.append(target)
+                # Store a path the project can open: relative to the
+                # destination folder when possible, else absolute.
+                try:
+                    stored = os.path.relpath(resolved, dest_folder)
+                except ValueError:
+                    stored = resolved
+                medium = next((m for m in data["media"]
+                               if m["path"] == stored), None)
+                if medium is None:
+                    medium = {"id": f"m-{uuid.uuid4().hex[:8]}",
+                              "path": stored, "kind": "video"}
+                    data["media"].append(medium)
+                item = {"id": clip_id, "media": medium["id"],
+                        "in": int(start), "dur": int(dur), "at": at,
+                        "speed": float(cmeta.get("speed", 1.0) or 1.0)}
+                for key in ("keyframes", "color", "volume", "fadeIn", "fadeOut"):
+                    if cmeta.get(key) is not None:
+                        item[key] = cmeta[key]
+            else:
+                # Text clip (Phase 3 exports captions this way).
+                text = child.get("name") or ""
+                item = {"id": clip_id, "at": at, "dur": int(dur),
+                        "text": text,
+                        "textStyle": {"size": 0.062, "positionY": 0.8,
+                                      "positionX": 0.5}}
+                # A clip with no media reference is a caption: the
+                # track becomes a text track so the renderer draws it.
+                track["kind"] = "text"
+            track["items"].append(item)
+            n_clips += 1
+            # Resolve a pending transition now that its "to" clip is known.
+            for pending in list(imported_transitions):
+                if pending.get("resolved") or pending.get("final"):
+                    continue
+                pending["to"] = clip_id
+                pending["resolved"] = True
+                kind2 = pending["kind"]
+                if not kind2:
+                    kind2 = "dissolve" if pending["transition_type"] == \
+                        "SMPTE_Dissolve" else None
+                if kind2 is None or pending["duration"] <= 0:
+                    warnings.append("Transition skipped: unknown kind "
+                                    "or zero duration")
+                    continue
+                from .project import TRANSITION_XFADE
+                if kind2 not in TRANSITION_XFADE:
+                    warnings.append(
+                        f"Transition kind {kind2!r} not supported, skipped")
+                    continue
+                from_id = id_map.get(pending["pending_from"],
+                                     pending["pending_from"])
+                imported_transitions.append({
+                    "id": pending["id"] or f"tr-{uuid.uuid4().hex[:8]}",
+                    "kind": kind2, "from": from_id, "to": clip_id,
+                    "duration": int(pending["duration"]),
+                    "final": True})
+            prev_clip_id = clip_id
+        track["items"].sort(key=lambda i: i["at"])
+        data["tracks"].append(track)
+    for trans in imported_transitions:
+        if trans.get("final"):
+            data.setdefault("transitions", []).append({
+                "id": trans["id"], "kind": trans["kind"],
+                "from": trans["from"], "to": trans["to"],
+                "duration": trans["duration"]})
+            n_trans += 1
+    for marker in (stack.get("markers") or []):
+        mmeta = (marker.get("metadata") or {}).get("VibeEdit") or {}
+        marked = marker.get("marked_range") or {}
+        at = int((marked.get("start_time") or {}).get("value", 0))
+        data.setdefault("markers", []).append({
+            "id": mmeta.get("id") or f"mk-{uuid.uuid4().hex[:8]}",
+            "text": marker.get("name", ""), "at": at})
+    data["tracks"].sort(key=lambda t: 0 if t.get("role") == "main" else 1)
+    out_path = os.path.join(dest_folder, PROJECT_FILENAME)
+    save_project(data, out_path)
+    return {"project": out_path, "tracks": len(data["tracks"]),
+            "clips": n_clips, "transitions": n_trans,
+            "markers": len(data.get("markers", [])),
+            "missing": missing, "warnings": warnings}
+
+
+def export_karaoke_ass(project: dict, out_path: str) -> dict:
+    """Write a standalone .ass file for all karaoke items in a project
+    (original timeline times, not transition-adjusted)."""
+    from .karaoke import build_ass
+    fmt = project["format"]
+    rate = fps_value(fmt["fps"])
+    items = []
+    for track in project["tracks"]:
+        if track["kind"] != "text":
+            continue
+        for item in sorted(track["items"], key=lambda i: i["at"]):
+            karaoke = item.get("karaoke")
+            if not karaoke:
+                continue
+            style = item.get("textStyle") or {}
+            items.append({
+                "start_s": item["at"] / rate,
+                "end_s": (item["at"] + item["dur"]) / rate,
+                "words": karaoke["words"],
+                "size_frac": float(style.get("size", 0.062)),
+                "position_y": float(style.get("positionY", 0.8))})
+    if not items:
+        raise ValueError("Project has no karaoke items")
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(build_ass(items, int(fmt["width"]), int(fmt["height"])))
+    return {"ass": out_path, "karaoke_items": len(items)}
+
+
 def batch_export(folders: list[str], preset: str = "full",
                  out_dir: str | None = None,
                  normalize_audio: bool = False) -> list[dict]:

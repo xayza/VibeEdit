@@ -106,8 +106,9 @@ COLOR_PRESETS = {
 
 # Keyframe properties. Times are stored in frames relative to the start
 # of their item; values are fractions for x/y, a multiplier for scale,
-# 0..1 for opacity, and dB for volume.
-KEYFRAME_PROPS = ("x", "y", "scale", "opacity", "volume")
+# 0..1 for opacity, dB for volume, and degrees for tilt (Phase 4:
+# rendered with FFmpeg's rotate filter, angle expression in radians).
+KEYFRAME_PROPS = ("x", "y", "scale", "opacity", "volume", "tilt")
 
 
 def validate_cube(path: str) -> int:
@@ -577,6 +578,8 @@ class Project:
                         raise ValueError("opacity keyframes must be 0..1")
                     if prop == "volume" and not -60.0 <= value <= 24.0:
                         raise ValueError("volume keyframes must be -60..24 dB")
+                    if prop == "tilt" and not -180.0 <= value <= 180.0:
+                        raise ValueError("tilt keyframes must be -180..180 degrees")
                     entry[prop] = value
             if len(entry) == 1:
                 raise ValueError("Keyframe must set at least one property")
@@ -694,6 +697,203 @@ class Project:
             lines.append(item.get("text", ""))
             lines.append("")
         return "\n".join(lines)
+
+    # -- Phase 4: adjustment layers -----------------------------------
+    def adjustment_track(self) -> dict:
+        """Return the adjustment track, creating it if absent."""
+        for track in self.data["tracks"]:
+            if track.get("role") == "adjustment":
+                return track
+        track = {"id": _new_id("adj"), "kind": "video",
+                 "role": "adjustment", "name": "Adjustment", "items": []}
+        # Adjustment sits after the main track in track order.
+        self.data["tracks"].insert(1, track)
+        return track
+
+    def add_adjustment(self, at: int, dur: int, preset: str | None = None,
+                       lut: str | None = None,
+                       strength: float | None = None) -> dict:
+        """Add an adjustment layer: a colour preset and/or .cube LUT
+        applied to the main-track picture for [at, at+dur) only.
+
+        Stored as an item on the adjustment track (no media). Range
+        and overlap rules match other timeline items; a missing or
+        invalid LUT is a hard error, never a silent skip.
+        """
+        if int(dur) <= 0:
+            raise ValueError("Adjustment duration must be positive")
+        color: dict = {}
+        if lut is not None:
+            validate_cube(lut)
+            color["lut"] = lut
+        if preset is not None:
+            if preset not in COLOR_PRESETS:
+                raise ValueError(f"Unknown colour preset: {preset!r}")
+            color["preset"] = preset
+        if strength is not None:
+            strength = float(strength)
+            if not 0.0 <= strength <= 1.0:
+                raise ValueError("LUT strength must be 0..1")
+            color["strength"] = strength
+        if not color:
+            raise ValueError("Provide a LUT path and/or a colour preset")
+        color.setdefault("strength", 1.0)
+        track = self.adjustment_track()
+        item = {"id": _new_id("adj"), "at": int(at), "dur": int(dur),
+                "color": color}
+        self._check_overlap(track, item)
+        track["items"].append(item)
+        track["items"].sort(key=lambda i: i["at"])
+        self._bump()
+        return item
+
+    def remove_adjustment(self, item_id: str) -> None:
+        track = self.adjustment_track()
+        before = len(track["items"])
+        track["items"] = [i for i in track["items"] if i["id"] != item_id]
+        if len(track["items"]) == before:
+            raise KeyError(f"Unknown adjustment layer: {item_id}")
+        self._bump()
+
+    def list_adjustments(self) -> list[dict]:
+        return copy.deepcopy(self.adjustment_track()["items"])
+
+    # -- Phase 4: karaoke captions ------------------------------------
+    def add_karaoke(self, item_id: str, words: list[dict]) -> dict:
+        """Attach per-word timings to a text item.
+
+        ``words`` is a list of {text, start, end} with times in seconds
+        relative to the item start. Words must be non-overlapping, in
+        order, inside the item, and must join (with single spaces) to
+        the item's own text — otherwise the highlight would drift
+        from the words on screen, so that is a hard error.
+        """
+        _, item = self.item(item_id)
+        if "text" not in item:
+            raise ValueError("Karaoke belongs on a text item")
+        dur_s = frames_to_seconds(int(item["dur"]), self.fps)
+        cleaned: list[dict] = []
+        prev_end = 0.0
+        for word in words:
+            text = str(word.get("text", "")).strip()
+            start, end = float(word["start"]), float(word["end"])
+            if not text:
+                raise ValueError("Karaoke word text must not be empty")
+            if not (0.0 <= start < end <= dur_s + 1e-9):
+                raise ValueError(
+                    f"Karaoke word {text!r} falls outside the cue")
+            if start < prev_end - 1e-9:
+                raise ValueError("Karaoke words must be in order "
+                                 "and non-overlapping")
+            cleaned.append({"text": text, "start": start, "end": end})
+            prev_end = end
+        if not cleaned:
+            raise ValueError("Karaoke needs at least one word")
+        joined = " ".join(w["text"] for w in cleaned)
+        if " ".join(str(item["text"]).split()) != joined:
+            raise ValueError(
+                f"Karaoke words {joined!r} do not match cue text "
+                f"{item['text']!r}")
+        item["karaoke"] = {"words": cleaned}
+        self._bump()
+        return item
+
+    def karaoke_get(self, item_id: str) -> dict:
+        _, item = self.item(item_id)
+        if "karaoke" not in item:
+            raise KeyError(f"Item has no karaoke timings: {item_id}")
+        return copy.deepcopy(item["karaoke"])
+
+    # -- Phase 4: ducking ---------------------------------------------
+    def set_ducking(self, enabled: bool, amount_db: float = 6.0,
+                    threshold: float = 0.02, ratio: float | None = None,
+                    attack: float = 20.0, release: float = 250.0) -> dict:
+        """Configure music ducking: while main-track audio is present,
+        music items are sidechain-compressed. ``amount_db`` sets the
+        compressor ratio as 10 ** (amount_db / 20) unless ``ratio``
+        is given explicitly; threshold is linear (0..1).
+        """
+        if not 0.0 < float(amount_db) <= 24.0:
+            raise ValueError("Duck amount must be 0..24 dB")
+        if not 0.0 < float(threshold) <= 1.0:
+            raise ValueError("Duck threshold must be 0..1 (linear)")
+        if ratio is None:
+            ratio = 10.0 ** (float(amount_db) / 20.0)
+        if not 1.0 <= float(ratio) <= 20.0:
+            raise ValueError("Duck ratio must be 1..20")
+        config = {"enabled": bool(enabled), "amountDb": float(amount_db),
+                  "threshold": float(threshold), "ratio": float(ratio),
+                  "attack": float(attack), "release": float(release)}
+        self.data.setdefault("audio", {})["ducking"] = config
+        self._bump()
+        return config
+
+    def ducking_get(self) -> dict:
+        return copy.deepcopy(
+            (self.data.get("audio") or {}).get("ducking") or
+            {"enabled": False})
+
+    # -- Phase 4: beat grid -------------------------------------------
+    def detect_beats(self, media_id: str, min_gap_s: float = 0.3) -> dict:
+        """Detect beats from a media file's audio (energy-onset method,
+        see vibeedit_core/beats.py) and store them in beatGrid. The
+        media path is resolved relative to the project folder.
+        """
+        from .beats import detect_beats as _detect
+        medium = self.media(media_id)
+        path = medium["path"]
+        if not os.path.isabs(path):
+            path = os.path.join(self.folder, path)
+        beats = _detect(path, min_gap_s=min_gap_s)
+        self.data["beatGrid"] = {"source": media_id, "beats": beats,
+                                 "method": "energy-onset"}
+        self._bump()
+        return self.data["beatGrid"]
+
+    def beat_list(self) -> list[float]:
+        return list((self.data.get("beatGrid") or {}).get("beats") or [])
+
+    def nearest_beat(self, time_s: float) -> float | None:
+        beats = self.beat_list()
+        if not beats:
+            return None
+        return min(beats, key=lambda b: abs(b - float(time_s)))
+
+    def snap_frame(self, frame: int) -> int:
+        """Snap a timeline frame to the nearest beat (frames)."""
+        beat = self.nearest_beat(frames_to_seconds(int(frame), self.fps))
+        if beat is None:
+            raise ValueError("No beat grid detected yet")
+        return seconds_to_frames(beat, self.fps)
+
+    def beats_to_markers(self) -> list[dict]:
+        """Copy the stored beat grid into timeline markers."""
+        beats = self.beat_list()
+        if not beats:
+            raise ValueError("No beat grid detected yet")
+        added = []
+        for beat in beats:
+            added.append(self.add_marker(
+                "beat", seconds_to_frames(beat, self.fps)))
+        return added
+
+    # -- Phase 4: project stats ---------------------------------------
+    def project_stats(self) -> dict:
+        items = [i for t in self.data["tracks"] for i in t["items"]]
+        return {
+            "name": self.data.get("name"), "rev": self.rev,
+            "duration_seconds": round(self.duration_seconds(), 3),
+            "tracks": len(self.data["tracks"]),
+            "items": len(items),
+            "clips": sum(1 for i in items if "media" in i),
+            "text_items": sum(1 for i in items if "text" in i),
+            "karaoke_items": sum(1 for i in items if "karaoke" in i),
+            "adjustment_layers": len(self.list_adjustments()),
+            "transitions": len(self.data.get("transitions", [])),
+            "markers": len(self.data.get("markers", [])),
+            "beats": len(self.beat_list()),
+            "ducking": self.ducking_get(),
+        }
 
     # -- readouts -----------------------------------------------------
     def timeline_text(self) -> str:

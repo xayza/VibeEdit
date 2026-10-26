@@ -77,6 +77,8 @@ function renderMedia() {
     `<li>${m.id} — ${m.path} (${m.kind || "?"})</li>`).join("") || "<li>No media yet.</li>";
   $("addMedia").innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
+  $("beatMedia").innerHTML = project.media.map((m) =>
+    `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("addTrack").innerHTML = project.tracks.filter((t) => t.kind === "video").map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
   $("inspTrack").innerHTML = project.tracks.map((t) =>
@@ -89,7 +91,9 @@ function renderTracks() {
   const widthPx = Math.max(totalS * pxPerSec, 400);
   const ruler = $("ruler");
   ruler.style.width = widthPx + "px";
-  ruler.innerHTML = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
+  ruler.innerHTML = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>` +
+    ((project.beatGrid && project.beatGrid.beats) || []).map((b) =>
+      `<div class="beat-tick" title="beat ${b}s" style="left:${b * pxPerSec}px"></div>`).join("");
   for (const track of project.tracks) {
     const row = document.createElement("div");
     row.className = "track-row";
@@ -299,6 +303,64 @@ $("batchForm").addEventListener("submit", async (e) => {
     $("batchResult").textContent = `Batch done: ${ok}/${data.results.length} succeeded. ` + data.results.map((r) => `${r.project}: ${r.ok ? "OK" : "FAIL " + r.error}`).join(" | ");
     setStatus(`Batch done: ${ok}/${data.results.length} succeeded.`);
   } catch (err) { setStatus("Batch failed: " + err.message, true); }
+});
+$("otioImportForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const data = await api("/api/otio-import", { otio: $("otioImportPath").value, dest: $("otioImportDest").value, merge: $("otioImportMerge").checked });
+    $("phase4Result").textContent = `OTIO imported: ${data.report.clips} clips, ${data.report.transitions} transitions, ${data.report.markers} markers. Missing: ${data.report.missing.join(", ") || "none"}. Warnings: ${data.report.warnings.join("; ") || "none"}.`;
+    setStatus("OTIO imported (into the destination folder, not the open project).");
+  } catch (err) { setStatus("OTIO import failed: " + err.message, true); }
+});
+$("karaokeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!selectedId) { setStatus("Select a text item first.", true); return; }
+  try {
+    await api("/api/project", { op: "karaoke_add", item: selectedId, words: JSON.parse($("karaokeWords").value) });
+    setStatus("Karaoke timings added."); await load();
+  } catch (err) { setStatus("Karaoke failed: " + err.message, true); }
+});
+$("btnKaraokeAss").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/karaoke-ass", {});
+    const blob = new Blob([data.ass], { type: "text/plain" }); const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "karaoke.ass"; a.click();
+    setStatus(`Karaoke .ass exported: ${data.report.karaoke_items} items.`);
+  } catch (err) { setStatus("Karaoke export failed: " + err.message, true); }
+});
+$("adjustmentForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/project", { op: "adjustment_add", at: Number($("adjAt").value), dur: Number($("adjDur").value), preset: $("adjPreset").value || null, lut: $("adjLut").value || null });
+    setStatus("Adjustment layer added."); await load();
+  } catch (err) { setStatus("Adjustment failed: " + err.message, true); }
+});
+$("beatForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  setStatus("Detecting beats…");
+  try {
+    const data = await api("/api/project", { op: "beat_detect", media: $("beatMedia").value });
+    setStatus(`Beats detected: ${data.result.beats.length} beats.`); await load();
+  } catch (err) { setStatus("Beat detection failed: " + err.message, true); }
+});
+$("btnBeatsMarkers").addEventListener("click", async () => {
+  try { await api("/api/project", { op: "beats_to_markers" }); setStatus("Beats copied to markers."); await load(); }
+  catch (err) { setStatus(err.message, true); }
+});
+$("btnSnap").addEventListener("click", async () => {
+  const beats = (project.beatGrid && project.beatGrid.beats) || [];
+  if (!beats.length) { setStatus("No beat grid yet — detect beats first.", true); return; }
+  const t = playheadFrame / fps();
+  const nearest = beats.reduce((a, b) => Math.abs(b - t) < Math.abs(a - t) ? b : a);
+  playheadFrame = Math.round(nearest * fps()); renderTracks();
+  setStatus(`Playhead snapped to beat at ${nearest}s.`);
+});
+$("duckingForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/project", { op: "ducking_set", enabled: $("duckEnabled").checked, amount_db: Number($("duckAmount").value) });
+    setStatus("Ducking saved."); await load();
+  } catch (err) { setStatus("Ducking failed: " + err.message, true); }
 });
 $("btnOtio").addEventListener("click", async () => {
   try {

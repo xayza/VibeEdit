@@ -1,4 +1,49 @@
-# VibeEdit — Windows (Phase 3)
+# VibeEdit — Windows (Phase 4)
+
+## What Phase 4 adds (on top of Phase 3)
+
+- OTIO import: `vibeedit.py otio-import <file.otio> <dest-folder>`
+  (or the web UI panel, or MCP) reads back the Phase 3 OTIO export
+  into a new project, or merges its tracks into an existing project
+  (`--merge`). Media paths resolve relative to the .otio file first,
+  then as stored; a file that cannot be found is still imported and
+  listed in the report's `missing` list — never silently dropped and
+  never replaced with invented media. Round-trip verified: export a
+  project, import it, and the clip counts, timings and transitions
+  match (2 video clips + 1 caption, 1 dissolve, 1 marker in tests).
+- Karaoke captions: a text item can carry per-word timings
+  (`karaoke-add <item> '[{"text":"Hello","start":0,"end":1},...]'`;
+  words must join to the cue text, in order, inside the cue).
+  Rendering burns one .ass track with libass `\k` tags via FFmpeg's
+  subtitles filter: sung words in yellow, unsung words in white.
+  Standalone export: `karaoke-export` writes `render/karaoke.ass`.
+- Adjustment layers: `adjustment-add <at> <dur> [--preset NAME]
+  [--lut FILE] [--strength N]` adds a colour preset and/or .cube LUT
+  that applies to the main-track picture only, for its own time
+  range (eq/lut3d with an `enable` window; overlays composited after
+  are not adjusted). Overlap on the adjustment track is rejected
+  like any other track.
+- Beat grid: `beat-detect <media>` decodes the audio with FFmpeg
+  and runs an energy-onset detector (no ML model, no fake beats),
+  storing seconds in `beatGrid`. The web UI draws the beats as ticks
+  on the ruler; `beat-snap` snaps a frame to the nearest beat and
+  `beats-to-markers` copies the grid into markers. Measured on
+  synthetic burst audio: all 5 bursts found within 0.05 s; silence
+  yields no beats. On real music this is a rough grid, not a
+  musically exact analysis.
+- Music ducking: `ducking [--amount DB] [--off]` stores the config
+  in `audio.ducking`; renders sidechain-compress music items with
+  the main-track audio as sidechain (asplit, so the main audio can
+  feed both the compressor and the mix). Amount sets the ratio as
+  10 ** (amount / 20); threshold defaults to 0.02. Measured in an
+  isolated sidechain test: music during a dialogue burst was more
+  than 3 dB quieter than music during silence.
+- Tilt keyframes: `tilt` (-180–180 degrees) joins the keyframe
+  properties and renders with FFmpeg's rotate filter (per-frame
+  angle expression, output size pinned). Main-track and overlay
+  clips both render tilt; still-image clips with keyframes remain
+  stored-not-rendered, as before.
+- MCP expanded from 38 to 54 real tools (see below).
 
 A Windows re-implementation of the VibeEdit (formerly BashCut) video
 editor's core: timeline editing, project JSON, CLI/MCP control and
@@ -129,16 +174,15 @@ timeline model in Python and renders with FFmpeg. See
   `bashcut.project/1` / `project.bashcut.json` files. Unknown
   fields round-trip unchanged.
 
-## What Phase 3 does NOT do yet
+## What Phase 4 does NOT do yet
 
-Adjustment layers, beat grid, agent dock terminals, OTIO import,
-a Windows .exe built and tested on Windows, voice providers, or
-the remaining ~211 original MCP tools (38 of 249 ported). Phase 4
-candidates: additional transcription providers behind the
-`transcribe.py` interface, main-track motion+opacity combined
-rendering, LUT strength blending for eq presets, and a checked
-PyInstaller build. See the Phase 3/4 lists in
-`VibeEdit/docs/windows-port.md`.
+Agent dock terminals, a Windows .exe built and tested on Windows,
+voice providers, additional transcription providers, or the
+remaining ~195 original MCP tools (54 of 249 ported). Still open
+from earlier phases: main-track motion+opacity combined rendering,
+LUT strength blending for eq presets, karaoke word timing by
+syllable (words only in Phase 4), and a checked PyInstaller build.
+See the Phase 4/5 lists in `VibeEdit/docs/windows-port.md`.
 
 ## Requirements
 
@@ -213,14 +257,13 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-38 tools (Phase 3 total) — Phase 2's 23 plus:
-`vibeedit_markers_add/list/remove`, `vibeedit_transitions_list`,
-`vibeedit_keyframes_get`, `vibeedit_clip_color_get`,
-`vibeedit_clip_fade`, `vibeedit_project_info`,
-`vibeedit_media_metadata`, `vibeedit_project_duplicate`,
-`vibeedit_otio_export`, `vibeedit_batch_queue/run/status`,
-`vibeedit_export_normalized`. Every tool calls a real Project or
-export operation; none is a stub.
+54 tools (Phase 4 total) — Phase 3's 38 plus:
+`vibeedit_otio_import`, `vibeedit_karaoke_add/get`,
+`vibeedit_karaoke_export_ass`, `vibeedit_adjustment_add/remove/list`,
+`vibeedit_beat_detect/list/snap`, `vibeedit_beats_to_markers`,
+`vibeedit_ducking_set/get`, `vibeedit_project_stats`,
+`vibeedit_export_ducked`, `vibeedit_clip_tilt`. Every tool calls a
+real Project or export operation; none is a stub.
 
 ## Tests
 

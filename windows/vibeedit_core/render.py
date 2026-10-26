@@ -36,8 +36,13 @@ position/scale/opacity keyframes (zoompan / stepwise alpha),
 LUT strength via blended .cube files, overlay-item audio at its
 timeline position, and single-pass loudnorm on export.
 
-Out of scope (preserved in the project, reported as skipped, never
-silently baked): adjustment layers, beat grids.
+Phase 4 additions: adjustment layers (eq/LUT with enable windows on
+the main picture), karaoke captions (one burned .ass track via the
+subtitles filter), tilt keyframes (FFmpeg rotate, per-frame angle
+expression), and music ducking (sidechaincompress with the main
+audio as sidechain). Beat grids are detected and stored, not baked
+into the picture (they drive markers and snap, and are drawn on the
+web UI ruler).
 """
 
 from __future__ import annotations
@@ -241,26 +246,29 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
 
 
 def render(project: dict, folder: str, output: str, preset: str = "full",
-           normalize_audio: bool = False) -> dict:
+           normalize_audio: bool = False, ducking: bool | None = None) -> dict:
     """Render the project with FFmpeg. Returns a report dict.
 
     ``preset``: "full" (project resolution, fast preset) or "draft"
     (half resolution, veryfast preset, higher CRF).
     ``normalize_audio``: single-pass EBU R128 loudnorm (I=-16, TP=-1.5,
     LRA=11) applied to the final mixed audio.
+    ``ducking``: None = use the project's audio.ducking setting;
+    True/False forces music ducking on/off for this render only.
     """
     import tempfile
     lut_dir = tempfile.mkdtemp(prefix="vibeedit-lut-")
     try:
         return _render_inner(project, folder, output, preset,
-                             normalize_audio, lut_dir)
+                             normalize_audio, lut_dir, ducking)
     finally:
         import shutil
         shutil.rmtree(lut_dir, ignore_errors=True)
 
 
 def _render_inner(project: dict, folder: str, output: str, preset: str,
-                  normalize_audio: bool, lut_dir: str) -> dict:
+                  normalize_audio: bool, lut_dir: str,
+                  ducking_override: bool | None = None) -> dict:
     fmt = project["format"]
     width, height = int(fmt["width"]), int(fmt["height"])
     fps = fps_value(fmt["fps"])
@@ -419,6 +427,25 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         return (f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d=1:"
                 f"s={out_w}x{out_h}:fps={fps_str}")
 
+    def _tilt_filter(item: dict, time_offset: float = 0.0) -> str | None:
+        """FFmpeg rotate filter for tilt keyframes (degrees -> radians).
+
+        The angle is a per-frame expression in clip-local time ``t``
+        (verified: rotate's angle expression is evaluated per frame
+        on FFmpeg 8.1). ``time_offset`` shifts the keyframe times for
+        segments whose timestamps restart (opacity sub-segments).
+        Output size is pinned to the input size so the frame size
+        never changes mid-chain; rotated corners are filled black.
+        Returns None when the item has no tilt keyframes.
+        """
+        import math
+        pts = [(t - time_offset, math.radians(v)) for t, v in
+               keyframe_points(item, "tilt", fmt["fps"])]
+        if not pts:
+            return None
+        return (f"rotate=a='{_piecewise_expr(pts, 't')}':"
+                f"ow='iw':oh='ih':c=black")
+
     def _main_range_segment(item: dict, local_start: float, local_dur: float,
                             alpha: float | None, fade_in: float,
                             fade_out: float) -> tuple[str, float]:
@@ -469,6 +496,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             # sets the output rate, and the segment is exact without it.
         else:
             vfilters.append(f"fps={fps_str}")
+        tilt = _tilt_filter(item, local_start)
+        if tilt is not None:
+            vfilters.append(tilt)
         if alpha is not None:
             vfilters.append("format=yuva420p")
             vfilters.append(f"colorchannelmixer=aa={_num(alpha)}")
@@ -630,11 +660,34 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         total_s = vchain_dur
     current = vchain
 
+    # ---- Phase 4: adjustment layers ----------------------------------
+    # Each layer applies its colour preset and/or LUT to the main-track
+    # picture only, for its own time range (eq/lut3d with an enable
+    # expression). Overlays composited afterwards are not adjusted.
+    adjustment_count = 0
+    for track in project["tracks"]:
+        if track.get("role") != "adjustment":
+            continue
+        for item in sorted(track["items"], key=lambda i: i["at"]):
+            start_adj = adjust(frames_to_seconds(item["at"], fmt["fps"]))
+            end_adj = adjust(frames_to_seconds(item["at"] + item["dur"],
+                                               fmt["fps"]))
+            filters = _color_filters(item, lut_dir)
+            if not filters:
+                skipped.append(f"adjustment {item['id']} (no colour set)")
+                continue
+            timed = [f"{f}:enable='between(t,{start_adj:.3f},"
+                     f"{end_adj:.3f})'" for f in filters]
+            out_label = next_label("vadj")
+            filter_parts.append(f"[{current}]{','.join(timed)}[{out_label}]")
+            current = out_label
+            adjustment_count += 1
+
     # ---- overlay video tracks (position/scale/opacity keyframes) ------
     overlay_count = 0
     overlay_audio: list[str] = []
     for track in project["tracks"]:
-        if track["kind"] != "video" or track.get("role") == "main":
+        if track["kind"] != "video" or track.get("role") in ("main", "adjustment"):
             continue
         for item in sorted(track["items"], key=lambda i: i["at"]):
             medium = next((m for m in project["media"]
@@ -695,6 +748,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                             f"crop={out_w}:{out_h}")
                     ofilters.append(f"fps={fps_str}")
                     ofilters.extend(_color_filters(item, lut_dir))
+                    _tilt = _tilt_filter(item, b0)
+                    if _tilt is not None:
+                        ofilters.append(_tilt)
                     ofilters.append("format=yuva420p")
                     ofilters.append(f"colorchannelmixer=aa={_num(held)}")
                     olabel = next_label("ov")
@@ -724,6 +780,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                         f"crop={out_w}:{out_h}")
                 ofilters.append(f"fps={fps_str}")
                 ofilters.extend(_color_filters(item, lut_dir))
+                _tilt = _tilt_filter(item)
+                if _tilt is not None:
+                    ofilters.append(_tilt)
                 ofilters.append("format=yuva420p")
                 if len(op_pts) == 1:
                     ofilters.append(f"colorchannelmixer=aa={_num(op_pts[0][1])}")
@@ -760,10 +819,14 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
     # ---- text overlays (position/opacity/scale keyframes) -------------
     font = find_font()
     text_count = 0
+    karaoke_rendered = 0
     for track in project["tracks"]:
         if track["kind"] != "text":
             continue
         for item in sorted(track["items"], key=lambda i: i["at"]):
+            if "karaoke" in item:
+                # Rendered below as one burned .ass track, not drawtext.
+                continue
             text = item.get("text", "")
             if not text:
                 continue
@@ -813,6 +876,38 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             current = out_label
             text_count += 1
 
+    # ---- Phase 4: karaoke captions (one burned .ass track) -----------
+    # All karaoke items become Dialogue lines with \k word tags in a
+    # single .ass file, burned with the subtitles (libass) filter.
+    # Dialogue times are absolute (transition-adjusted) timeline times.
+    karaoke_items = []
+    for track in project["tracks"]:
+        if track["kind"] != "text":
+            continue
+        for item in sorted(track["items"], key=lambda i: i["at"]):
+            karaoke = item.get("karaoke")
+            if not karaoke:
+                continue
+            style = item.get("textStyle") or {}
+            start_adj = adjust(frames_to_seconds(item["at"], fmt["fps"]))
+            karaoke_items.append({
+                "start_s": start_adj,
+                "end_s": adjust(frames_to_seconds(item["at"] + item["dur"],
+                                                  fmt["fps"])),
+                "words": karaoke["words"],
+                "size_frac": float(style.get("size", 0.062)),
+                "position_y": float(style.get("positionY", 0.8))})
+    if karaoke_items:
+        from .karaoke import build_ass
+        ass_path = os.path.join(lut_dir, "karaoke.ass")
+        with open(ass_path, "w", encoding="utf-8") as fh:
+            fh.write(build_ass(karaoke_items, out_w, out_h))
+        out_label = next_label("vkar")
+        filter_parts.append(
+            f"[{current}]subtitles=filename='{ass_path}'[{out_label}]")
+        current = out_label
+        karaoke_rendered = len(karaoke_items)
+
     # ---- audio mix -----------------------------------------------------
     extra_audio = []
     for track in project["tracks"]:
@@ -839,9 +934,41 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             afilters.append(f"apad=whole_dur={total_s:.3f}")
             label = next_label("aextra")
             filter_parts.append(f"[{idx}:a]{','.join(afilters)}[{label}]")
-            extra_audio.append(f"[{label}]")
-    all_audio = ([f"[{achain}]"] if achain else []) + overlay_audio \
-        + extra_audio
+            extra_audio.append((f"[{label}]", track.get("role")))
+    # ---- Phase 4: music ducking (sidechaincompress) ------------------
+    # When enabled, each music item is compressed with the main-track
+    # audio as its sidechain, so music drops while dialogue/main
+    # audio is present and returns when it stops. The main chain is
+    # split (not consumed twice) so it can feed both the compressor
+    # and the final mix.
+    duck_cfg = (project.get("audio") or {}).get("ducking") or {}
+    duck_enabled = duck_cfg.get("enabled", False) \
+        if ducking_override is None else bool(ducking_override)
+    ducking_applied = False
+    music_labels = [lbl for lbl, role in extra_audio if role == "music"]
+    extra_labels = [lbl for lbl, _ in extra_audio]
+    if duck_enabled and achain and music_labels:
+        sc_labels = [next_label("sc") for _ in music_labels]
+        filter_parts.append(
+            f"[{achain}]asplit={1 + len(music_labels)}[achain_main]"
+            + "".join(f"[{lbl}]" for lbl in sc_labels))
+        achain_main = "achain_main"
+        ducked = {}
+        for lbl, sc in zip(music_labels, sc_labels):
+            dlabel = next_label("duck")
+            filter_parts.append(
+                f"{lbl}[{sc}]sidechaincompress="
+                f"threshold={float(duck_cfg.get('threshold', 0.02))}:"
+                f"ratio={float(duck_cfg.get('ratio', 2.0))}:"
+                f"attack={float(duck_cfg.get('attack', 20.0))}:"
+                f"release={float(duck_cfg.get('release', 250.0))}[{dlabel}]")
+            ducked[lbl] = f"[{dlabel}]"
+        extra_labels = [ducked.get(lbl, lbl) for lbl in extra_labels]
+        ducking_applied = True
+    else:
+        achain_main = achain
+    all_audio = ([f"[{achain_main}]"] if achain_main else []) + overlay_audio \
+        + extra_labels
     audio_map = None
     if all_audio:
         if len(all_audio) == 1:
@@ -877,6 +1004,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         "duration": round(total_s, 3), "fps": fps,
         "text_overlays": text_count, "overlay_clips": overlay_count,
         "overlay_audio_clips": len(overlay_audio),
+        "karaoke_items": karaoke_rendered,
+        "adjustment_layers": adjustment_count,
+        "ducking_applied": ducking_applied,
         "loudness_normalized": bool(normalize_audio and audio_map),
         "warnings": warnings, "skipped": skipped,
         "segments": segment_count,

@@ -177,7 +177,8 @@ def cmd_export(args) -> int:
     out = args.out or os.path.join(proj.folder, "render",
                                    f"export-{args.preset}.mp4")
     report = render(proj.data, proj.folder, out, preset=args.preset,
-                    normalize_audio=args.normalize)
+                    normalize_audio=args.normalize,
+                    ducking=True if args.duck else None)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
@@ -301,6 +302,109 @@ def cmd_transcribe(args) -> int:
     return 0
 
 
+# -- Phase 4 commands ---------------------------------------------------
+def cmd_otio_import(args) -> int:
+    from vibeedit_core.export_ops import import_otio
+    report = import_otio(args.otio, args.dest, merge=args.merge)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_karaoke_add(args) -> int:
+    proj, path = _open(args.path)
+    item = proj.add_karaoke(args.item, json.loads(args.words))
+    _save_with_backup(proj, path)
+    print(json.dumps(item, ensure_ascii=False))
+    return 0
+
+
+def cmd_karaoke_get(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps(proj.karaoke_get(args.item), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_karaoke_export(args) -> int:
+    from vibeedit_core.export_ops import export_karaoke_ass
+    proj, _ = _open(args.path)
+    out = args.out or os.path.join(proj.folder, "render", "karaoke.ass")
+    print(json.dumps(export_karaoke_ass(proj.data, out), indent=2,
+                     ensure_ascii=False))
+    return 0
+
+
+def cmd_adjustment_add(args) -> int:
+    proj, path = _open(args.path)
+    item = proj.add_adjustment(args.at, args.dur, args.preset, args.lut,
+                               args.strength)
+    _save_with_backup(proj, path)
+    print(json.dumps(item, ensure_ascii=False))
+    return 0
+
+
+def cmd_adjustment_list(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps(proj.list_adjustments(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_adjustment_remove(args) -> int:
+    proj, path = _open(args.path)
+    proj.remove_adjustment(args.item)
+    _save_with_backup(proj, path)
+    print(json.dumps({"deleted": args.item}, ensure_ascii=False))
+    return 0
+
+
+def cmd_beat_detect(args) -> int:
+    proj, path = _open(args.path)
+    grid = proj.detect_beats(args.media, min_gap_s=args.min_gap)
+    _save_with_backup(proj, path)
+    print(json.dumps(grid, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_beat_list(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps(proj.beat_list(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_beat_snap(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps({"frame": args.frame,
+                      "snapped": proj.snap_frame(args.frame)},
+                     ensure_ascii=False))
+    return 0
+
+
+def cmd_beats_to_markers(args) -> int:
+    proj, path = _open(args.path)
+    added = proj.beats_to_markers()
+    _save_with_backup(proj, path)
+    print(json.dumps(added, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_ducking(args) -> int:
+    proj, path = _open(args.path)
+    if args.off:
+        config = proj.set_ducking(False)
+    else:
+        config = proj.set_ducking(True, amount_db=args.amount,
+                                  threshold=args.threshold,
+                                  ratio=args.ratio)
+    _save_with_backup(proj, path)
+    print(json.dumps(config, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_project_stats(args) -> int:
+    proj, _ = _open(args.path)
+    print(json.dumps(proj.project_stats(), indent=2, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="vibeedit")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -369,6 +473,7 @@ def main(argv=None) -> int:
     p.add_argument("--preset", default="full", choices=["full", "draft"])
     p.add_argument("--out", default=None)
     p.add_argument("--normalize", action="store_true")
+    p.add_argument("--duck", action="store_true")
     p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("transition")
@@ -434,6 +539,65 @@ def main(argv=None) -> int:
     p.add_argument("path"); p.add_argument("media")
     p.add_argument("--model", default="small"); p.add_argument("--track", default="t1")
     p.set_defaults(fn=cmd_transcribe)
+
+    p = sub.add_parser("otio-import")
+    p.add_argument("otio"); p.add_argument("dest")
+    p.add_argument("--merge", action="store_true")
+    p.set_defaults(fn=cmd_otio_import)
+
+    p = sub.add_parser("karaoke-add")
+    p.add_argument("path"); p.add_argument("item"); p.add_argument("words")
+    p.set_defaults(fn=cmd_karaoke_add)
+
+    p = sub.add_parser("karaoke-get")
+    p.add_argument("path"); p.add_argument("item")
+    p.set_defaults(fn=cmd_karaoke_get)
+
+    p = sub.add_parser("karaoke-export")
+    p.add_argument("path"); p.add_argument("--out", default=None)
+    p.set_defaults(fn=cmd_karaoke_export)
+
+    p = sub.add_parser("adjustment-add")
+    p.add_argument("path"); p.add_argument("at", type=int); p.add_argument("dur", type=int)
+    p.add_argument("--preset", default=None); p.add_argument("--lut", default=None)
+    p.add_argument("--strength", type=float, default=None)
+    p.set_defaults(fn=cmd_adjustment_add)
+
+    p = sub.add_parser("adjustment-list")
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_adjustment_list)
+
+    p = sub.add_parser("adjustment-remove")
+    p.add_argument("path"); p.add_argument("item")
+    p.set_defaults(fn=cmd_adjustment_remove)
+
+    p = sub.add_parser("beat-detect")
+    p.add_argument("path"); p.add_argument("media")
+    p.add_argument("--min-gap", type=float, default=0.3)
+    p.set_defaults(fn=cmd_beat_detect)
+
+    p = sub.add_parser("beat-list")
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_beat_list)
+
+    p = sub.add_parser("beat-snap")
+    p.add_argument("path"); p.add_argument("frame", type=int)
+    p.set_defaults(fn=cmd_beat_snap)
+
+    p = sub.add_parser("beats-to-markers")
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_beats_to_markers)
+
+    p = sub.add_parser("ducking")
+    p.add_argument("path"); p.add_argument("--amount", type=float, default=6.0)
+    p.add_argument("--threshold", type=float, default=0.02)
+    p.add_argument("--ratio", type=float, default=None)
+    p.add_argument("--off", action="store_true")
+    p.set_defaults(fn=cmd_ducking)
+
+    p = sub.add_parser("project-stats")
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_project_stats)
 
     p = sub.add_parser("serve")
     p.add_argument("--project", default=None)

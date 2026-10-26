@@ -242,16 +242,71 @@ is single-project and edits the project file directly).
   `transcribe(path, model) -> [(start_s, end_s, text)]` in
   `vibeedit_core/transcribe.py`.
 
-## 8. Phase 4 list (explicitly NOT in Phase 3)
+## 7b. Phase 4 — DONE (what Phase 3 did not do, now implemented)
 
-- Tilt keyframes; karaoke captions; adjustment layers.
+- OTIO import: `vibeedit.py otio-import <file.otio> <dest>` (new
+  project, or `--merge` into an existing project) reads the Phase 3
+  OTIO export back into a VibeEdit project: tracks, clips (with
+  source in/duration, speed, keyframes, colour, volume, fades),
+  transitions (kind/id/from/to/duration from metadata, or
+  SMPTE_Dissolve -> dissolve), markers, and per-clip media. Media
+  paths resolve relative to the .otio file first, then as stored;
+  missing files are imported anyway and listed in the report's
+  `missing` list — never dropped, never invented. Round-trip test:
+  export -> import keeps clip counts, timings and transitions, and
+  the imported project renders (6 s minus a 0.5 s transition =
+  5.5 s). CLI, web UI panel, MCP tool.
+- Karaoke captions: text items carry `karaoke: {words: [{text,
+  start, end}]}` (seconds relative to the cue; words must join to
+  the cue text, in order, inside the cue). Rendered as one burned
+  .ass track (libass `\k` tags, sung = yellow, unsung = white) via
+  FFmpeg's subtitles filter; standalone export writes
+  `render/karaoke.ass`. Verified with a real render (karaoke_items
+  = 1, duration correct).
+- Adjustment layers: items on an `adjustment` track (created on
+  demand) with a colour preset and/or .cube LUT, applied to the
+  main-track picture only for their time range via eq/lut3d with
+  an `enable` window. Overlap on the adjustment track is rejected;
+  a missing/invalid LUT is a hard error. Verified: a mono layer
+  measurably lowers the frame's mean channel spread vs the
+  unadjusted render.
+- Beat grid: `vibeedit_core/beats.py` decodes audio with FFmpeg
+  to mono 11025 Hz floats and runs an energy-onset detector
+  (512-sample windows, 256 hop, beat time at window centre,
+  threshold = median + 0.5 * (max - median), min gap 0.3 s). Stored
+  in `beatGrid` (source media id, beats in seconds, method). Web UI
+  draws beats as ticks on the ruler; `beat-snap` snaps a frame to
+  the nearest beat; `beats-to-markers` copies the grid to markers.
+  Measured on synthetic burst audio: 5/5 bursts within 0.05 s;
+  silence yields []. On real music this is a rough grid.
+- Music ducking: `audio.ducking` config (enabled, amountDb,
+  threshold, ratio, attack, release); renders sidechain-compress
+  music items with the main-track audio as sidechain (asplit, so
+  the main audio feeds both the compressor and the mix). Amount
+  sets ratio as 10 ** (amount / 20). Verified in an isolated
+  sidechain test: music during a dialogue burst was >3 dB quieter
+  than during silence; a full project render reports
+  `ducking_applied: true`.
+- Tilt keyframes: `tilt` (-180–180 degrees) renders with FFmpeg's
+  rotate filter (per-frame angle expression, output size pinned
+  to input size) on main-track and overlay clips. Still-image
+  clips with keyframes remain stored-not-rendered, as before.
+- MCP: 54 real tools (was 38). New: otio_import, karaoke_add/get/
+  export_ass, adjustment_add/remove/list, beat_detect/list/snap,
+  beats_to_markers, ducking_set/get, project_stats,
+  export_ducked, clip_tilt. CLI, server ops and a web UI Phase 4
+  panel cover the same features.
+- 55 tests OK (5 Phase 1 + 14 Phase 2 + 17 Phase 3 + 19 Phase 4).
+
+## 8. Phase 5 list (explicitly NOT in Phase 4)
+
 - Additional transcription providers behind the `transcribe.py`
-  interface; voice providers; beat grid, ducking automation.
+  interface; voice providers; karaoke by syllable (words only now).
 - Main-track motion+opacity combined rendering; LUT strength
-  blending for eq presets; OTIO import.
+  blending for eq presets.
 - Agent dock terminal, knowledge/skills, review panel,
   transition preview stills.
-- The remaining ~211 original MCP tools; a Windows .exe built
+- The remaining ~195 original MCP tools; a Windows .exe built
   and tested on Windows.
 - macOS build verification of the renamed Swift tree (Xcode 16+,
   Swift 6, macOS 14) and a VibeEdit logo/splash replacement.
