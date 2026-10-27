@@ -421,8 +421,9 @@ class TestSelectsVariantsPlanWorkflowCheckpointRunLibrary(B1Case):
 HONEST_SAMPLE = [
     "vibeedit_agent_open", "vibeedit_agent_open_chat", "vibeedit_agent_open_claude",
     "vibeedit_agent_open_codex", "vibeedit_agent_open_shell", "vibeedit_agent_terminals",
-    "vibeedit_agent_toggle_dock", "vibeedit_agent_ask", 
-     "vibeedit_agent_kit_update", "vibeedit_agent_kit_later",
+    "vibeedit_agent_toggle_dock", "vibeedit_agent_ask",
+    # Round 15: agent_kit_update/later left (now real); their real
+    # behaviour is covered by tests/test_round15.py.
     "vibeedit_agent_status", "vibeedit_agent_setup", "vibeedit_agent_setup_show",
     "vibeedit_agent_restart_tab", "vibeedit_agent_quick_edit", "vibeedit_agent_show_changes",
     "vibeedit_agent_dismiss_changes", "vibeedit_agent_undo_changes", "vibeedit_agent_detach",
@@ -514,7 +515,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 78)  # Round 9: 85 -> 78, 7 tools became real (see tests/test_round9.py)
+        self.assertEqual(len(honest), 76)  # Round 15: 78 -> 76, agent_kit_update + agent_kit_later became real (see tests/test_round15.py)
 
 
 if __name__ == "__main__":

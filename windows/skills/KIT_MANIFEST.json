@@ -1,0 +1,78 @@
+{
+  "installed": [
+    {
+      "id": "audio-mix",
+      "sha256": "85ebcb3d8dacef5ae82d170c4ad32649cfa17ab643ee266f1980c27848750459"
+    },
+    {
+      "id": "beat-cut",
+      "sha256": "73086e4214c3508ecbd20696b3b72dfe7ed039c91b9a148194e0aaf1cea9a102"
+    },
+    {
+      "id": "captions-text",
+      "sha256": "9abd4f2af00d6f31a12b37585f79d3e04b01df542bcf63eed483e92468396d64"
+    },
+    {
+      "id": "color-grade",
+      "sha256": "d8298851cdbed057521782f8a00d184a0bde74334a281143347ce51ecf065370"
+    },
+    {
+      "id": "edit-workflow",
+      "sha256": "d084d775758a04b134c23544601a23f08dd34182c944a51ae2b1219db01bdeb8"
+    },
+    {
+      "id": "effects",
+      "sha256": "ef10402a8a121ad652d1da63bf91dad287759b87b1730211992e777445bbc6a2"
+    },
+    {
+      "id": "footage-survey",
+      "sha256": "9b8c8830836563862f9313e217740c35b84af64b9ce76ca3f75d9158ac7cbac4"
+    },
+    {
+      "id": "library",
+      "sha256": "1686db57b5b67a582a4cc0a9ec14b12c16c0b142da56bae66cb9002d1fb36283"
+    },
+    {
+      "id": "motion-graphics",
+      "sha256": "684708e3dbb94f53f1ea50c6b9c5bb35bba1f1f7934f091a3189e4a34f76011b"
+    },
+    {
+      "id": "review",
+      "sha256": "4b2b444111825013aff4655e418c6cc0396f3d48e95d643606a8f7da9425255a"
+    },
+    {
+      "id": "rough-cut",
+      "sha256": "df9bc18fec85d7d534d88c34103cc9ce4fbf7894b9557dd83aeb2aa07e826bb0"
+    },
+    {
+      "id": "self-learn",
+      "sha256": "869d009a71ccd0611d7c20414b3411514dc8f0084f91ba19794e86bf513cd046"
+    },
+    {
+      "id": "setup",
+      "sha256": "db47dc7b6f5d080e1d6e73c8dc841e69413db822377dfca1c0c4709d2a8c26a7"
+    },
+    {
+      "id": "stock-images",
+      "sha256": "f5418941fc3c60eaafdcce44656a929bb42fa1382f47bd8b3ca5330b0f4f7ccd"
+    },
+    {
+      "id": "style-study",
+      "sha256": "8ba36e1a85556854dda291a7478537fe66a2ee876ecb72de7b7bf238d4d0de77"
+    },
+    {
+      "id": "visual-plan",
+      "sha256": "a0a5ce387ed5c2bf47f6eb11f023a90b6c88aadfe4655a7385d46c1a5cf98ca7"
+    },
+    {
+      "id": "voiceover",
+      "sha256": "eac3ad04d8908c8e2f1d0e2d4c580bd0eeefd044889e32c0f4929702e285712d"
+    }
+  ],
+  "license": "MIT",
+  "note": "Installed from the signed kit release 0.1.56 (SHA-256 verified against releases.json); skill files are verbatim copies of skills/*/SKILL.md from the release archive.",
+  "previous_version": null,
+  "source": "https://github.com/dongnguyenvie/bashcut-agent-kit",
+  "updated_at": "2026-10-27T11:19:24Z",
+  "version": "0.1.56"
+}

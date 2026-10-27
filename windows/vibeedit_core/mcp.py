@@ -481,10 +481,10 @@ TOOLS.extend([
     {"name": "vibeedit_agent_terminals", "description": "Not available in this Windows build: no terminal list exists in this headless server; terminals live outside it."},
     {"name": "vibeedit_agent_toggle_dock", "description": "Not available in this Windows build: no dock UI exists in this headless server; the web UI Agent dock is a separate browser view."},
     {"name": "vibeedit_agent_ask", "description": "Not available in this Windows build: in-app LLM chat is not present (parity-by-design: the original removed its model-API panel); use an external agent via MCP."},
-    {"name": "vibeedit_agent_kit_check", "description": "Local agent-kit status: kit folder and skills from the skills store. No releases channel is configured, so no newer-release check runs (newer is null)."},
+    {"name": "vibeedit_agent_kit_check", "description": "Agent-kit status: kit folder, installed skills, installed kit version and releases channel (https://raw.githubusercontent.com/dongnguyenvie/bashcut-agent-kit/main/releases.json). Pass check_updates=true to compare against the channel (network); otherwise local only and newer is null."},
     {"name": "vibeedit_agent_kit_install", "description": "Install agent-kit skills from a folder of .md files (or one .md file) into the kit folder; unsafe ids and existing skills are refused."},
-    {"name": "vibeedit_agent_kit_update", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
-    {"name": "vibeedit_agent_kit_later", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
+    {"name": "vibeedit_agent_kit_update", "description": "Update the agent kit from the signed releases channel: fetch releases.json, download the target archive, verify size, SHA-256 and the publisher Ed25519 signature, stage and validate its skills, then swap, keeping the old kit until the swap succeeds (restored on failure). Pass version for a specific release; already-current returns updated=false."},
+    {"name": "vibeedit_agent_kit_later", "description": "Defer the agent-kit update offer: records later_until (7 days by default) in the kit state file, which agent_kit_check reports. No UI prompt exists in this headless server, so the record itself is the deferral."},
     {"name": "vibeedit_agent_status", "description": "Not available in this Windows build: no agent terminal session is managed by this headless server."},
     {"name": "vibeedit_agent_setup", "description": "Not available in this Windows build: no agent terminal setup exists in this headless server."},
     {"name": "vibeedit_agent_setup_show", "description": "Not available in this Windows build: no agent setup view exists in this headless server."},
@@ -603,9 +603,9 @@ TOOLS.extend([
     {"name": "vibeedit_skills_propose", "description": "Store a caller-supplied skill draft as a pending proposal (not an active skill)."},
     {"name": "vibeedit_skills_remove", "description": "Delete a skill file (requires confirm=true)."},
     {"name": "vibeedit_skills_save", "description": "Write a caller-supplied skill file (user-written provenance header; refuses overwrite unless overwrite=true)."},
-    {"name": "vibeedit_plugins_install", "description": "Install a plugin from a local folder or .zip bundle (manifest validated before copying; URL sources must be downloaded first with plugins_download)."},
-    {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (no network; unknown unless the installed manifest carries update metadata)."},
-    {"name": "vibeedit_plugins_search", "description": "Search locally discovered plugins by name, description or hook (local plugins folder only; no registry)."},
+    {"name": "vibeedit_plugins_install", "description": "Install a plugin from a local folder or .zip bundle (manifest validated before copying; URL sources must be downloaded first with plugins_download); or pass registry_plugin (+registry_version) to install a verified registry release (SHA-256 + publisher signature checked, staged, validated, installed disabled and never executed; registry provider plugins have no Windows-runnable entry). The caller's explicit install command is the approval in headless MCP."},
+    {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (local manifest metadata by default); pass check_registry=true to compare the installed version against the fetched plugin registry instead."},
+    {"name": "vibeedit_plugins_search", "description": "Search plugins: local installed plugins by default (source=local); pass source=registry to search the fetched plugin registry (registry.json from the bashcut-plugins repo), or source=all for both. A registry fetch failure is reported, never silently replaced by local results."},
     {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: pure .py plugins declare no dependency recipe for plugins.setup to run; manifest actions/views/overlays/proposals/replacement are real tools."},
     {"name": "vibeedit_plugins_set", "description": "Turn a plugin on or off (same switches as plugin_enable/plugin_disable). Per-hook switches are not supported in this build."},
     {"name": "vibeedit_plugins_set_overlays", "description": "Replace a plugin's overlays (empty list clears them); session-only, never saved with the project."},
@@ -869,12 +869,9 @@ class MCPServer:
                            "wired in this build (generation via Edge/Piper "
                            "is wired separately); nothing is cloned")
         if name.startswith("vibeedit_agent_kit"):
-            raise self._na(name, "agent-kit update needs the signed "
-                           "releases channel, which is not configured "
-                           "in this build, and kit-later dismisses a "
-                           "UI prompt this headless server has no "
-                           "view of; kit_check (local kit status) and "
-                           "kit_install (skill-pack install) are real")
+            raise self._na(name, "unknown agent-kit tool; kit_check, "
+                           "kit_install, kit_update and kit_later are "
+                           "real in this build")
         # Every other honest tool: its description (in TOOLS) already
         # states the exact blocker; the raised error repeats it.
         desc = next((t["description"] for t in TOOLS
@@ -2968,16 +2965,43 @@ class MCPServer:
         if name == "vibeedit_plugins_search":
             from .plugins import list_plugins
             query = str(args.get("query", "") or "").strip().lower()
-            plugins = [p for p in list_plugins(args.get("plugins_dir"))
-                       if p["name"] != "_errors"]
-            if query:
-                plugins = [p for p in plugins
-                           if query in p["name"].lower()
-                           or query in p.get("description", "").lower()
-                           or any(query in h.lower()
-                                  for h in p.get("hooks", []))]
-            return {"query": args.get("query", ""), "plugins": plugins,
-                    "count": len(plugins)}
+            source = str(args.get("source", "local") or "local").strip().lower()
+            if source not in ("local", "registry", "all"):
+                raise ValueError(
+                    "plugins_search: source must be local, registry or all")
+            plugins = []
+            registry_error = None
+            if source in ("local", "all"):
+                plugins = [p for p in list_plugins(args.get("plugins_dir"))
+                           if p["name"] != "_errors"]
+                if query:
+                    plugins = [p for p in plugins
+                               if query in p["name"].lower()
+                               or query in p.get("description", "").lower()
+                               or any(query in h.lower()
+                                      for h in p.get("hooks", []))]
+            registry_results = []
+            if source in ("registry", "all"):
+                # Round 15: registry fetch failure is reported, never
+                # silently replaced by local results.
+                from . import round15 as _r15
+                try:
+                    registry, meta = _r15.fetch_registry(
+                        cache_path=_r15.registry_cache_path(
+                            args.get("plugins_dir")))
+                    registry_results = _r15.search_registry(
+                        registry, args.get("query", ""))
+                except Exception as exc:
+                    if source == "registry":
+                        raise ValueError(
+                            f"plugins_search: registry fetch failed: "
+                            f"{exc}") from exc
+                    registry_error = str(exc)
+            return {"query": args.get("query", ""), "source": source,
+                    "plugins": plugins, "count": len(plugins),
+                    "registry": registry_results,
+                    "registry_count": len(registry_results),
+                    "registry_error": registry_error}
         if name in ("vibeedit_plugins_run", "vibeedit_plugins_invoke"):
             # Round 5: run one DECLARED hook of an ENABLED plugin
             # via the round-4 apply_plugin path (disabled plugins
@@ -3776,6 +3800,19 @@ class MCPServer:
             except VisionUnavailable as exc:
                 raise ValueError(f"NOT_AVAILABLE: vision backend missing: {exc}")
         if name == "vibeedit_plugins_install":
+            if args.get("registry_plugin"):
+                # Round 15: verified registry install. The caller's
+                # explicit install command is the approval in
+                # headless MCP; nothing runs before validation.
+                from . import round15 as _r15
+                registry, _meta = _r15.fetch_registry(
+                    cache_path=_r15.registry_cache_path(
+                        args.get("plugins_dir")))
+                return _r15.install_registry_plugin(
+                    registry, args["registry_plugin"],
+                    version=args.get("registry_version"),
+                    plugins_dir=args.get("plugins_dir"),
+                    overwrite=bool(args.get("overwrite", False)))
             from .plugins import install_plugin
             return install_plugin(args["source"],
                                   plugins_dir=args.get("plugins_dir"),
@@ -3793,6 +3830,15 @@ class MCPServer:
             return remove_plugin(args["plugin"],
                                  plugins_dir=args.get("plugins_dir"))
         if name == "vibeedit_plugins_updates":
+            if str(args.get("check_registry", "")).lower() in (
+                    "true", "1", "yes") or args.get("check_registry") is True:
+                from . import round15 as _r15
+                registry, _meta = _r15.fetch_registry(
+                    cache_path=_r15.registry_cache_path(
+                        args.get("plugins_dir")))
+                return _r15.check_registry_updates(
+                    args["plugin"], registry,
+                    plugins_dir=args.get("plugins_dir"))
             from .plugins import check_plugin_update
             return check_plugin_update(args["plugin"],
                                        plugins_dir=args.get("plugins_dir"))
@@ -3933,6 +3979,8 @@ class MCPServer:
                     "vibeedit_library_brand_pose",
                     "vibeedit_agent_kit_check",
                     "vibeedit_agent_kit_install",
+                    "vibeedit_agent_kit_update",
+                    "vibeedit_agent_kit_later",
                     "vibeedit_plugins_overlays",
                     "vibeedit_plugins_set_overlays",
                     "vibeedit_plugins_actions", "vibeedit_plugins_view",
@@ -4092,10 +4140,26 @@ class MCPServer:
                 self._save()
                 return result
             if name == "vibeedit_agent_kit_check":
-                return _r8.kit_check(args.get("kit_dir"))
+                from . import round15 as _r15
+                return _r15.kit_status(
+                    args.get("kit_dir"),
+                    check_updates=_bool(args.get("check_updates", False)))
             if name == "vibeedit_agent_kit_install":
                 return _r8.kit_install_skills(args["path"],
                                               args.get("kit_dir"))
+            if name == "vibeedit_agent_kit_update":
+                from . import round15 as _r15
+                return _r15.kit_update(args.get("kit_dir"),
+                                       version=args.get("version"))
+            if name == "vibeedit_agent_kit_later":
+                from . import round15 as _r15
+                days = args.get("days", 7)
+                try:
+                    days = int(days)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "agent_kit_later: days must be an integer") from None
+                return _r15.kit_later(args.get("kit_dir"), days=days)
             if name == "vibeedit_plugins_overlays":
                 return list_plugin_overlays(args.get("plugin"), pdir)
             if name == "vibeedit_plugins_set_overlays":

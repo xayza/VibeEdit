@@ -15,6 +15,15 @@ with a provenance header line. ``list_skills`` reports it verbatim as
 ``source`` (``"original"`` or ``"derived"``); content invented for the
 Windows port is never presented as the original's text.
 
+Round 15 exception, and the only one: the 17 agent-kit skills
+installed from the bashcut-agent-kit releases are copied VERBATIM
+from the kit archive -- adding a provenance header would falsify
+"verbatim". Their provenance lives in ``windows/skills/
+KIT_MANIFEST.json`` (source repo, kit version, MIT licence, per-file
+SHA-256), and ``list_skills`` reports them as ``"unknown"`` because
+they carry no header line. Never add a header to a kit file, and
+never label a kit file as port-written.
+
 Only the standard library is used, so importing this module never
 fails for a missing optional dependency.
 """

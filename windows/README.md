@@ -213,6 +213,38 @@ server project tạm (GET / 200, `/api/mcp-tools` 479, `/api/info` 200,
 `/api/agent-status` 200, tắt sạch). Chi tiết và giới hạn còn lại ở
 [`PARITY.md`](PARITY.md) mục vòng 14 và [`UI_MAP.md`](UI_MAP.md).
 
+## Vòng 15 — agent kit đầy đủ qua kênh releases đã ký + plugin registry fetch
+
+Không thêm công cụ MCP mới (tổng vẫn 479); 2 công cụ từ báo-lỗi
+thành thật (`agent_kit_update`, `agent_kit_later`) nên 479 = 403
+thật + 76 honest. Module mới `vibeedit_core/round15.py` (stdlib
+only). Kit thật từ repo công khai `dongnguyenvie/bashcut-agent-kit`
+— bản **0.1.56**, giấy phép **MIT**: 17 skill chép nguyên văn vào
+`windows/skills/` (cộng 4 skill cũ thành 21), nguồn + phiên bản +
+SHA-256 từng file trong `skills/KIT_MANIFEST.json`, LICENSE nguyên
+văn ở `skills/KIT_LICENSE.txt`. `agent_kit_update` đọc
+`releases.json`, tải bản mới, kiểm size + SHA-256 + chữ ký Ed25519
+của publisher (thuật toán thuần stdlib, kiểm chứng bằng vector RFC
+8032 và chữ ký thật của kit 0.1.56), staging + validate skill rồi
+mới swap, giữ bản cũ tới khi swap thành công, khôi phục khi lỗi;
+file người dùng trùng tên không bao giờ bị ghi đè.
+`agent_kit_later` ghi hoãn 7 ngày vào `KIT_STATE.json`.
+Registry plugin từ file tĩnh `registry.json` của repo
+`bashcut-plugins` (10 plugin): fetch có cache 24 giờ
+(`plugin_registry_cache.json`, runtime state, không push),
+`plugins_search` thêm `source=registry`/`all`,
+`plugins_updates` thêm `check_registry=true`, `plugins_install`
+thêm `registry_plugin` (download → SHA-256 → chữ ký publisher →
+staging → manifest khớp id/version registry → swap → sidecar +
+trạng thái tắt). Giới hạn trung thực: manifest registry dùng id có
+dấu chấm + tên map `{en, vi}` và script macOS nên không qua
+validation nghiêm ngặt của `install_plugin` (cố tình không nới);
+bản registry chỉ liệt kê để xem, không chạy được và không bật được
+trên Windows, mọi bản đều kèm cảnh báo chỉ có nền tảng macOS.
+Kiểm chứng: py_compile, node --check, MCP 479 = 403 + 76, test 249
+tên gốc vẫn đủ, full suite trên Linux VM, smoke server project tạm.
+Chi tiết ở [`PARITY.md`](PARITY.md) mục vòng 15.
+
 ## Full-parity vòng 13 — kiểm chứng tích hợp end-to-end, rà soát docs, checklist test Windows
 
 - **Export tổng hợp (test `tests/test_round13.py`, dữ liệu giả lập

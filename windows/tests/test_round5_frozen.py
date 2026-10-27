@@ -25,7 +25,16 @@ class TestFrozenSkillsDir(unittest.TestCase):
     def test_source_checkout_dir_unchanged(self):
         self.assertTrue(os.path.isdir(skills.DEFAULT_SKILLS_DIR))
         self.assertTrue(skills.DEFAULT_SKILLS_DIR.endswith("skills"))
-        self.assertEqual(len(skills.list_skills()), 4)
+        # Round 15: 4 port skills + 17 verbatim kit skills (0.1.56).
+        # The 4 original ids must still be present; the kit files
+        # are covered by the manifest-digest test in
+        # test_vision_skills.py.
+        listed = skills.list_skills()
+        self.assertEqual(len(listed), 21)
+        ids = {e["id"] for e in listed}
+        for original in ("export-presets", "loudness-check",
+                         "review-workflow", "timeline-editing"):
+            self.assertIn(original, ids)
 
     def test_frozen_dir_uses_meipass(self):
         tmp = tempfile.mkdtemp()

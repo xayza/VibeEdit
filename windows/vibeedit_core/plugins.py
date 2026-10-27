@@ -100,6 +100,38 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
         manifest_path = os.path.join(sub, "plugin.json")
         if not os.path.isfile(manifest_path):
             continue
+        # Round 15: registry records (see vibeedit_core/round15.py).
+        # A folder with a vibeedit-registry.json sidecar is a
+        # verified registry install: its original manifest uses
+        # dotted ids and {en, vi} name maps, which the strict
+        # validation below rejects by design, so it is listed from
+        # the sidecar instead -- never executed, never in _errors,
+        # and set_plugin_enabled refuses it.
+        sidecar_path = os.path.join(sub, "vibeedit-registry.json")
+        if os.path.isfile(sidecar_path):
+            try:
+                with open(sidecar_path, encoding="utf-8") as fh:
+                    sidecar = _json.load(fh)
+                if not isinstance(sidecar, dict) \
+                        or sidecar.get("registry_id") != name:
+                    raise ValueError(
+                        "registry sidecar id does not match folder")
+                plugins[name] = {
+                    "name": name,
+                    "display_name": name,
+                    "description": sidecar.get("reason", ""),
+                    "manifest": True,
+                    "manifest_hooks": [],
+                    "registry": True,
+                    "runnable": False,
+                    "registry_version": sidecar.get("registry_version"),
+                    "platforms": sidecar.get("platforms") or [],
+                    "capabilities": sidecar.get("capabilities") or [],
+                    "path": sub,
+                }
+            except Exception as exc:  # noqa: BLE001 - one bad record
+                errors[name] = str(exc)
+            continue
         try:
             with open(manifest_path, encoding="utf-8") as fh:
                 manifest = _json.load(fh)
@@ -182,6 +214,16 @@ def set_plugin_enabled(name: str, enabled: bool,
     plugins = load_plugins(plugins_dir)
     if name not in plugins:
         raise KeyError(f"Unknown plugin: {name!r}")
+    # Round 15: registry records are review-only and can never be
+    # enabled -- they have no Windows-runnable entry, and enabling
+    # one would be the first step toward executing macOS provider
+    # scripts. Disabling an already-disabled record is a no-op that
+    # stays allowed (it is the overwrite precondition for updates).
+    if plugins[name].get("registry") and enabled:
+        raise ValueError(
+            f"Registry plugin {name!r} cannot be enabled: it has no "
+            "Windows-runnable entry (review-only record; see "
+            "vibeedit-registry.json in its folder)")
     import json as _json
     state = load_plugin_state(plugins_dir)
     disabled = set(state.get("disabled", []))

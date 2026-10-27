@@ -55,16 +55,16 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 14)
+## Current status (honest, full-parity round 15)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **401
-  real-operation tools and 78 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **403
+  real-operation tools and 76 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design), and round 14 re-ran that check with the
+  shared-handler design), and round 15 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
@@ -101,7 +101,10 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   labels, library pack export/import with licence checks, library
   item analysis, image-path brand pose, plugin overlays/actions/
   views/proposals/replacement, agent-kit local check + skill-pack
-  install, clip backdrop (blur/colour, real render on main-track
+  install, signed-releases kit update + deferral (kit 0.1.56, 17
+  skills, MIT licence), plugin registry fetch/browse/updates/
+  install-record (review-only: registry providers are macOS-only),
+  clip backdrop (blur/colour, real render on main-track
   stills, video and freeze frames), run-panel state (dismiss/toggle/
   follow, reported by run_checklist), run follow-up request drafts
   (fix-issues/another-recipe in the original's exact wording),
@@ -115,14 +118,15 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   end time, on millisecond-exact and non-millisecond ends alike),
   end-to-end integration export verified against its own report
   (135 frames / 4.5 s composite, server smoke with clean shutdown)
-  and a Windows test checklist document (round 13), a round-14 UI rebuild matching the original app plus the Neon Nights spec (agent sidebar left, neon clip colours, two-way playhead/preview sync within one frame),
-  584 tests OK on the Linux VM.
+  and a Windows test checklist document (round 13), a round-14 UI rebuild matching the original app plus the Neon Nights spec (agent sidebar left, neon clip colours, two-way playhead/preview sync within one frame), a round-15 agent-kit + plugin-registry completion (signed-releases kit update, registry fetch/browse/updates/install-record),
+  605 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K
   footage; plugin install works (folder/zip, gated download,
-  remove, metadata-only update check) but fetching updates from a
-  plugin registry is missing (no registry exists); vision/OCR/cutout
+  remove, registry fetch/browse/updates/install-record with SHA-256
+  + signature checks; registry installs are review-only records
+  because registry providers are macOS-only) ; vision/OCR/cutout
   works only where Tesseract/OpenCV are installed, otherwise it
   errors clearly; the updater can check/download/verify, write an
   installer handoff script and record defer/skip choices, but
@@ -134,7 +138,9 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   full table with a port path per item):** voice cloning (needs a
   cloning provider model — none exists in either tree), real
   learned-segmentation execution (needs a user-supplied ONNX model
-  + runtime), plugin registry fetch, a clean-Windows installer/.exe
+  + runtime), running registry provider plugins on Windows (their
+  providers are macOS-only; fetch/browse/updates/install-record are
+  done), a clean-Windows installer/.exe
   (the FFmpeg bundle licence is now packaged, not just checked:
   the full GPLv3 text from gnu.org plus a source offer generated
   from the bundled binaries' real versions are copied into the

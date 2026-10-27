@@ -119,7 +119,37 @@ class SkillsShippedDirTests(unittest.TestCase):
         names = sorted(f for f in os.listdir(SHIPPED_DIR)
                        if f.endswith(".md"))
         self.assertGreaterEqual(len(names), 1)
+        # Round 15 exception: kit skills installed verbatim from the
+        # signed bashcut-agent-kit release carry no header line (a
+        # header would falsify "verbatim"); their provenance is
+        # KIT_MANIFEST.json, which must list them with matching
+        # SHA-256 digests. Every other shipped file still needs its
+        # header line.
+        manifest_path = os.path.join(SHIPPED_DIR, "KIT_MANIFEST.json")
+        kit_ids = set()
+        if os.path.isfile(manifest_path):
+            import hashlib as _hashlib
+            import json as _json
+            with open(manifest_path, encoding="utf-8") as fh:
+                manifest = _json.load(fh)
+            self.assertTrue(manifest.get("version"),
+                            "KIT_MANIFEST.json must record a kit version")
+            self.assertTrue(manifest.get("source"),
+                            "KIT_MANIFEST.json must record the kit source")
+            for entry in manifest.get("installed", []):
+                kit_ids.add(entry["id"])
+                path = os.path.join(SHIPPED_DIR, entry["id"] + ".md")
+                self.assertTrue(os.path.isfile(path),
+                                "manifest lists missing kit skill "
+                                "%s" % entry["id"])
+                with open(path, "rb") as fh:
+                    digest = _hashlib.sha256(fh.read()).hexdigest()
+                self.assertEqual(digest, entry["sha256"],
+                                 "kit skill %s differs from its manifest "
+                                 "digest" % entry["id"])
         for name in names:
+            if name[:-3] in kit_ids:
+                continue
             with open(os.path.join(SHIPPED_DIR, name),
                       encoding="utf-8") as fh:
                 first = fh.readline().strip()
