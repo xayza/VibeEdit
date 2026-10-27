@@ -25,6 +25,7 @@ import json
 import sys
 
 from .project import (Project, load_project, save_project, find_project_file,
+                      write_backup,
                       PROJECT_FILENAME)
 
 TOOLS = [
@@ -353,6 +354,7 @@ class MCPServer:
         data = load_project(found)
         self.project = Project(data, os.path.dirname(os.path.abspath(found)))
         self.path = found
+        self._needs_first_backup = True
         return {"path": found, "name": data.get("name"), "rev": data.get("rev")}
 
     def _require(self) -> Project:
@@ -362,9 +364,33 @@ class MCPServer:
 
     def _save(self) -> None:
         assert self.project is not None and self.path is not None
+        # Phase 0 backup rule, same as the web server: autosave
+        # creates no backup; only the first save after opening does.
+        if getattr(self, "_needs_first_backup", False):
+            try:
+                write_backup(self.path)
+            except Exception:
+                pass
+            self._needs_first_backup = False
         save_project(self.project.data, self.path)
 
+    # MCP tools that delete items/tracks/media or rewrite positions
+    # or format: back up the saved file before the tool runs.
+    DESTRUCTIVE_TOOLS = frozenset({
+        "vibeedit_clip_delete", "vibeedit_transition_remove",
+        "vibeedit_markers_remove", "vibeedit_adjustment_remove",
+        "vibeedit_track_remove", "vibeedit_media_remove",
+        "vibeedit_clip_keyframe_remove", "vibeedit_karaoke_remove",
+        "vibeedit_library_remove", "vibeedit_source_overwrite",
+        "vibeedit_close_gaps", "vibeedit_project_format_set"})
+
     def call(self, name: str, args: dict) -> dict:
+        if name in self.DESTRUCTIVE_TOOLS and self.path:
+            try:
+                write_backup(self.path)
+            except Exception:
+                pass
+            self._needs_first_backup = False
         if name == "vibeedit_project_get":
             proj = self._require()
             return {"project": proj.data}

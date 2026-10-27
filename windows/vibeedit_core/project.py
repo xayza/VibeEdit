@@ -345,7 +345,13 @@ def load_project(path: str) -> dict:
 
 
 def save_project(project: dict, path: str) -> None:
-    """Atomic save: temp file + rename, sorted keys, indented JSON."""
+    """Atomic save: temp file + rename, sorted keys, indented JSON.
+
+    This is the autosave path and it deliberately creates NO backup
+    copy: a backup on every autosave would grow one file per save.
+    Backups are created only by write_backup(), called on the first
+    save after a project is opened and before data-affecting
+    operations (see State.backup_before_change / MCPServer.call)."""
     folder = os.path.dirname(os.path.abspath(path))
     os.makedirs(folder, exist_ok=True)
     tmp = os.path.join(folder, ".vibeedit-save.tmp")
@@ -353,6 +359,122 @@ def save_project(project: dict, path: str) -> None:
         json.dump(project, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
     os.replace(tmp, path)
+
+
+# -- backups (Phase 0 data safety) ------------------------------------
+# Retention rule, applied at every backup-creation time so the folder
+# can never grow unbounded: one project.json.bak holding the
+# immediately previous saved version, plus a backups/ folder holding
+# at most the 5 newest timestamped copies AND at most one copy per
+# day for the last 7 days (the two sets may overlap). Backups hold
+# only the project JSON, never media, and backups/ is never listed
+# as media (media comes from project data, not a directory scan) and
+# is skipped by duplicate_project().
+BACKUP_DIRNAME = "backups"
+BACKUP_BASENAME = "project.json.bak"
+BACKUP_KEEP_NEWEST = 5
+BACKUP_KEEP_DAYS = 7
+
+
+def _backup_date(entry_name: str, mtime: float) -> str:
+    """Calendar date (YYYYMMDD) for a backup file, from its name if
+    it carries a timestamp, else from its modification time."""
+    import re
+    import time
+    match = re.match(r"project-(\d{8})-\d{6}", entry_name)
+    if match:
+        return match.group(1)
+    return time.strftime("%Y%m%d", time.localtime(mtime))
+
+
+def prune_backups(folder: str) -> list[str]:
+    """Delete timestamped backups outside the retention rule.
+    Returns the deleted filenames. Never touches project.json.bak."""
+    import time
+    backup_dir = os.path.join(folder, BACKUP_DIRNAME)
+    if not os.path.isdir(backup_dir):
+        return []
+    entries = []
+    for name in os.listdir(backup_dir):
+        path = os.path.join(backup_dir, name)
+        if os.path.isfile(path) and name.endswith(".json"):
+            entries.append((os.path.getmtime(path), name))
+    entries.sort(reverse=True)  # newest first
+    keep: set[str] = set()
+    for _, name in entries[:BACKUP_KEEP_NEWEST]:
+        keep.add(name)
+    cutoff = time.time() - BACKUP_KEEP_DAYS * 86400
+    kept_days: set[str] = set()
+    for mtime, name in entries:
+        if mtime < cutoff:
+            continue
+        day = _backup_date(name, mtime)
+        if day not in kept_days:
+            kept_days.add(day)
+            keep.add(name)
+    deleted = []
+    for _, name in entries:
+        if name not in keep:
+            try:
+                os.remove(os.path.join(backup_dir, name))
+                deleted.append(name)
+            except OSError:
+                pass
+    return deleted
+
+
+def write_backup(project_path: str) -> dict | None:
+    """Back up the CURRENT SAVED project file before it is
+    overwritten: copy it to project.json.bak (previous version) and
+    to a timestamped copy in backups/, then prune. Returns the
+    backup locations, or None when there is no saved file yet
+    (nothing to back up). Backup failures must never block an edit,
+    so callers swallow exceptions from this function."""
+    folder = os.path.dirname(os.path.abspath(project_path))
+    if not os.path.isfile(project_path):
+        return None
+    import shutil
+    import time
+    with open(project_path, "rb") as fh:
+        content = fh.read()
+    bak_path = os.path.join(folder, BACKUP_BASENAME)
+    with open(bak_path, "wb") as fh:
+        fh.write(content)
+    backup_dir = os.path.join(folder, BACKUP_DIRNAME)
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    candidate = os.path.join(backup_dir, f"project-{stamp}.json")
+    suffix = 2
+    while os.path.exists(candidate):
+        candidate = os.path.join(
+            backup_dir, f"project-{stamp}-{suffix}.json")
+        suffix += 1
+    with open(candidate, "wb") as fh:
+        fh.write(content)
+    prune_backups(folder)
+    return {"bak": bak_path, "copy": candidate}
+
+
+def unique_media_name(media_dir: str, filename: str) -> str:
+    """A stored media name that never overwrites an existing file:
+    ``clip.mp4`` stays ``clip.mp4`` when free, else ``clip-2.mp4``,
+    ``clip-3.mp4``, ... The caller stores under the returned name
+    and records it in the project, so old clips keep pointing at
+    the old file. Only the basename is used (no directories)."""
+    safe = os.path.basename(filename) or "upload.bin"
+    if not os.path.exists(os.path.join(media_dir, safe)):
+        return safe
+    stem, dot, ext = safe.rpartition(".")
+    if not dot:
+        stem, ext = safe, ""
+    else:
+        ext = "." + ext
+    n = 2
+    while True:
+        candidate = f"{stem}-{n}{ext}"
+        if not os.path.exists(os.path.join(media_dir, candidate)):
+            return candidate
+        n += 1
 
 
 class Project:

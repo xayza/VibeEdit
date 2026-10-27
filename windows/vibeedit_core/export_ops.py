@@ -25,7 +25,7 @@ import uuid
 
 from .project import (Project, load_project, save_project, new_project,
                       find_project_file, PROJECT_FILENAME, fps_value,
-                      frames_to_seconds)
+                      frames_to_seconds, write_backup)
 
 
 def _rational_time(frames: int, rate: float) -> dict:
@@ -162,6 +162,13 @@ def import_otio(otio_path: str, dest_folder: str,
         if not found:
             raise FileNotFoundError(
                 f"No project file in folder for merge: {dest_folder}")
+        # Phase 0: a merge rewrites an existing project, so back up
+        # its saved file before importing (best-effort, never blocks
+        # the import itself).
+        try:
+            write_backup(found)
+        except Exception:
+            pass
         data = load_project(found)
         proj = Project(data, dest_folder)
     else:
@@ -483,7 +490,7 @@ def duplicate_project(src_folder: str, dest_folder: str,
     os.makedirs(dest_folder)
     for entry in os.listdir(src_folder):
         src_path = os.path.join(src_folder, entry)
-        if entry in ("render",) or entry.endswith(".bak"):
+        if entry in ("render", "backups") or entry.endswith(".bak"):
             continue
         if os.path.isdir(src_path):
             shutil.copytree(src_path, os.path.join(dest_folder, entry))

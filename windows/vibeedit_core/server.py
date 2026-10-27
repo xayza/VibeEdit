@@ -34,7 +34,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .project import (Project, load_project, save_project, new_project,
-                      find_project_file, PROJECT_FILENAME)
+                      find_project_file, PROJECT_FILENAME,
+                      write_backup, unique_media_name)
 from .render import render, probe_media
 
 
@@ -90,6 +91,9 @@ class State:
         self.last_export: str | None = None
         self.last_report: dict | None = None
         self.project, self.path = self._load_or_create()
+        # Phase 0 backup rule: the first save after a project is
+        # opened creates one backup of the saved file as loaded.
+        self._needs_first_backup = True
 
     def _load_or_create(self) -> tuple[Project, str]:
         os.makedirs(os.path.join(self.project_dir, "media"), exist_ok=True)
@@ -103,7 +107,23 @@ class State:
         save_project(data, path)
         return Project(data, self.project_dir), path
 
+    def backup_before_change(self) -> None:
+        """Back up the saved project file before a data-affecting
+        operation overwrites it. Best-effort: a backup failure must
+        never block the edit itself (the in-session undo stack still
+        protects the change). Also clears the first-save flag so a
+        destructive first operation does not create two backups."""
+        try:
+            write_backup(self.path)
+        except Exception:
+            pass
+        self._needs_first_backup = False
+
     def save(self) -> None:
+        # Autosave itself creates no backup; only the first save
+        # after opening a project does (see backup_before_change).
+        if self._needs_first_backup:
+            self.backup_before_change()
         save_project(self.project.data, self.path)
 
     def projects_root(self) -> str:
@@ -220,14 +240,28 @@ class State:
         self.redo_stack.clear()
         self.last_export = None
         self.last_report = None
+        self._needs_first_backup = True
         self.record_recent(candidate)
         return {"name": data.get("name"), "folder": candidate,
                 "rev": data.get("rev")}
+
+    # Ops whose saved result cannot be recovered by re-adding media:
+    # they delete items/tracks or rewrite positions/format. A backup
+    # of the saved file is taken BEFORE the mutation (the undo stack
+    # only protects the current session; the backup survives a crash
+    # or a later save). Non-destructive ops rely on the first-save
+    # backup plus undo.
+    DESTRUCTIVE_OPS = frozenset({
+        "delete", "remove_transition", "adjustment_remove",
+        "remove_marker", "source_overwrite", "set_format",
+        "set_project", "close_gaps"})
 
     def apply(self, op: dict) -> dict:
         proj = self.project
         if op.get("op") == "srt_export":
             return {"srt": proj.export_srt(op.get("track", "t1"))}
+        if op.get("op") in self.DESTRUCTIVE_OPS:
+            self.backup_before_change()
         self.undo_stack.append(proj.snapshot())
         if len(self.undo_stack) > 50:
             self.undo_stack.pop(0)
@@ -432,7 +466,16 @@ def _clip_covering(proj: Project, frame: int) -> tuple[dict, dict]:
 
 
 def _parse_multipart(body: bytes, boundary: bytes) -> dict[str, tuple[str, bytes]]:
-    """Minimal multipart/form-data parser (stdlib only)."""
+    """Minimal multipart/form-data parser (stdlib only).
+
+    Phase 0 fix: parameters are parsed ONLY from the
+    Content-Disposition line, one header line at a time. The old code
+    split the whole header block on ';', so a part with a Content-Type
+    header (which every real browser sends) produced a filename like
+    'clip.mp4"\\r\\nContent-Type: video/mp4', which os.path.basename
+    then collapsed to just 'mp4' — every mp4 upload landed as a file
+    literally named 'mp4', 'mp4-2', ... instead of its real name.
+    """
     parts: dict[str, tuple[str, bytes]] = {}
     for chunk in body.split(b"--" + boundary):
         if b"Content-Disposition" not in chunk:
@@ -441,12 +484,17 @@ def _parse_multipart(body: bytes, boundary: bytes) -> dict[str, tuple[str, bytes
         payload = payload.rsplit(b"\r\n", 1)[0]
         name = None
         filename = None
-        for piece in head.decode(errors="replace").split(";"):
-            piece = piece.strip()
-            if piece.startswith("name="):
-                name = piece[5:].strip('"')
-            elif piece.startswith("filename="):
-                filename = piece[9:].strip('"')
+        for line in head.decode(errors="replace").split("\r\n"):
+            line = line.strip()
+            if not line.lower().startswith("content-disposition:"):
+                continue
+            params = line.split(";", 1)[1] if ";" in line else ""
+            for piece in params.split(";"):
+                piece = piece.strip()
+                if piece.startswith("name="):
+                    name = piece[5:].strip('"')
+                elif piece.startswith("filename="):
+                    filename = piece[9:].strip('"')
         if name:
             parts[name] = (filename or "", payload)
     return parts
@@ -898,8 +946,15 @@ def make_handler(state: State):
                         boundary = ctype.split("boundary=")[-1].encode()
                         parts = _parse_multipart(body, boundary)
                         filename, payload = parts["file"]
-                        safe = os.path.basename(filename) or "upload.bin"
-                        dest = os.path.join(state.project_dir, "media", safe)
+                        # Phase 0: never overwrite an existing media
+                        # file. A second upload of the same name is
+                        # stored as name-2.ext, so clips pointing at
+                        # the first file keep their content.
+                        media_dir = os.path.join(state.project_dir,
+                                                 "media")
+                        os.makedirs(media_dir, exist_ok=True)
+                        safe = unique_media_name(media_dir, filename)
+                        dest = os.path.join(media_dir, safe)
                         with open(dest, "wb") as fh:
                             fh.write(payload)
                         info = probe_media(dest)
