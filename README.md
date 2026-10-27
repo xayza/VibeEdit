@@ -106,7 +106,7 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   follow, reported by run_checklist), run follow-up request drafts
   (fix-issues/another-recipe in the original's exact wording),
   plugin show-view (recorded as the project's shown view), and
-  549 tests OK on the Linux VM.
+  552 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K

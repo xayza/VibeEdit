@@ -1394,6 +1394,29 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         return (f"rotate=a='{_piecewise_expr(pts, 't')}':"
                 f"ow='iw':oh='ih':c=black")
 
+    def _frame_trim(src_s: float, src_end_s: float, mfps: float) -> str:
+        """Exact frame-index trim for the main-track paths (round 10).
+
+        The old ``trim=start={:.3f}:end={:.3f}`` rounded the start
+        UP past any frame whose timestamp does not land on a
+        millisecond boundary (30 fps frame 29: 0.9667 s -> "0.967"),
+        dropping that frame entirely. That was fatal for freeze
+        (a one-frame selection: 0 frames out) and an off-by-one
+        for clips starting on such a frame. Frame indices
+        reproduce trim's [start, end) timestamp semantics exactly
+        for CFR media: start is the first frame at or after the
+        start time, end is the first frame at or after the end
+        time (exclusive). The 1e-6 tolerance absorbs float noise
+        when a time is exactly on a frame boundary (59/30 * 30
+        can come out as 59.0000000001). The +1 guard only fires
+        for degenerate sub-microsecond ranges, where the old
+        time trim also kept the frame at the start.
+        """
+        import math
+        start_f = max(0, math.ceil(src_s * mfps - 1e-6))
+        end_f = max(start_f + 1, math.ceil(src_end_s * mfps - 1e-6))
+        return f"trim=start_frame={start_f}:end_frame={end_f}"
+
     def _main_range_segment(item: dict, local_start: float, local_dur: float,
                             alpha: float | None, fade_in: float,
                             fade_out: float) -> tuple[str, float]:
@@ -1539,7 +1562,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             fscale = (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
                       f"crop={out_w}:{out_h}"
                       f"{_crop_offset_expr(item.get('transform') or {})}")
-            ffilters = [f"trim=start={src_s:.3f}:end={src_s + frame_dur:.3f}",
+            ffilters = [_frame_trim(src_s, src_s + frame_dur,
+                                     media_fps(medium)),
                         "setpts=PTS-STARTPTS",
                         "loop=loop=-1:size=1:start=0",
                         f"trim=end={dur_s:.3f}",
@@ -1606,7 +1630,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             scale = (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
                      f"crop={out_w}:{out_h}"
                      f"{_crop_offset_expr(transform)}")
-        vfilters = [f"trim=start={src_s:.3f}:end={src_s + src_dur_s:.3f}",
+        vfilters = [_frame_trim(src_s, src_s + src_dur_s,
+                                media_fps(medium)),
                     "setpts=PTS-STARTPTS"]
         if speed != 1.0:
             vfilters.append(f"setpts=PTS/{speed:.4f}")

@@ -218,13 +218,14 @@ class BackdropRenderTest(unittest.TestCase):
             self.assertGreater(dimmed.getpixel((80, 90))[0], 200)
 
     def test_video_clip_and_freeze_backdrop(self):
-        # 25 fps on purpose: at 30 fps the freeze path's 3-decimal
-        # trim (29/30 -> "0.967") drops the held frame — a
-        # pre-existing freeze defect, identical with and without a
-        # backdrop, reported in PARITY.md and NOT fixed in round 9.
-        # At 25 fps the last frame (24/25 = 0.960) lands exactly on
-        # the trim boundary, so this test genuinely exercises the
-        # freeze backdrop branch.
+        # 25 fps on purpose: at 30 fps the freeze path's old
+        # 3-decimal trim (29/30 -> "0.967") used to drop the held
+        # frame — the round 9 defect, fixed in round 10 by the
+        # exact frame-index trim (see test_round10.py, which
+        # covers 30 fps freeze with and without a backdrop).
+        # At 25 fps the last frame (24/25 = 0.960) lands exactly
+        # on the trim boundary, so this test genuinely exercises
+        # the freeze backdrop branch.
         with tempfile.TemporaryDirectory() as tmp:
             _half_image(os.path.join(tmp, "photo.png"))
             subprocess.run(

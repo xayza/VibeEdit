@@ -57,9 +57,9 @@ vòng 5 thêm 2 alias thật nữa (`media.ocr` → `vision.text`,
 — các alias dùng chung handler, và các giới hạn thật còn lại vẫn liệt
 kê ở mục 8 bên dưới. Vòng 9 chuyển thêm 7 công cụ từ báo-lỗi thành
 thật mà không thêm công cụ mới nào nên tổng vẫn 479 (xem mục 8).
-Test: **549 tests OK** trên Linux VM (531 trước vòng chín + 18 test
-vòng chín mới: backdrop validate/set/render, run panel, follow-up
-request, show-view, registry).
+Test: **552 tests OK** trên Linux VM (549 trước vòng mười + 3 test
+vòng mười mới: freeze 30 fps, freeze 30 fps có backdrop, clip chính
+bắt đầu ở khung không rơi đúng mốc mili-giây).
 
 ## Cách đọc cột Verification
 
@@ -246,18 +246,25 @@ gọn + cuộn nội bộ; toolbar gấp mục (bản gốc) tương đương v�
 và player-head wrap hàng (bản web, không cắt nội dung); timeline giữ
 chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
 
-## Lỗi đã biết (phát hiện trong vòng 9, chưa sửa)
+## Lỗi đã biết (phát hiện trong vòng 9, đã sửa trong vòng 10)
 
 - Freeze ở fps mà khung hình cuối không rơi đúng mốc thập phân 3 chữ
   số (ví dụ 30 fps: khung 29/30 = 0,9667 s bị trim thành "0.967"
   nên khung bị loại): đoạn freeze render ra 0 khung hình, file
   xuất ngắn hơn report ghi (report nói 2,0 s, file thực 1,0 s).
-  Lỗi có sẵn ở đường freeze, giống hệt khi có và không có backdrop,
-  nên vòng 9 không sửa lặng trong lúc làm backdrop — test vòng 9
-  dùng 25 fps (khung 24/25 = 0,960 đúng mốc) để kiểm chứng nhánh
-  freeze backdrop thật. Hướng sửa: tăng độ chính xác timestamp
-  trim ở đường freeze (cẩn trọng: cùng định dạng trim dùng chung
-  với đường video chính nên cần chạy lại toàn bộ test render).
+  ĐÃ SỬA trong vòng 10: đường freeze và đường video chính nay
+  dùng trim theo số khung hình chính xác (`_frame_trim` trong
+  render.py, tái hiện đúng ngữ nghĩa [start, end) của trim cho
+  media CFR mà không còn làm tròn mili-giây), kèm test tái hiện
+  `tests/test_round10.py` (fail trước sửa, pass sau sửa):
+  freeze 30 fps nay ra đủ khung và đúng thời lượng report
+  (kiểm chứng thật: report 3,0 s, file 3,0 s / 90 khung), và
+  clip chính bắt đầu ở khung 29 nay giữ đủ 30 khung bắt đầu
+  bằng khung đỏ đúng thay vì rớt sang khung xanh. Lưu ý còn
+  lại: các trim `.3f` ở đường overlay video và cửa sổ
+  transition vẫn dùng định dạng cũ (cùng họ làm tròn, nhưng
+  ngoài phạm vi vòng 10 và chưa có test tái hiện) — ứng cử
+  viên cho vòng sau nếu cần.
 
 ## Những gì KHÔNG phải là tính năng thiếu
 

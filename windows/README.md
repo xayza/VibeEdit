@@ -183,8 +183,8 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   chung (hướng sửa: tăng độ chính xác timestamp trim ở đường
   freeze, cần chạy lại toàn bộ test render).
 - **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
-  **401 thật / 78 honest**; **549 tests OK** trên Linux VM
-  (531 + 18 test vòng chín mới). Cây Swift không động, không hợp
+  **401 thật / 78 honest**; **552 tests OK** trên Linux VM
+  (549 + 3 test vòng mười mới). Cây Swift không động, không hợp
   nhất, chưa đẩy. Smoke server trên project tạm riêng: `GET /`
   200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
   `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
