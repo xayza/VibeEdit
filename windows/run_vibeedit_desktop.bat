@@ -11,7 +11,7 @@ if not exist "%SCRIPT_DIR%desktop_app.py" goto :noapp
 where python >nul 2>nul
 if errorlevel 1 goto :nopython
 echo Dang mo VibeEdit dang cua so desktop...
-python "%SCRIPT_DIR%desktop_app.py"
+python "%SCRIPT_DIR%desktop_app.py" %*
 goto :end
 :noapp
 echo Khong tim thay desktop_app.py cung thu muc voi file bat nay.

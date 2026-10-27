@@ -847,6 +847,15 @@ def make_handler(state: State):
                         state.project.restore(state.redo_stack.pop())
                         state.save()
                         self._send_json({"ok": True, **self._project_view()})
+                    elif parsed.path == "/api/save":
+                        # Phase 2: explicit save for Ctrl+S. Every
+                        # successful edit already autosaves, so this
+                        # just re-writes the current in-memory state
+                        # (and, per the Phase 0 rule, only the first
+                        # save after opening creates a backup).
+                        self._read_json()
+                        state.save()
+                        self._send_json({"ok": True, **self._project_view()})
                     elif parsed.path == "/api/export":
                         body = self._read_json()
                         preset = body.get("preset", "full")
@@ -1005,3 +1014,12 @@ def run_server(project_dir: str | None, port: int = 8000,
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nVibeEdit stopped.")
+    finally:
+        # Phase 2 clean shutdown: without server_close the socket
+        # can stay bound after Ctrl+C on some platforms. (No
+        # shutdown() here: serve_forever runs on this same thread,
+        # and shutdown() must be called from another thread.)
+        try:
+            server.server_close()
+        except Exception:
+            pass
