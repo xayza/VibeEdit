@@ -53,6 +53,7 @@ async function load() {
   }
   fillSettingsInfo();
   renderMedia(); renderTracks(); renderInspector(); renderTransitions(); renderVoiceover();
+  seekPreviewToPlayhead();
 }
 function renderTransitions() {
   const list = $("transitionList");
@@ -142,12 +143,15 @@ async function renderMedia() {
   $("mediaList").innerHTML = project.media.map((m) => {
     const name = mediaBaseName(m);
     const dims = (m.width && m.height) ? `${m.width}×${m.height}` : "";
+    const durLabel = mediaDurationLabel(m);
     const icon = m.kind === "audio" ? "♪" : (m.kind === "image" ? "🖼" : "🎬");
     const thumb = m.kind === "audio"
       ? `<div class="media-thumb media-thumb-audio" title="Audio — không có thumbnail">♪</div>`
       : `<img class="media-thumb" src="/api/thumbnail/${encodeURIComponent(m.id)}" alt="" loading="lazy" onerror="this.style.display='none'">`;
-    return `<li class="media-card" data-media="${m.id}" title="Bấm để xem file này, bấm đúp để thêm vào timeline">${thumb}<div class="media-card-body"><div class="media-card-name">${icon} ${name}</div><div class="media-card-meta">${m.kind || "?"} · ${mediaDurationLabel(m)}${dims ? " · " + dims : ""}</div><div class="media-card-id">${m.id}</div></div>${used.has(m.id) ? '<span class="media-added-badge">Đã thêm</span>' : ""}<button type="button" class="media-add-btn primary" data-add-media="${m.id}">Thêm vào timeline</button></li>`;
-  }).join("") || "<li>No media yet.</li>";
+    return `<li class="media-card" data-media="${m.id}" title="Bấm để xem file này, bấm đúp để thêm vào timeline">${thumb}${durLabel === "—" ? "" : `<span class="media-duration-badge">${durLabel}</span>`}<div class="media-card-body"><div class="media-card-name">${icon} ${name}</div><div class="media-card-meta">${m.kind || "?"} · ${durLabel}${dims ? " · " + dims : ""}</div><div class="media-card-id">${m.id}</div></div>${used.has(m.id) ? '<span class="media-added-badge">Đã thêm</span>' : ""}<button type="button" class="media-add-btn primary" data-add-media="${m.id}">Thêm vào timeline</button></li>`;
+  }).join("") || "<li>Chưa có media.</li>";
+  const ct = document.querySelector(".create-tools");
+  if (ct) ct.hidden = project.media.length > 0;
   $("mediaList").querySelectorAll(".media-card").forEach((li) => {
     li.addEventListener("click", (e) => { if (!e.target.closest("[data-add-media]")) loadMediaPreview(li.dataset.media); });
     li.addEventListener("dblclick", () => addMediaToTimeline(li.dataset.media));
@@ -181,11 +185,14 @@ async function renderMedia() {
 function renderTracks() {
   const wrap = $("tracks");
   wrap.innerHTML = "";
-  const totalS = Math.max(project.tracks.flatMap((t) => t.items.map((i) => (i.at + i.dur) / fps())), [1])[0] || 1;
+  const totalS = Math.max(1, ...project.tracks.flatMap((t) => t.items.map((i) => (i.at + i.dur) / fps())));
   const widthPx = Math.max(totalS * pxPerSec, 400);
+  const tc = $("tlTimecode");
+  const fmtTc = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(2).padStart(5, "0")}`;
+  if (tc) tc.textContent = `${fmtTc(playheadFrame / fps())} / ${fmtTc(totalS)}`;
   const ruler = $("ruler");
   ruler.style.width = widthPx + "px";
-  const totalSecs = Math.max(project.tracks.flatMap((t) => t.items.map((i) => (i.at + i.dur) / fps())), [1])[0] || 1;
+  const totalSecs = totalS;
   let rulerHtml = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
   for (let sec = 0; sec <= Math.ceil(totalSecs); sec++) {
     const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
@@ -203,12 +210,17 @@ function renderTracks() {
     const ia = TRACK_ORDER.indexOf(a.role), ib = TRACK_ORDER.indexOf(b.role);
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
+  // Beauty-photo headers: short code + name + indicators (no fake
+  // toggles: hide/mute/lock do not exist in this port, so the eye
+  // only states the track is visible and the speaker marks audio).
+  const TRACK_CODES = { captions: "CC", overlay: "V2", main: "V1", background: "V3", dialogue: "A1", voiceover: "A2", music: "A3", sfx: "A4", adjustment: "FX" };
+  const trackHeader = (role, name, kind) => `<div class="track-label" title="${role} · ${kind}"><span class="track-code code-${kind}">${TRACK_CODES[role] || "?"}</span><span class="track-name">${name}</span><span class="track-ico" title="Đang hiển thị">👁</span>${kind === "audio" ? `<span class="track-ico" title="Track âm thanh">🔊</span>` : ""}</div>`;
   for (const track of ordered) {
     const row = document.createElement("div");
     // Main lane is taller in the original (TimelineLayout.mainRowHeight
     // 46pt vs 29pt for other rows); the class carries that, ids unchanged.
     row.className = "track-row" + (track.role === "main" ? " track-row-main" : "");
-    row.innerHTML = `<div class="track-label">${track.name}<br><small>${track.role} · ${track.kind}</small></div>`;
+    row.innerHTML = trackHeader(track.role, track.name, track.kind);
     const lane = document.createElement("div");
     lane.className = "track-lane";
     lane.style.width = widthPx + "px";
@@ -220,13 +232,14 @@ function renderTracks() {
       const rect = lane.getBoundingClientRect();
       const at = Math.max(0, Math.round(((e.clientX - rect.left) / pxPerSec) * fps()));
       try { await api("/api/project", { op: "move", item: selectedId, track: track.id, at }); await load(); }
-      catch (err) { setStatus("Move rejected: " + err.message, true); await load(); }
+      catch (err) { setStatus("Di chuyển bị từ chối: " + err.message, true); await load(); }
     });
     for (const item of track.items) {
       const el = document.createElement("div");
-      el.className = `clip ${track.kind} ${item.id === selectedId ? "selected" : ""}`;
+      el.className = `clip ${track.kind} role-${track.role} ${item.id === selectedId ? "selected" : ""}`;
       el.style.left = (item.at / fps()) * pxPerSec + "px";
       el.style.width = Math.max((item.dur / fps()) * pxPerSec - 2, 24) + "px";
+      if ((item.dur / fps()) * pxPerSec < 90) el.classList.add("clip-narrow");
       const medium = item.media ? project.media.find((m) => m.id === item.media) : null;
       const baseName = medium ? medium.path.split(/[\\/]/).pop() : "";
       if (track.kind === "text" && item.karaoke && item.karaoke.words && item.karaoke.words.length) {
@@ -239,10 +252,27 @@ function renderTracks() {
           chip.title = `${w.start}s–${w.end}s`;
           el.appendChild(chip);
         }
+      } else if (medium && track.kind !== "audio") {
+        const img = document.createElement("img");
+        img.className = "clip-thumb";
+        img.src = `/api/thumbnail/${encodeURIComponent(item.media)}`;
+        img.alt = "";
+        img.loading = "lazy";
+        img.onerror = () => { img.style.display = "none"; };
+        const nm = document.createElement("span"); nm.className = "clip-name"; nm.textContent = baseName;
+        const du = document.createElement("span"); du.className = "clip-dur"; du.textContent = `${((item.dur / fps())).toFixed(1)}s`;
+        el.append(img, nm, du);
+        // Real effect chip only: the clip's own stored colour data
+        // (preset name, or LUT when no preset). Nothing is invented.
+        const col = item.color || {};
+        const fxName = (col.preset && col.preset !== "none") ? col.preset : (col.lut ? "LUT" : null);
+        if (fxName) { const fx = document.createElement("span"); fx.className = "clip-fx"; fx.textContent = fxName; el.appendChild(fx); }
       } else if (medium) {
-        el.textContent = `${baseName} · ${((item.dur / fps())).toFixed(1)}s`;
+        const nm = document.createElement("span"); nm.className = "clip-name"; nm.textContent = baseName;
+        el.appendChild(nm);
       } else {
         el.textContent = item.text || item.media || item.id;
+        if (track.kind === "text") el.classList.add("clip-title");
       }
       el.title = `${item.id} — ${item.at}..${item.at + item.dur} frames` + (baseName ? ` — ${baseName}` : "");
       if (track.kind === "audio" && item.media) {
@@ -279,24 +309,42 @@ function renderTracks() {
         if (!from) continue;
         const marker = document.createElement("div");
         marker.className = "transition-marker";
-        marker.style.left = ((from.at + from.dur) / fps()) * pxPerSec + "px";
-        marker.style.width = Math.max((t.duration / fps()) * pxPerSec, 12) + "px";
-        marker.textContent = "⇄ " + t.kind;
+        marker.style.left = ((from.at + from.dur) / fps()) * pxPerSec - 9 + "px";
+        marker.textContent = "⇄";
         marker.title = `${t.kind} (${t.duration} frames)`;
         lane.appendChild(marker);
       }
     }
+    const ph = document.createElement("div");
+    ph.className = "tl-playhead";
+    ph.style.left = (playheadFrame / fps()) * pxPerSec + "px";
+    lane.appendChild(ph);
     row.appendChild(lane);
     wrap.appendChild(row);
   }
   const presentRoles = new Set(project.tracks.map((t) => t.role));
   const standard = [["captions", "Captions", "text"], ["overlay", "Overlay", "video"], ["main", "Main", "video"], ["background", "Background", "video"], ["dialogue", "Dialogue", "audio"], ["voiceover", "Voiceover", "audio"], ["music", "Music", "audio"], ["sfx", "Sfx", "audio"]];
-  for (const [role, name, kind] of standard) {
-    if (presentRoles.has(role)) continue;
+  const emptyRoles = standard.filter(([role]) => !presentRoles.has(role));
+  if (emptyRoles.length && !window.__showEmptyTracks) {
     const row = document.createElement("div");
-    row.className = "track-row track-row-empty";
-    row.innerHTML = `<div class="track-label">${name}<br><small>${role} · ${kind}</small></div><div class="track-lane empty-lane" style="width:${widthPx}px">Empty — use Add Layer, then move a clip here</div>`;
+    row.className = "track-row track-row-fold";
+    row.innerHTML = `<div class="track-label">Tracks</div><div class="track-lane empty-lane" style="width:${widthPx}px">${emptyRoles.length} track trống — bấm để hiện</div>`;
+    row.addEventListener("click", () => { window.__showEmptyTracks = true; renderTracks(); });
     wrap.appendChild(row);
+  } else {
+    for (const [role, name, kind] of emptyRoles) {
+      const row = document.createElement("div");
+      row.className = "track-row track-row-empty";
+      row.innerHTML = trackHeader(role, name, kind) + `<div class="track-lane empty-lane" style="width:${widthPx}px">Trống — dùng Add Layer rồi kéo clip vào đây</div>`;
+      wrap.appendChild(row);
+    }
+    if (emptyRoles.length) {
+      const row = document.createElement("div");
+      row.className = "track-row track-row-fold";
+      row.innerHTML = `<div class="track-label">Tracks</div><div class="track-lane empty-lane" style="width:${widthPx}px">Ẩn track trống — bấm để gập</div>`;
+      row.addEventListener("click", () => { window.__showEmptyTracks = false; renderTracks(); });
+      wrap.appendChild(row);
+    }
   }
 }
 function renderVoiceover() {
@@ -309,10 +357,25 @@ function renderVoiceover() {
   }
   list.innerHTML = takes.length ? takes.map((x) => `<li>${x}</li>`).join("") : "<li>No voiceover takes yet.</li>";
 }
+function fillDetailsProject() {
+  if (!project) return;
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set("detailsName", project.name || "—");
+  set("detailsFormat", `${project.format.width}×${project.format.height}`);
+  set("detailsFps", `${fps().toFixed(2)} fps`);
+  let totalS = 0;
+  for (const t of project.tracks) for (const it of t.items) totalS = Math.max(totalS, (it.at + it.dur) / fps());
+  set("detailsLength", `${totalS.toFixed(2)}s`);
+  set("detailsClips", String(project.tracks.reduce((n, t) => n + t.items.length, 0)));
+  if (window.__projectDir) set("detailsPath", window.__projectDir);
+  else api("/api/info").then((d) => { window.__projectDir = d.project_dir || ""; set("detailsPath", window.__projectDir || "—"); }).catch(() => {});
+}
 function renderInspector() {
   const found = selectedId ? findItem(selectedId) : null;
-  $("inspectorEmpty").hidden = !!found;
+  $("inspectorEmpty").hidden = true; // empty state is now the project Details view
   $("inspectorForm").hidden = !found;
+  const dp = $("detailsProject");
+  if (dp) { dp.hidden = !!found; if (!found) fillDetailsProject(); }
   if (!found) return;
   const { track, item } = found;
   $("inspId").value = item.id;
@@ -390,6 +453,7 @@ function showSourcePreview(medium) {
     video.hidden = false; img.hidden = true;
   }
   applyPreviewAspect();
+  seekPreviewToPlayhead();
 }
 function loadMediaPreview(mediaId) {
   const medium = project.media.find((m) => m.id === mediaId);
@@ -413,6 +477,21 @@ function selectClipAndPreview(itemId) {
   const tl = document.querySelector(".timeline-wrap");
   if (tl) tl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
+// __PREVIEW_SYNC_MAP_START__
+// Pure timeline <-> source mapping in seconds. Extracted verbatim by
+// tests/test_round14.py and run under Node: both directions must agree
+// within one frame (the user's <1-frame sync requirement).
+function timelineToSourceSeconds(timelineSec, atSec, inSec, speed, mediaDuration) {
+  const clipSec = Math.max(0, timelineSec - atSec);
+  const src = inSec + clipSec * (speed || 1);
+  const dur = (mediaDuration === null || mediaDuration === undefined) ? Infinity : mediaDuration;
+  return Math.max(0, Math.min(src, dur));
+}
+function sourceToTimelineSeconds(sourceSec, atSec, inSec, speed, clipDurSec) {
+  const t = atSec + (sourceSec - inSec) / (speed || 1);
+  return Math.max(atSec, Math.min(t, atSec + clipDurSec));
+}
+// __PREVIEW_SYNC_MAP_END__
 function sourceTimeForPlayhead() {
   // Timeline seconds -> source seconds for the selected clip, or
   // plain timeline seconds when only a file (no clip) is previewed.
@@ -423,24 +502,71 @@ function sourceTimeForPlayhead() {
       const medium = project.media.find((m) => m.id === found.item.media);
       const mediaFps = medium && Array.isArray(medium.fps) ? medium.fps[0] / medium.fps[1] : (medium && medium.fps ? medium.fps : fps());
       const inSec = (found.item.in || 0) / mediaFps;
-      const clipSec = Math.max(0, (playheadFrame - found.item.at) / fps());
-      const src = inSec + clipSec * (found.item.speed || 1);
-      const dur = medium && medium.duration ? medium.duration : Infinity;
-      return Math.max(0, Math.min(src, dur));
+      const dur = medium && medium.duration ? medium.duration : null;
+      return timelineToSourceSeconds(t, found.item.at / fps(), inSec, found.item.speed || 1, dur);
     }
   }
   return t;
 }
 function seekPreviewToPlayhead() {
+  // Timeline -> preview (one direction of the two-way sync). The old
+  // code silently dropped the seek when metadata was not loaded yet;
+  // now it waits for loadedmetadata instead of losing the seek.
   $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
+  renderPreviewCaption();
+  updatePreviewEmpty();
   const video = $("preview");
-  if (previewMode === "source") {
-    if (!video.hidden && video.src && !isNaN(video.duration)) {
-      video.currentTime = Math.min(sourceTimeForPlayhead(), video.duration);
+  if (!video || video.hidden || !video.src) return;
+  const target = previewMode === "source" ? sourceTimeForPlayhead() : playheadFrame / fps();
+  if (!isNaN(video.duration)) video.currentTime = Math.min(target, video.duration);
+  else video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(target, video.duration); }, { once: true });
+}
+function renderPreviewCaption() {
+  // Real timeline text at the playhead: the active text item's own
+  // text (or the active karaoke word) at its stored position. Source
+  // mode only — the export already carries burned-in subtitles.
+  const box = $("previewCaption");
+  if (!box || !project) return;
+  box.innerHTML = "";
+  const video = $("preview");
+  if (previewMode !== "source" || !video || video.hidden) { box.hidden = true; return; }
+  const stage = document.querySelector(".preview-stage");
+  const refH = stage && stage.clientHeight ? stage.clientHeight : 360;
+  const tSec = playheadFrame / fps();
+  let shown = 0;
+  for (const tr of project.tracks) {
+    if (tr.kind !== "text") continue;
+    for (const item of tr.items) {
+      const atSec = item.at / fps(), endSec = (item.at + item.dur) / fps();
+      if (tSec < atSec || tSec >= endSec) continue;
+      let text = item.text || "";
+      if (item.karaoke && item.karaoke.words) {
+        const rel = tSec - atSec;
+        const w = item.karaoke.words.find((x) => rel >= x.start && rel < x.end);
+        if (w) text = w.text;
+      }
+      if (!text) continue;
+      const st = item.textStyle || {};
+      const d = document.createElement("div");
+      d.className = "preview-caption-line";
+      d.textContent = text;
+      d.style.left = ((st.positionX ?? 0.5) * 100) + "%";
+      d.style.top = ((st.positionY ?? 0.85) * 100) + "%";
+      d.style.fontSize = Math.max(14, Math.round((st.size || 0.055) * refH)) + "px";
+      box.appendChild(d);
+      shown++;
     }
-    return;
   }
-  if (video.src && !isNaN(video.duration)) video.currentTime = Math.min(playheadFrame / fps(), video.duration);
+  box.hidden = shown === 0;
+}
+function updatePreviewEmpty() {
+  // Honest empty state: shown only when no preview source is loaded,
+  // instead of a black video box pretending to be a preview.
+  const box = $("previewEmpty");
+  if (!box) return;
+  const video = $("preview"), img = $("previewImage");
+  const hasSource = (video && !video.hidden && !!video.src) || (img && !img.hidden && !!img.src);
+  box.hidden = hasSource;
 }
 async function fillSettingsInfo() {
   const pi = $("settingsProjectInfo");
@@ -477,7 +603,7 @@ $("zoom").addEventListener("input", (e) => {
   renderTracks();
 });
 $("projectName").addEventListener("change", async (e) => {
-  try { await api("/api/project", { op: "set_project", name: e.target.value }); setStatus("Project renamed."); await load(); }
+  try { await api("/api/project", { op: "set_project", name: e.target.value }); setStatus("Đã đổi tên project."); await load(); }
   catch (err) { setStatus(err.message, true); }
 });
 $("btnUndo").addEventListener("click", async () => { try { await api("/api/undo", {}); await load(); } catch (e) { setStatus(e.message, true); } });
@@ -800,7 +926,7 @@ $("btnReview").addEventListener("click", async () => {
     if (data.last_export_report && data.last_export_report.duration !== undefined)
       lines.push(`Last export duration: ${data.last_export_report.duration}s, skipped: ${(data.skipped || []).join(", ") || "none"}, warnings: ${(data.warnings || []).join("; ") || "none"}.`);
     else
-      lines.push("No export yet, so there are no skipped items to report.");
+      lines.push("Chưa có bản xuất nên không có mục nào bị bỏ qua để báo cáo.");
     box.textContent = lines.join(" ");
     setStatus("Review refreshed.");
   } catch (err) { box.textContent = "Review failed: " + err.message; setStatus(err.message, true); }
@@ -839,7 +965,16 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     });
   }
   document.querySelectorAll("[data-tab]").forEach((b) => {
-    b.addEventListener("click", () => activateTab(b.dataset.tab));
+    b.addEventListener("click", () => {
+      const col = document.querySelector(".tool-col");
+      if (b.closest(".tool-rail") && b.classList.contains("active")) {
+        if (col) col.classList.add("tool-col-collapsed");
+        activateTab("__none__");
+        return;
+      }
+      if (col) col.classList.remove("tool-col-collapsed");
+      activateTab(b.dataset.tab);
+    });
   });
   document.querySelectorAll('[data-action="timeline"]').forEach((b) => {
     b.addEventListener("click", () => {
@@ -866,6 +1001,18 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   }
   const add = document.getElementById("tlAdd");
   if (add) add.addEventListener("click", () => activateTab("media"));
+  $("tlSnap").addEventListener("click", () => { const b = $("btnSnap"); if (b) b.click(); });
+  $("tlFit").addEventListener("click", () => {
+    const lane = document.querySelector(".track-lane");
+    const w = lane ? lane.clientWidth : 800;
+    let totalS = 1;
+    if (project) for (const t of project.tracks) for (const it of t.items) totalS = Math.max(totalS, (it.at + it.dur) / fps());
+    pxPerSec = Math.max(10, Math.min(200, Math.floor((w - 40) / totalS)));
+    const z = document.getElementById("zoom"); if (z) z.value = pxPerSec;
+    const zl = document.getElementById("zoomLabel"); if (zl) zl.textContent = pxPerSec + " px/s";
+    renderTracks();
+  });
+  $("tlWaveforms").addEventListener("click", () => { window.__waveCache = {}; renderTracks(); setStatus("Đã tải lại sóng âm."); });
   // Import drop zone: dropping files fills the existing upload input
   // and submits the existing upload form (no new upload path).
   const zone = document.getElementById("importDropzone");
@@ -895,24 +1042,23 @@ $("btnTransitionPreview").addEventListener("click", async () => {
    is not available yet — nothing here fakes an AI reply, a voice
    clone, a recording, or a waveform. Fenced: guarded lookups only. */
 (function originalAppWiring() {
-  function agentSay(text) {
+  function agentLogRow(text, fromUser) {
     const chat = $("agentChat");
     if (!chat) return;
-    const div = document.createElement("div");
-    div.className = "msg-agent";
-    div.textContent = text;
-    chat.appendChild(div);
+    const row = document.createElement("div");
+    row.className = "agent-log-row" + (fromUser ? " from-user" : "");
+    const tm = document.createElement("span");
+    tm.className = "agent-log-time";
+    tm.textContent = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    const tx = document.createElement("span");
+    tx.className = "agent-log-text";
+    tx.textContent = text;
+    row.append(tm, tx);
+    chat.appendChild(row);
     chat.scrollTop = chat.scrollHeight;
   }
-  function agentAsk(text) {
-    const chat = $("agentChat");
-    if (!chat) return;
-    const div = document.createElement("div");
-    div.className = "msg-user";
-    div.textContent = text;
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
-  }
+  function agentSay(text) { agentLogRow(text, false); }
+  function agentAsk(text) { agentLogRow(text, true); }
   function focusAgent(prefill) {
     const dock = $("agentDock");
     if (dock) {
@@ -1261,13 +1407,13 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const layerBtn = $("tlAddLayer");
   if (layerBtn) layerBtn.addEventListener("click", async () => {
     const n = project.tracks.filter((t) => t.kind === "video").length + 1;
-    try { await api("/api/project", { op: "add_track", kind: "video", role: "overlay", name: "Layer " + n }); setStatus("Layer added."); await load(); }
+    try { await api("/api/project", { op: "add_track", kind: "video", role: "overlay", name: "Layer " + n }); setStatus("Đã thêm layer."); await load(); }
     catch (err) { setStatus(err.message, true); }
   });
   const secBtn = $("tlSections");
   if (secBtn) secBtn.addEventListener("click", () => {
     const ms = project.markers || [];
-    setStatus(ms.length ? "Sections (markers): " + ms.map((m) => `${(m.at / fps()).toFixed(2)}s ${m.text}`).join(" | ") : "No sections (markers) yet — markers can be added via the MCP tools (vibeedit_markers_add).");
+    setStatus(ms.length ? "Sections (marker): " + ms.map((m) => `${(m.at / fps()).toFixed(2)}s ${m.text}`).join(" | ") : "Chưa có section (marker) nào — thêm marker bằng công cụ MCP (vibeedit_markers_add).");
   });
   const askBtn = $("tlAskAgent");
   if (askBtn) askBtn.addEventListener("click", () => focusAgent(selectedId ? "Help with the selected clip" : "Help with this project"));
@@ -1573,4 +1719,85 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     if (recorder && recorder.state !== "inactive") recorder.stop();
     recBtn.hidden = false; stopBtn.hidden = true;
   });
+})();
+
+/* Round 14: inspector tabs, agent provider tabs + one-line MCP status, copyable MCP command. */
+(function round14Shell() {
+  function activateInsp(tab) {
+    document.querySelectorAll("[data-insp-tab]").forEach((b) => b.classList.toggle("active", b.dataset.inspTab === tab));
+    document.querySelectorAll("[data-insp-pane]").forEach((p) => { p.hidden = p.dataset.inspPane !== tab; });
+  }
+  $("inspTabVideo").addEventListener("click", () => activateInsp("video"));
+  $("inspTabAudio").addEventListener("click", () => activateInsp("audio"));
+  $("inspTabText").addEventListener("click", () => activateInsp("text"));
+  $("inspTabColor").addEventListener("click", () => activateInsp("color"));
+  $("inspTabSpeed").addEventListener("click", () => activateInsp("speed"));
+  $("btnDetailsModify").addEventListener("click", () => { const s = $("btnSettings"); if (s) s.click(); });
+  function syncAgentTabs(value) {
+    document.querySelectorAll("[data-agent-tab]").forEach((b) => b.classList.toggle("active", b.dataset.agentTab === value));
+    const sel = document.getElementById("agentProvider");
+    if (sel) sel.value = value;
+  }
+  async function refreshAgentStatus() {
+    const line = document.getElementById("agentStatusLine");
+    if (!line) return;
+    const sel = document.getElementById("agentProvider");
+    if (sel && sel.value === "ollama") {
+      line.textContent = "Ollama chưa kết nối trong app — dùng agent ngoài qua MCP.";
+      return;
+    }
+    try {
+      const d = await api("/api/agent-status");
+      if (d && d.connected && d.last_seen) {
+        const when = new Date(d.last_seen * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+        line.textContent = `Đã kết nối agent ngoài qua MCP (hoạt động gần nhất ${when}).`;
+      } else {
+        line.textContent = "Chưa kết nối agent ngoài — chạy lệnh MCP để kết nối.";
+      }
+    } catch (err) {
+      line.textContent = "Chưa kết nối agent ngoài — chạy lệnh MCP để kết nối.";
+    }
+  }
+  $("agentTabMcp").addEventListener("click", () => { syncAgentTabs("mcp"); refreshAgentStatus(); });
+  $("agentTabOllama").addEventListener("click", () => { syncAgentTabs("ollama"); refreshAgentStatus(); });
+  const sel = document.getElementById("agentProvider");
+  if (sel) sel.addEventListener("change", () => { syncAgentTabs(sel.value); refreshAgentStatus(); });
+  $("btnAgentCopyMcp").addEventListener("click", async () => {
+    const code = document.getElementById("agentMcpCommand");
+    const text = code ? code.textContent : "python windows\\vibeedit.py mcp <project-folder>";
+    try { await navigator.clipboard.writeText(text); setStatus("Đã sao chép lệnh MCP."); }
+    catch (err) { setStatus("Không sao chép được tự động — hãy bôi đen lệnh MCP rồi Ctrl+C.", true); }
+  });
+  refreshAgentStatus();
+  setInterval(refreshAgentStatus, 60000);
+})();
+
+(function previewSync() {
+  // Preview -> timeline (the other direction of the two-way sync).
+  // timeupdate fires while playing; seeked fires on native-control
+  // seeks. A <=1-frame difference is treated as echo from our own
+  // seek (rounding) and only refreshes the caption, never re-renders.
+  const video = $("preview");
+  if (!video) return;
+  function syncPlayheadFromPreview() {
+    if (!project || video.hidden || !video.src) return;
+    let t;
+    if (previewMode === "source" && previewItemId) {
+      const found = findItem(previewItemId);
+      if (!found) return;
+      const medium = project.media.find((m) => m.id === found.item.media);
+      const mediaFps = medium && Array.isArray(medium.fps) ? medium.fps[0] / medium.fps[1] : (medium && medium.fps ? medium.fps : fps());
+      t = sourceToTimelineSeconds(video.currentTime, found.item.at / fps(), (found.item.in || 0) / mediaFps, found.item.speed || 1, found.item.dur / fps());
+    } else {
+      t = video.currentTime;
+    }
+    const newFrame = Math.round(t * fps());
+    if (Math.abs(newFrame - playheadFrame) <= 1) { renderPreviewCaption(); return; }
+    playheadFrame = newFrame;
+    $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
+    renderTracks();
+    renderPreviewCaption();
+  }
+  video.addEventListener("timeupdate", syncPlayheadFromPreview);
+  video.addEventListener("seeked", syncPlayheadFromPreview);
 })();

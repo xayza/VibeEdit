@@ -55,7 +55,7 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 13)
+## Current status (honest, full-parity round 14)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
   endpoint; the number in docs goes stale as tools are added): **401
@@ -64,7 +64,7 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design), and round 13 re-ran that check with the
+  shared-handler design), and round 14 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
@@ -115,8 +115,8 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   end time, on millisecond-exact and non-millisecond ends alike),
   end-to-end integration export verified against its own report
   (135 frames / 4.5 s composite, server smoke with clean shutdown)
-  and a Windows test checklist document (round 13),
-  567 tests OK on the Linux VM.
+  and a Windows test checklist document (round 13), a round-14 UI rebuild matching the original app plus the Neon Nights spec (agent sidebar left, neon clip colours, two-way playhead/preview sync within one frame),
+  584 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K

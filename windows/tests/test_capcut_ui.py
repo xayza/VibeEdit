@@ -130,9 +130,11 @@ class TestCapcutShell(unittest.TestCase):
         filters = _panel(html, "filters")
         self.assertIn("Details", filters)
 
-    def test_teal_theme_and_legacy_selectors(self):
+    def test_neon_theme_and_legacy_selectors(self):
+        # Round 14 Neon Nights spec replaces the old teal palette; the
+        # selector locks below are unchanged.
         css = _read("static/style.css")
-        for snippet in ("#00c8d4", "#101014", "#1a1a1f",
+        for snippet in ("#06b6d4", "#09090b", "#16161a",
                         ".tool-rail",
                         ".workbench", ".details-col", ".timeline-toolbar",
                         ".preview-wrap video", ".panel h3::before",

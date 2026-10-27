@@ -1,9 +1,10 @@
-/* VibeEdit Windows — CapCut-style editor shell (redesign).
-   Original dark-editor look, in the spirit of a desktop video
-   editor: near-black background, #1a1a1f panels, thin borders and
-   a single teal accent for active items and primary actions.
-   No external fonts, images, icon fonts or CDNs: plain text and
-   Unicode symbols only. CSS ONLY: no element id or class used by
+/* VibeEdit Windows — Cyberpunk / Neon Nights editor shell.
+   Design system (authoritative, round 14): app bg #09090b, panels
+   #16161a/#18181b, hairline 1px borders #27272a/#3f3f46, default
+   text #a1a1aa, active white; neon accents only pink #ec4899,
+   cyan #06b6d4, purple #8b5cf6, green #10b981. System font stack
+   only (Inter/SF Pro equivalent) — no external fonts, images,
+   icon fonts or CDNs; toolbar icons are inline Lucide-style SVG. CSS ONLY: no element id or class used by
    app.js was renamed or removed, and the logo data URI in
    index.html is untouched, so every existing feature keeps
    working. Panels that used to stack vertically now live in
@@ -12,22 +13,25 @@
    the timeline spans the full width at the bottom. */
 * { box-sizing: border-box; }
 :root {
-  --bg: #101014;
-  --bg-panel: #1a1a1f;
-  --bg-panel2: #202027;
-  --bg-panel3: #26262e;
-  --bg-input: #141419;
-  --line: #23232a;
+  --bg: #09090b;
+  --bg-panel: #16161a;
+  --bg-panel2: #18181b;
+  --bg-panel3: #1e1e24;
+  --bg-input: #09090b;
+  --line: #27272a;
   --line-soft: #1e1e24;
-  --line-strong: #33333d;
-  --text: #f2f2f4;
-  --muted: #a8a8b3;
-  --faint: #76767f;
-  --accent: #00c8d4;
-  --accent-dark: #009aa6;
-  --accent-soft: rgba(0, 200, 212, 0.14);
-  --accent-line: rgba(0, 200, 212, 0.45);
-  --ok: #4ade80;
+  --line-strong: #3f3f46;
+  --text: #a1a1aa;
+  --muted: #71717a;
+  --faint: #52525b;
+  --accent: #06b6d4;
+  --accent-dark: #0891b2;
+  --accent-soft: rgba(6, 182, 212, 0.14);
+  --accent-line: rgba(6, 182, 212, 0.45);
+  --pink: #ec4899;
+  --purple: #8b5cf6;
+  --green: #10b981;
+  --ok: #10b981;
   --warn: #f5a623;
   --danger: #ef4444;
   --danger-bg: #3a1d1d;
@@ -41,14 +45,14 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  font-size: 13px;
+  font-family: "Inter", "SF Pro Display", "SF Pro Text", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #33333d; border-radius: 8px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 8px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- Buttons / inputs (shared) ---------- */
@@ -57,7 +61,7 @@ button {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 7px 12px;
+  padding: 9px 14px;
   cursor: pointer;
   font: inherit;
   font-weight: 600;
@@ -75,9 +79,9 @@ button.primary {
   border-color: transparent;
   font-weight: 700;
   min-height: 36px;
-  box-shadow: 0 3px 14px rgba(0, 200, 212, 0.35);
+  box-shadow: 0 3px 14px rgba(6, 182, 212, 0.35);
 }
-button.primary:hover { background: #22d3e0; }
+button.primary:hover { background: #22d3ee; }
 button.secondary { background: var(--bg-panel2); }
 button.danger { background: var(--danger-bg); color: #fecaca; border-color: #7f1d1d; }
 button.danger:hover { background: #4a2424; }
@@ -122,7 +126,7 @@ form { margin: 0; }
   align-items: center;
   gap: 14px;
   padding: 8px 14px;
-  background: #141419;
+  background: #0d0d0f;
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
@@ -178,7 +182,7 @@ form { margin: 0; }
   gap: 2px;
   align-items: stretch;
   padding: 6px 10px;
-  background: #141419;
+  background: #0d0d0f;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   position: sticky;
@@ -228,15 +232,15 @@ form { margin: 0; }
   flex-shrink: 0;
   padding: 10px 6px;
   border-right: 1px solid var(--line);
-  background: #15151a;
+  background: #0d0d0f;
 }
 .rail-btn {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: 11px;
-  padding: 8px 4px;
+  font-size: 12px;
+  padding: 10px 4px;
   text-align: center;
   white-space: normal;
 }
@@ -259,7 +263,8 @@ form { margin: 0; }
 .tool-panels .panel { border: 0; border-radius: 0; padding: 2px 2px 16px; background: transparent; }
 .panel h3 {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: 14px;
+  color: #fafafa;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -276,7 +281,7 @@ form { margin: 0; }
   background: var(--accent);
   flex-shrink: 0;
 }
-.panel h4 { margin: 14px 0 6px; font-size: 13px; }
+.panel h4 { margin: 14px 0 6px; font-size: 14px; font-weight: 700; }
 .panel ul { list-style: none; padding: 0; margin: 0; }
 .panel li {
   padding: 6px 0;
@@ -323,7 +328,7 @@ form { margin: 0; }
 }
 
 /* ---------- Centre player ---------- */
-.centre-col { flex: 1; min-width: 0; background: #18181d; }
+.centre-col { flex: 1; min-width: 0; background: var(--bg-panel2); }
 .player-head {
   display: flex;
   align-items: center;
@@ -411,7 +416,7 @@ form { margin: 0; }
 
 /* ---------- Timeline strip (full width, bottom) ---------- */
 .timeline-wrap {
-  background: #141419;
+  background: #0d0d0f;
   border-top: 1px solid var(--line);
   padding: 12px 14px 22px;
 }
@@ -462,8 +467,8 @@ form { margin: 0; }
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #fff;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.9);
   z-index: 3;
 }
 .ruler .playhead::after {
@@ -472,7 +477,7 @@ form { margin: 0; }
   top: -1px;
   left: -5px;
   border: 6px solid transparent;
-  border-top-color: #fff;
+  border-top-color: #ef4444;
 }
 .beat-tick {
   position: absolute;
@@ -511,9 +516,9 @@ form { margin: 0; }
   position: absolute;
   top: 6px;
   bottom: 6px;
-  background: #2d2d38;
-  border: 1px solid #4b4b58;
-  border-left: 4px solid #8b8b9a;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-left: 4px solid #71717a;
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 12px;
@@ -526,10 +531,10 @@ form { margin: 0; }
 }
 .clip:hover { filter: brightness(1.15); }
 .clip:active { cursor: grabbing; }
-.clip.video { background: linear-gradient(180deg, #3a2b56, #2c2142); border-color: #6d4fa8; border-left-color: #a855f7; }
-.clip.text { background: linear-gradient(180deg, #1a4234, #123524); border-color: #2f7a5a; border-left-color: var(--ok); }
-.clip.audio { background: linear-gradient(180deg, #463a1e, #362d16); border-color: #8a6a2f; border-left-color: var(--warn); }
-.clip.selected { outline: 2px solid #fff; outline-offset: -1px; box-shadow: 0 0 0 3px rgba(0, 200, 212, 0.45), var(--shadow-sm); z-index: 2; }
+.clip.video { background: rgba(6, 182, 212, 0.14); border-color: #06b6d4; border-left-color: #22d3ee; }
+.clip.text { background: rgba(39, 39, 42, 0.9); border-color: #3f3f46; border-left-color: #a1a1aa; }
+.clip.audio { background: rgba(16, 185, 129, 0.14); border-color: #10b981; border-left-color: #34d399; }
+.clip.selected { outline: 2px solid #06b6d4; outline-offset: -1px; box-shadow: 0 0 0 3px rgba(0, 200, 212, 0.45), var(--shadow-sm); z-index: 2; }
 .transition-marker {
   position: absolute;
   top: 4px;
@@ -589,7 +594,7 @@ form { margin: 0; }
 .ruler .playhead { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.9); }
 .ruler .playhead::after { border-top-color: #ef4444; }
 .ruler-tick { position: absolute; top: 2px; font-size: 10px; color: var(--muted); transform: translateX(2px); white-space: nowrap; }
-.word-chip { display: inline-block; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; padding: 1px 7px; margin: 1px 3px 1px 0; font-size: 11px; white-space: nowrap; }
+.word-chip { display: inline-block; background: rgba(139, 92, 246, 0.25); border: 1px solid rgba(139, 92, 246, 0.55); color: #ede9fe; border-radius: 999px; padding: 1px 7px; margin: 1px 3px 1px 0; font-size: 11px; white-space: nowrap; }
 .wave-strip { display: flex; align-items: center; gap: 1px; height: 16px; margin-top: 2px; opacity: 0.9; }
 .wave-bar { flex: 1; background: rgba(255, 255, 255, 0.75); border-radius: 1px; min-width: 1px; }
 .timeline-capabilities { color: var(--muted); }
@@ -605,7 +610,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .centre-col { overflow-y: auto; min-height: 0; }
 .details-col { display: flex; flex-direction: column; overflow: hidden; }
 .details-col > .panel { flex: 1; min-height: 0; overflow-y: auto; }
-.details-col .agent-dock { flex-shrink: 0; max-height: 48%; overflow-y: auto; }
+.agent-col .agent-dock { flex-shrink: 0; overflow-y: auto; }
 .timeline-wrap { flex-shrink: 0; max-height: 40vh; overflow-y: auto; }
 .preview-wrap video { height: auto; max-height: 36vh; }
 .preview-wrap img { height: auto; max-height: 36vh; width: auto; max-width: 100%; margin: 0 auto; background: #000; border-radius: var(--radius); border: 1px solid var(--line); display: block; object-fit: contain; }
@@ -626,10 +631,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* ---- Media Library grid + timeline fit + Agent convenience (original-app shell) ---- */
 /* Original shell: NO top icon toolbar (removed from index.html); the
    far-left vertical rail is the only tool switcher, as in the original. */
-#mediaList { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; list-style: none; margin: 0; padding: 0; }
+#mediaList { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; list-style: none; margin: 0; padding: 0; }
 .media-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-panel2); padding: 8px; cursor: pointer; position: relative; overflow: hidden; }
 .media-card:hover { border-color: var(--accent); }
-.media-thumb { display: block; width: 100%; height: 84px; object-fit: cover; background: #000; border-radius: 4px; }
+.media-thumb { display: block; width: 100%; height: 84px; object-fit: cover; background: #000; border-radius: 6px; }
 .media-thumb-audio { display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--accent); }
 .media-card-body { padding: 6px 2px 2px; }
 .media-card-name { font-size: 12px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -650,8 +655,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 #timelineText { max-height: 64px; overflow-y: auto; }
 /* Agent dock: wider, chat input pinned at the bottom of the dock. */
 .details-col { width: 380px; }
-.details-col .agent-dock { display: flex; flex-direction: column; max-height: none; flex: 1; min-height: 0; }
-.details-col .agent-dock .agent-chat { flex: 1; min-height: 120px; overflow-y: auto; }
+.agent-col .agent-dock { display: flex; flex-direction: column; max-height: none; flex: 1; min-height: 0; }
+.agent-col .agent-dock .agent-chat { flex: 1; min-height: 120px; overflow-y: auto; }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .agent-chips button { font-size: 11px; padding: 5px 8px; }
 #agentChatForm { flex-shrink: 0; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -672,13 +677,13 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .compare-label { position: absolute; top: 8px; z-index: 3; background: rgba(0,0,0,0.65); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 .compare-label-before { left: 8px; }
 .compare-label-after { right: 8px; }
-.compare-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; margin-left: -2px; background: var(--accent, #00c8d4); cursor: ew-resize; z-index: 4; touch-action: none; }
+.compare-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; margin-left: -2px; background: var(--accent, #06b6d4); cursor: ew-resize; z-index: 4; touch-action: none; }
 .compare-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 0; font-size: 12px; }
 .compare-controls input[type="range"] { width: 220px; }
 .compare-note { color: var(--faint, #999); }
 
 /* Code-gap batch 2: welcome panel, library/plugin rows. */
-.welcome-panel { padding: 12px 16px; background: #1a1a1f; border-bottom: 1px solid #23232a; }
+.welcome-panel { padding: 12px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--line); }
 .welcome-panel h3 { margin: 0 0 6px; }
 .library-item, .plugin-item, .welcome-item { padding: 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
@@ -781,3 +786,126 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .track-lane { min-height: 29px; }
 .track-row-main .track-lane { min-height: 46px; }
 .timeline-wrap { max-height: clamp(300px, 46vh, 480px); overflow-y: auto; }
+
+/* ---------- Round 14: original-app presentation (layout first) ---------- */
+.timeline-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tl-timecode { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.tool-col.tool-col-collapsed { width: 76px; }
+.tool-col.tool-col-collapsed .tool-panels { display: none; }
+.track-row { margin-top: 4px; }
+.track-lane { min-height: 30px; }
+.track-row-main .track-lane { min-height: 46px; }
+#tracks { position: relative; }
+.clip { display: flex; align-items: center; gap: 6px; padding: 3px 8px; }
+.clip-thumb { height: 100%; max-height: 38px; width: auto; border-radius: 3px; object-fit: cover; flex-shrink: 0; }
+.clip-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; }
+.clip-dur { opacity: 0.75; font-size: 11px; flex-shrink: 0; }
+.clip.audio { flex-direction: column; align-items: stretch; justify-content: center; gap: 1px; }
+.clip.audio .clip-name { font-size: 11px; }
+/* role colours removed in neon restyle: kind colours + track-code chips carry the role. */
+/* role colours removed in neon restyle: kind colours + track-code chips carry the role. */
+/* role colours removed in neon restyle: kind colours + track-code chips carry the role. */
+/* role colours removed in neon restyle: kind colours + track-code chips carry the role. */
+.clip.text { flex-wrap: wrap; align-content: center; }
+.word-chip { background: #8b5cf6; border-color: #a78bfa; color: #ffffff; }
+.wave-strip { width: 100%; height: 14px; margin-top: 0; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 4; pointer-events: none; box-shadow: 0 0 6px rgba(239, 68, 68, 0.8); }
+.track-row-fold { cursor: pointer; }
+.track-row-fold .track-lane { display: flex; align-items: center; color: var(--muted); font-size: 12px; padding-left: 10px; }
+.insp-tabs { display: flex; gap: 4px; margin: 4px 0 10px; flex-wrap: wrap; }
+.insp-tab { padding: 7px 10px; font-size: 12px; }
+.insp-tab.active { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.inspector-extra { margin-top: 10px; }
+.inspector-extra summary { cursor: pointer; font-weight: 700; color: var(--text); font-size: 12px; }
+.details-project .details-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.details-project .details-rows > div { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.details-project .details-rows span { color: var(--muted); }
+.details-project .details-rows b { font-weight: 600; word-break: break-all; text-align: right; }
+.agent-tabs { display: flex; gap: 4px; margin: 4px 0 8px; }
+.agent-tab { padding: 7px 12px; font-size: 12px; }
+.agent-tab.active { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.agent-status { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+.agent-mcp-row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+.agent-mcp-row code { flex: 1; min-width: 0; overflow-x: auto; font-size: 11px; background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 8px; white-space: nowrap; }
+.agent-log-row { display: flex; gap: 8px; font-size: 12px; }
+.agent-log-time { color: var(--faint); font-size: 11px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.agent-log-text { word-break: break-word; }
+.agent-log-row.from-user .agent-log-text { color: var(--accent); }
+.source-range-wrap { margin-top: 8px; }
+.source-range-wrap summary { cursor: pointer; font-weight: 700; color: var(--text); font-size: 12px; }
+.form-advanced { margin: 6px 0; }
+.form-advanced summary { cursor: pointer; font-weight: 700; color: var(--text); font-size: 12px; }
+
+/* ---- Round 14, lớp phong cách 2026 (phủ lên cấu trúc app gốc) ---- */
+/* Thang spacing nhất quán: 4 / 8 / 12 / 16 px. Các vùng chính dùng
+   padding 14px (panel), gap topbar 14px, gap tab 6px, gap timeline 8px. */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+}
+/* Nút: primary (teal, chỉ Export + hành động chính) / secondary (mặc
+   định) / ghost (nút điều hướng, nền trong suốt, chỉ viền khi hover). */
+button.btn-ghost { background: transparent; border-color: transparent; }
+button.btn-ghost:hover { background: var(--bg-panel2); border-color: var(--line); }
+/* Panel bên: viền + bóng nhẹ, tiêu đề vùng đã có thanh accent 4px. */
+.details-col .panel { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30); }
+/* Tab: hover nhìn thấy được; focus ring đã có từ button:focus-visible. */
+.insp-tabs, .agent-tabs { gap: 6px; }
+.insp-tab:hover, .agent-tab:hover { background: var(--bg-panel2); border-color: var(--line-strong); }
+.insp-tab.active:hover, .agent-tab.active:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+/* Clip: hover sáng + viền đậm hơn (cùng với brightness đã có). */
+.clip:hover { border-color: var(--line-strong); }
+/* Timeline: gap toolbar nhất quán 8px; playhead đỏ + thước đã có. */
+.timeline-toolbar { gap: 8px; }
+/* Responsive: không thêm breakpoint mới — thang breakpoint hiện có
+   (1160px -> 300px, 859px -> 280px, 779px -> workbench scroll nội bộ)
+   đã cho 1280-1920 ở 100/125/150% không cuộn ngang trang:
+   1280/1.5 = 853 -> 280 + 280 + 260 = 820 <= 853; trang overflow hidden. */
+
+/* ---- Round 14, Neon Nights restyle (authoritative spec) ---- */
+/* Left sidebar: AI Agent Workspace. Widths mirror the inspector
+   ladder (300 / 340 at >=1680) so 1280px still fits: 300 agent +
+   356 library + 300 inspector + 260 viewer-min = 1216 <= 1280. */
+.agent-col { width: 300px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--line); background: var(--bg-panel); padding: 12px; min-height: 0; }
+.agent-col:has(> .agent-dock[hidden]) { display: none; }
+@media (min-width: 1680px) { .agent-col { width: 340px; } }
+@media (max-width: 1160px) { .agent-col { width: 280px; } }
+@media (max-width: 859px) { .agent-col { width: 240px; } }
+/* Icon-only top toolbar (Lucide-style inline SVG) + accessible text. */
+.icon-btn { padding: 8px; background: transparent; border-color: transparent; }
+.icon-btn:hover { background: var(--bg-panel2); border-color: var(--line); }
+.icon-btn svg { width: 18px; height: 18px; display: block; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* Export CTA: cyan -> pink gradient, rounded, top-right. */
+button.cta { background: linear-gradient(90deg, #06b6d4, #ec4899); color: #fff; border-color: transparent; border-radius: 10px; box-shadow: 0 3px 16px rgba(236, 72, 153, 0.35); }
+button.cta:hover { filter: brightness(1.1); background: linear-gradient(90deg, #06b6d4, #ec4899); }
+#btnExportFull { margin-left: auto; }
+/* Track headers: code chip + name + indicators (beauty-photo form). */
+.track-label { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.track-code { flex-shrink: 0; font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: #27272a; border: 1px solid #3f3f46; color: #fafafa; }
+.track-code.code-video { color: #22d3ee; }
+.track-code.code-audio { color: #34d399; }
+.track-code.code-text { color: #c4b5fd; }
+.track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.track-ico { flex-shrink: 0; font-size: 11px; opacity: 0.65; }
+/* Clips: rounded, readable when short, real effect chips + join icons. */
+.clip { border-radius: 8px; }
+.clip-narrow .clip-thumb, .clip-narrow .clip-dur { display: none; }
+.clip-fx { position: absolute; top: 2px; right: 4px; z-index: 3; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: #8b5cf6; color: #fff; border: 1px solid #a78bfa; white-space: nowrap; }
+.clip-title { background: linear-gradient(180deg, #ec4899, #be185d); border-color: #f472b6; color: #fff; }
+.transition-marker { width: 18px; height: 18px; line-height: 18px; text-align: center; padding: 0; top: 50%; bottom: auto; transform: translateY(-50%); background: #8b5cf6; color: #fff; border-radius: 999px; font-size: 12px; }
+/* Media library: duration badge over the thumbnail (real duration). */
+.media-duration-badge { position: absolute; bottom: 6px; right: 6px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; z-index: 2; }
+/* Preview monitor: black stage, caption overlay, honest empty state. */
+.preview-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.preview-caption { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
+.preview-caption-line { position: absolute; transform: translate(-50%, -50%); color: #fff; font-weight: 700; text-align: center; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.8); white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; }
+.preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; color: var(--muted); font-size: 13px; background: #000; border-radius: var(--radius); border: 1px solid var(--line); z-index: 2; }
+.preview-empty[hidden] { display: none; }
+/* Inspector: text-xs params, dark inputs, subtle borders. */
+label { font-size: 12px; }
+.details-col input, .details-col select, .details-col textarea { font-size: 12px; }
+/* Player timecode: small white, tabular (beauty-photo format). */
+.tl-timecode { color: #fafafa; }

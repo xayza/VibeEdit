@@ -82,6 +82,30 @@ STATIC_DIR = _static_dir()
 DEFAULT_PROJECT_DIR = _default_project_dir()
 
 
+
+def agent_status_for(project_dir):
+    """Round 14: last MCP activity for one project dir (see mcp.py
+    _touch_agent_status). connected=True only when an MCP process
+    touched the stamp within the last hour; the stamp holds a
+    timestamp only, never conversation content."""
+    import hashlib
+    import json
+    import os
+    import tempfile
+    import time
+    if not project_dir:
+        return {"connected": False, "last_seen": None, "age_seconds": None}
+    folder = os.path.normcase(os.path.abspath(project_dir))
+    key = hashlib.sha1(folder.encode()).hexdigest()[:12]
+    stamp = os.path.join(tempfile.gettempdir(), f"vibeedit-mcp-{key}.json")
+    try:
+        with open(stamp, encoding="utf-8") as fh:
+            last = float(json.load(fh).get("last_seen", 0))
+    except Exception:
+        return {"connected": False, "last_seen": None, "age_seconds": None}
+    age = time.time() - last
+    return {"connected": age < 3600, "last_seen": last, "age_seconds": age}
+
 class State:
     def __init__(self, project_dir: str | None):
         self.lock = threading.Lock()
@@ -820,6 +844,8 @@ def make_handler(state: State):
                 from .plugins import list_plugins
                 with state.lock:
                     self._send_json({"plugins": list_plugins()})
+            elif parsed.path == "/api/agent-status":
+                self._send_json(agent_status_for(state.project_dir))
             elif parsed.path == "/api/mcp-tools":
                 # Phase 5 agent dock: the live tool registry from
                 # mcp.py (names + descriptions), not a hardcoded list.

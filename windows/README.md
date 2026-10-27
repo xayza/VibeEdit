@@ -66,7 +66,7 @@ Vòng 9 bổ sung: backdrop clip (blur/màu, render thật), state panel
 chạy (dismiss/toggle/follow), request follow-up fix-issues /
 another-recipe đúng wording gốc, và mở view plugin (show-view).
 
-Trạng thái hiện tại (sau đợt full-parity vòng 13): **MCP 479 công cụ
+Trạng thái hiện tại (sau đợt full-parity vòng 14): **MCP 479 công cụ
 (401 thao tác thật, 78 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
@@ -194,6 +194,24 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   nhất, chưa đẩy. Smoke server trên project tạm riêng: `GET /`
   200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
   `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
+
+## Vòng 14 — làm lại giao diện theo app gốc + spec Neon Nights, đồng bộ preview/playhead
+
+Vòng trình bày, không thêm/bớt tính năng hay MCP (479 = 401 thật + 78
+honest). Agent sang sidebar trái; rail + library, preview, Inspector,
+timeline full-width dưới cùng. Top bar icon SVG kiểu Lucide, CTA Export
+Video gradient cyan→pink góc phải. Timeline: header mã track, clip
+video cyan + thumbnail thật, audio green + sóng thật, title pink,
+caption chip tím, chip hiệu ứng và icon transition chỉ từ dữ liệu thật,
+playhead đỏ, timecode mm:ss.cs. Preview đồng bộ hai chiều với playhead
+(sai số <1 frame, kiểm chứng bằng test Node trích nguyên văn hàm
+mapping); caption overlay đúng vị trí/thời gian; trạng thái trống thay
+khung đen giả. Nhãn tự do dùng tiếng Việt, giữ tiếng Anh cho CTA và
+thuật ngữ kỹ thuật (xem `UI_MAP.md` §8). Kiểm chứng: py_compile,
+node --check, full suite 584 tests OK trên Linux VM, smoke
+server project tạm (GET / 200, `/api/mcp-tools` 479, `/api/info` 200,
+`/api/agent-status` 200, tắt sạch). Chi tiết và giới hạn còn lại ở
+[`PARITY.md`](PARITY.md) mục vòng 14 và [`UI_MAP.md`](UI_MAP.md).
 
 ## Full-parity vòng 13 — kiểm chứng tích hợp end-to-end, rà soát docs, checklist test Windows
 

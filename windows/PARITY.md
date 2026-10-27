@@ -8,7 +8,7 @@ còn thiếu trong bảng này đều ghi trạng thái
 đã biết. Không có tính năng gốc nào bị ghi là "out of scope" hay
 "not planned" ở đây.
 
-Trạng thái hiện tại (đợt full-parity vòng 13):
+Trạng thái hiện tại (đợt full-parity vòng 14):
 **MCP 479 công cụ** (số live đọc từ `/api/mcp-tools` trong app; số
 trong tài liệu này là số tại thời điểm viết và sẽ cũ đi khi thêm công
 cụ mới — app luôn là nguồn đúng nhất). Trong 479 công cụ có **401
@@ -45,7 +45,7 @@ kênh releases nên không kiểm tra bản mới hơn) và `agent_kit_install`
 (`tests/test_round3_parity.py`: trích spec từ
 `CommandCatalog*.swift` bằng regex đa dòng — grep một dòng chỉ tìm
 được 7 vì spec viết nhiều dòng — rồi chuẩn hóa dấu `.` và `-` thành
-`_`, thêm tiền tố `vibeedit_`; vòng 13 chạy lại test này và vẫn đủ
+`_`, thêm tiền tố `vibeedit_`; vòng 14 chạy lại test này và vẫn đủ
 249 tên). 4 tên khác với tên Windows chính
 (`beats.detect`, `clip.speed-curve`, `transcript.words`,
 `library.save-selection`) được bao phủ bằng alias thật trỏ về handler
@@ -332,3 +332,57 @@ chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
 - "Hoàn thành 100%" theo nghĩa không còn gì để làm: mục tiêu là port đầy
   đủ, và bảng này chính là danh sách việc còn lại; bất kỳ báo cáo nào nói
   "đã xong" mà không đối chiếu bảng này đều là phóng đại.
+
+## Vòng 14 — làm lại giao diện theo app gốc + spec Neon Nights, đồng bộ preview/playhead
+
+Vòng trình bày, không thêm công cụ MCP (479 = 401 thật + 78 honest,
+không đổi) và không bỏ tính năng/API nào. Bản đồ cấu trúc đầy đủ ở
+[`UI_MAP.md`](UI_MAP.md) (đọc từ Swift gốc + 3 ảnh mẫu).
+
+- **Bố cục mới:** Agent dời sang sidebar trái ngoài cùng; tiếp theo là
+  rail + library, preview ở giữa, Inspector phải, timeline full-width
+  dưới cùng. Top bar gọn thành icon SVG kiểu Lucide + nhãn `.sr-only`
+  (giữ id và marker test); CTA Export Video gradient cyan→pink, góc
+  phải, bo góc.
+- **Timeline:** header track gọn (mã CC/V2/V1/V3/A1/A2/A3/A4/FX + tên +
+  chỉ báo mắt/loa tĩnh — không có nút hide/mute/lock giả); clip video
+  cyan mờ viền sáng + thumbnail thật + tên + thời lượng; clip audio
+  green + sóng thật từ `/api/waveform`; title card pink neon; caption
+  chip tím; chip hiệu ứng nhỏ chỉ khi clip có sẵn `color.preset`/`lut`
+  thật; icon transition ⇄ nhỏ ở điểm nối (từ `transitions[]` thật);
+  playhead đỏ xuyên track; thước mm:ss; timecode mm:ss.cs; clip ngắn
+  <90px tự ẩn thumbnail + thời lượng, tên cắt "…".
+- **Neon Nights:** nền #09090b, panel #16161a/#18181b, viền 1px
+  #27272a/#3f3f46, chữ #a1a1aa/active trắng, accent pink/cyan/purple/
+  green; font stack hệ thống (Inter/SF Pro); không viền trắng (cả
+  playhead thước trắng cũ đã sửa thành đỏ); Media Library grid 3 cột
+  + badge thời lượng thật; Inspector text-xs, input nền #09090b.
+- **Đồng bộ preview/playhead hai chiều:** timeline → preview qua
+  `seekPreviewToPlayhead()` + hàm thuần `timelineToSourceSeconds()`
+  (chờ `loadedmetadata` thay vì bỏ seek như trước); preview → timeline
+  qua `timeupdate` + `seeked` + `sourceToTimelineSeconds()`; lệch ≤1
+  frame coi là echo làm tròn. Caption overlay hiện text/karaoke đang
+  active tại đúng vị trí `textStyle`; trạng thái trống `#previewEmpty`
+  thay khung đen giả; video/ảnh nguồn load toàn bộ file; sóng audio
+  lấy từ toàn bộ file. Sau khi sửa, `load()` giữ playhead và seek lại
+  preview — không chuyển chế độ, không tải lại trang.
+- **Ngôn ngữ:** nhãn tự do dùng tiếng Việt; giữ tiếng Anh cho CTA
+  "Export Video", thuật ngữ kỹ thuật người dùng đã dùng bằng tiếng
+  Anh, nhãn gốc của app gốc và chuỗi bị test khóa (xem `UI_MAP.md` §8).
+- **Sửa lỗi thật trong vòng này:** công thức `totalS` cũ luôn bằng 1
+  (thước + chiều rộng lane hỏng với project dài); seek bị mất khi
+  chưa có metadata; playhead thước trắng lệch màu với playhead đỏ
+  trong lane; các nút mới của vòng 14 ban đầu không qua được detector
+  dead-button (đã nối theo đúng mẫu `$("id").addEventListener`).
+- **Kiểm chứng:** py_compile toàn `vibeedit_core`, node --check
+  `static/app.js`, full suite 584 tests OK trên Linux VM (gồm
+  test Node trích nguyên văn hàm mapping hai chiều, sai số <1 frame ở
+  30 fps, và test waveform toàn file tone-silence-tone), smoke server
+  trên project tạm riêng (GET / 200, `/api/mcp-tools` 479,
+  `/api/info` 200, `/api/agent-status` 200, tắt sạch). 249 tên gốc vẫn
+  đủ qua test coverage. Cây Swift không động, không merge, không push
+  trong vòng này (parent kiểm tra rồi đẩy).
+- **Chưa đạt (trung thực):** xem `UI_MAP.md` §7 — ở 1280@150% preview
+  bị bóp hẹp (dưới chiều rộng tối thiểu của app gốc); icon mắt/loa
+  chỉ là chỉ báo tĩnh; kiểm chứng trực quan trên Windows thật vẫn cần
+  người dùng làm sau (VM Linux không có trình duyệt/Windows).

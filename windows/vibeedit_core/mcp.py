@@ -912,8 +912,31 @@ class MCPServer:
         "vibeedit_media_subjects": "vibeedit_vision_faces",
     }
 
+    def _touch_agent_status(self) -> None:
+        # Round 14: one-line agent-connection status for the web dock.
+        # The MCP process is separate from the web server, so it leaves
+        # a last-activity stamp (timestamp only, no content) in the temp
+        # dir; the web server reads it via /api/agent-status. Best
+        # effort only: it must never break a tool call.
+        if not self.path:
+            return
+        try:
+            import hashlib
+            import json as _json
+            import os as _os
+            import tempfile
+            import time as _time
+            folder = _os.path.dirname(_os.path.abspath(self.path))
+            key = hashlib.sha1(_os.path.normcase(folder).encode()).hexdigest()[:12]
+            stamp = _os.path.join(tempfile.gettempdir(), f"vibeedit-mcp-{key}.json")
+            with open(stamp, "w", encoding="utf-8") as fh:
+                _json.dump({"last_seen": _time.time()}, fh)
+        except Exception:
+            pass
+
     def call(self, name: str, args: dict) -> dict:
         name = self.ALIASES.get(name, name)
+        self._touch_agent_status()
         if name in self.DESTRUCTIVE_TOOLS and self.path:
             try:
                 write_backup(self.path)
@@ -4427,6 +4450,7 @@ def handle(server: MCPServer, request: dict) -> dict:
 
 def serve(folder: str | None = None) -> None:
     server = MCPServer(folder)
+    server._touch_agent_status()
     for line in sys.stdin:
         line = line.strip()
         if not line:
