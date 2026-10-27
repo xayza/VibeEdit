@@ -567,7 +567,7 @@ TOOLS.extend([
     {"name": "vibeedit_media_describe", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
     {"name": "vibeedit_media_description", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
     {"name": "vibeedit_media_digest", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
-    {"name": "vibeedit_media_cuts", "description": "Not available in this Windows build: no cut-detection provider is wired in this build."},
+    {"name": "vibeedit_media_cuts", "description": "Detect scene cuts in a project media with the FFmpeg scene filter (threshold, default 0.4) and correct the stored cut list: add cuts or remove candidates at source seconds, clear drops earlier corrections, remeasure measures again and drops corrections. Corrections live in the media record."},
     {"name": "vibeedit_media_sync", "description": "Not available in this Windows build: no audio-sync provider is wired in this build."},
     {"name": "vibeedit_media_speech_map", "description": "Not available in this Windows build: no speech-mapping provider is wired in this build."},
     {"name": "vibeedit_media_strip", "description": "Not available in this Windows build: no media-strip provider is wired in this build."},
@@ -607,7 +607,7 @@ TOOLS.extend([
     {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (no network; unknown unless the installed manifest carries update metadata)."},
     {"name": "vibeedit_plugins_search", "description": "Search locally discovered plugins by name, description or hook (local plugins folder only; no registry)."},
     {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: plugin setup is not supported in this build."},
-    {"name": "vibeedit_plugins_set", "description": "Not available in this Windows build: plugin setting is not supported in this build; use plugin_enable/plugin_disable for enable state."},
+    {"name": "vibeedit_plugins_set", "description": "Turn a plugin on or off (same switches as plugin_enable/plugin_disable). Per-hook switches are not supported in this build."},
     {"name": "vibeedit_plugins_set_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
     {"name": "vibeedit_plugins_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
     {"name": "vibeedit_plugins_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
@@ -618,8 +618,8 @@ TOOLS.extend([
     {"name": "vibeedit_plugins_run", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
     {"name": "vibeedit_plugins_invoke", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
     {"name": "vibeedit_plugins_actions", "description": "Not available in this Windows build: no plugin action host exists in this headless server."},
-    {"name": "vibeedit_plugins_option", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
-    {"name": "vibeedit_plugins_options", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
+    {"name": "vibeedit_plugins_option", "description": "Set one plugin option (omit value to reset it to its default). Values are validated against the plugin's declared schema; project-scope values are a project edit, user-scope values are saved in plugins.json."},
+    {"name": "vibeedit_plugins_options", "description": "Read a plugin's options: declared schema, scope (user/project) and current values (user-scope from plugins.json, project-scope from the open project; without an open project, project-scope options report their defaults)."},
     {"name": "vibeedit_plugins_show_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
     {"name": "vibeedit_clip_motion", "description": "Not available in this Windows build: motion editing is another agent's job; no motion state exists on clips in this build."},
     {"name": "vibeedit_clip_backdrop", "description": "Not available in this Windows build: backdrop editing is another agent's job; no backdrop state exists on clips in this build."},
@@ -850,9 +850,11 @@ class MCPServer:
                            "replacement workflows are not supported in "
                            "this build; the local plugin system holds: "
                            f"{available or 'none'}. "
-                           "Plugin install, search and hook execution "
-                           "are real (plugins_install/plugins_search/"
-                           "plugins_run); no untrusted code is copied "
+                           "Plugin install, search, hook execution, "
+                           "option read/set and the on/off switch are "
+                           "real (plugins_install/plugins_search/"
+                           "plugins_run/plugins_options/plugins_option/"
+                           "plugins_set); no untrusted code is copied "
                            "or executed outside those paths")
         if name.startswith("vibeedit_voice_") or name in (
                 "vibeedit_acme_voice_fast", "vibeedit_speech_rate"):
@@ -1254,11 +1256,86 @@ class MCPServer:
         if name in ("vibeedit_media_analysis", "vibeedit_media_analyze"):
             # Round 5: ffprobe-based analysis is the analysis the
             # build can actually do — same data as media_metadata.
+            # Round 6: a stored media_cuts record rides along, so
+            # "shots and statistics in media.analysis follow" the
+            # corrections instead of hiding them.
             from .export_ops import media_metadata
             if not args.get("media"):
                 raise ValueError("media_analysis needs media")
             proj = self._require()
-            return media_metadata(proj.data, proj.folder, args["media"])
+            result = media_metadata(proj.data, proj.folder,
+                                    args["media"])
+            try:
+                medium = proj.media(args["media"])
+                record = medium.get("analysis")
+                if isinstance(record, dict):
+                    result["analysis_cuts"] = record.get("cuts")
+                    result["analysis_cuts_detected"] = \
+                        record.get("cuts_detected")
+                    result["analysis_cuts_threshold"] = \
+                        record.get("threshold")
+            except Exception:
+                pass
+            return result
+        if name == "vibeedit_media_cuts":
+            # Round 6: original media.cuts semantics — correct the
+            # cut list of an analysed media (see vibeedit_core/
+            # cuts.py for the full mapping). Detection runs on
+            # first use; remeasure measures again and drops
+            # earlier corrections.
+            from .cuts import apply_cut_corrections, detect_cuts
+            from .project import fps_value
+            if not args.get("media"):
+                raise ValueError("media_cuts needs media")
+            proj = self._require()
+            medium = proj.media(args["media"])
+            src = self._media_abs(proj, medium)
+            record = medium.get("analysis")
+            if not isinstance(record, dict):
+                record = {}
+            remeasure = bool(args.get("remeasure"))
+            if record.get("cuts_detected") and not remeasure:
+                detected = list(record["cuts_detected"])
+                threshold = record.get("threshold", 0.4)
+                measured_now = False
+            else:
+                det = detect_cuts(
+                    src, threshold=float(args.get("threshold", 0.4)))
+                detected = det["cuts"]
+                threshold = det["threshold"]
+                measured_now = True
+                record = {"cuts_detected": detected,
+                          "threshold": threshold}
+            try:
+                raw_fps = medium.get("fps") or \
+                    proj.data.get("format", {}).get("fps")
+                fps = fps_value(raw_fps) if raw_fps else None
+            except Exception:
+                fps = None
+            tolerance = (1.0 / fps) if fps else 0.04
+            try:
+                duration = float(medium["duration"]) \
+                    if medium.get("duration") is not None else None
+            except (TypeError, ValueError):
+                duration = None
+            current = list(record.get("cuts", detected))
+            corrected = apply_cut_corrections(
+                detected, current, add=args.get("add"),
+                remove=args.get("remove"),
+                clear=bool(args.get("clear")),
+                tolerance=tolerance, duration=duration)
+            record["cuts"] = corrected["cuts"]
+            record["cuts_corrections"] = {
+                "added": corrected["added"],
+                "removed": corrected["removed"]}
+            medium["analysis"] = record
+            self._save()
+            return {"media": medium["id"], "cuts": corrected["cuts"],
+                    "detected": detected, "added": corrected["added"],
+                    "removed": corrected["removed"],
+                    "removed_unmatched": corrected["removed_unmatched"],
+                    "threshold": threshold, "remeasured": measured_now,
+                    "tolerance": round(tolerance, 4)}
         if name == "vibeedit_media_proxy":
             from .render import generate_proxy
             if not args.get("media"):
@@ -2521,6 +2598,86 @@ class MCPServer:
             return {"plugins_dir": PLUGINS_DIR,
                     "plugins": [p["name"] for p in list_plugins()
                                 if p["name"] != "_errors"]}
+        if name == "vibeedit_plugins_options":
+            # Round 6: original plugins.options semantics — schema,
+            # scope and current values (see vibeedit_core/
+            # plugins.py). Reading needs no open project; without
+            # one, project-scope options report their defaults and
+            # the reply says so.
+            from .plugins import (get_plugin_options,
+                                  get_plugin_option_values)
+            plugin = args.get("plugin") or args.get("plugin_id")
+            if not plugin:
+                raise ValueError("plugins_options needs plugin")
+            try:
+                proj = self._require()
+                project_data = proj.data
+                project_open = True
+            except RuntimeError:
+                project_data = None
+                project_open = False
+            schema = get_plugin_options(
+                plugin, plugins_dir=args.get("plugins_dir"))
+            values = get_plugin_option_values(
+                plugin, plugins_dir=args.get("plugins_dir"),
+                project_data=project_data)
+            return {"plugin": plugin, "project_open": project_open,
+                    "options": [{**opt, "value": values[opt["id"]]}
+                                for opt in schema]}
+        if name == "vibeedit_plugins_option":
+            # Round 6: original plugins.option semantics — set one
+            # option, omit value to reset to default. Project-scope
+            # values are saved with the project; user-scope values
+            # go to plugins.json. Values are validated against the
+            # declared schema before anything is written.
+            from .plugins import set_plugin_option
+            plugin = args.get("plugin") or args.get("plugin_id")
+            option = args.get("option")
+            if not plugin or not option:
+                raise ValueError("plugins_option needs plugin and option")
+            from .plugins import get_plugin_options
+            schema = get_plugin_options(
+                plugin, plugins_dir=args.get("plugins_dir"))
+            entry = next((o for o in schema if o["id"] == option), None)
+            if entry is None:
+                raise ValueError(
+                    f"Unknown option {option!r} for plugin {plugin!r}")
+            if entry["scope"] == "project":
+                proj = self._require()
+                result = set_plugin_option(
+                    plugin, option, args.get("value"),
+                    plugins_dir=args.get("plugins_dir"),
+                    project_data=proj.data)
+                self._save()
+            else:
+                result = set_plugin_option(
+                    plugin, option, args.get("value"),
+                    plugins_dir=args.get("plugins_dir"))
+            return result
+        if name == "vibeedit_plugins_set":
+            # Round 6: original plugins.set turns a plugin (or its
+            # hooks) off; agents can only turn them off, turning on
+            # stays with the user in the Plugins sheet. This port
+            # already has plugin_enable/plugin_disable, so set
+            # mirrors those switches for the enabled flag.
+            # Per-hook switches do not exist in this build and are
+            # refused plainly instead of pretended.
+            from .plugins import set_plugin_enabled
+            plugin = args.get("plugin") or args.get("plugin_id")
+            if not plugin:
+                raise ValueError("plugins_set needs plugin")
+            if args.get("hooks") is not None:
+                raise ValueError(
+                    "Per-hook switches are not supported in this "
+                    "build; use plugins_set with enabled only")
+            if args.get("enabled") is None:
+                raise ValueError("plugins_set needs enabled (true/false)")
+            enabled = args["enabled"]
+            if isinstance(enabled, str):
+                enabled = enabled.strip().lower() in (
+                    "true", "on", "1", "yes")
+            return set_plugin_enabled(plugin, bool(enabled),
+                                      plugins_dir=args.get("plugins_dir"))
         if name in ("vibeedit_jobs_status", "vibeedit_run_status"):
             return {"queued": self.batch_queue,
                     "results": self.batch_results,

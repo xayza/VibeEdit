@@ -70,6 +70,7 @@ a = Analysis(
     # plugins data entry above.
     hiddenimports=[
         "vibeedit_core.beats",
+        "vibeedit_core.cuts",
         "vibeedit_core.export_ops",
         "vibeedit_core.karaoke",
         "vibeedit_core.knowledge",

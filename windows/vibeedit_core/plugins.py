@@ -122,6 +122,12 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
                 "manifest_hooks": sorted(hooks),
                 "path": sub,
             }
+            if "options" in manifest:
+                # Raw manifest options; validated by
+                # get_plugin_options() on read, never silently
+                # dropped here (a bad schema must error on read,
+                # not vanish from the listing).
+                entry_info["manifest_options"] = manifest.get("options")
             entry = manifest.get("entry")
             if entry is not None:
                 _validate_manifest(manifest, source_label=name)
@@ -144,8 +150,10 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
 
 def _state_path(plugins_dir: str | None = None) -> str:
     """plugins.json next to the plugins/ folder (windows/plugins.json
-    in a source checkout). Stores enable/disable state only — never
-    plugin code or project data."""
+    in a source checkout). Stores enable/disable state and
+    user-scope option values only — never plugin code or project
+    data. This file is runtime state: it is never pushed to the
+    repo."""
     folder = plugins_dir or PLUGINS_DIR
     return os.path.join(os.path.dirname(os.path.abspath(folder)),
                         "plugins.json")
@@ -181,6 +189,224 @@ def set_plugin_enabled(name: str, enabled: bool,
     with open(path, "w", encoding="utf-8") as fh:
         _json.dump(state, fh, indent=2, sort_keys=True)
     return {"plugin": name, "enabled": enabled}
+
+
+# ------------------------------------------------------------------
+# Plugin options (round 6) — original semantics from
+# CommandCatalog+Plugins.swift:
+# - plugins.options (read): "Read a plugin's options (schema, scope
+#   and current values)."
+# - plugins.option (edit): "Set one plugin option like the Plugins
+#   sheet: project-scope values are an undoable project edit,
+#   user-scope values are saved for this Mac. Omit value to reset
+#   it to the default."
+# A plugin declares options in register()'s "options" list (or in a
+# manifest's "options" list): each entry is {id, type, default,
+# scope, description?, choices?} with type in bool/number/integer/
+# string/choice and scope in user/project (default user).
+# User-scope values live in plugins.json (runtime state, never
+# pushed); project-scope values live in the open project's data
+# under "plugin_options" and are saved with the project by the
+# caller (this module never saves a project itself). A plugin that
+# declares no options simply has an empty schema — options is
+# never invented for it.
+# ------------------------------------------------------------------
+
+OPTION_TYPES = ("bool", "number", "integer", "string", "choice")
+
+
+def get_plugin_options(plugin_name: str,
+                       plugins_dir: str | None = None) -> list[dict]:
+    """Normalized declared options schema of one discovered plugin.
+
+    Raises KeyError for an unknown plugin and ValueError for a
+    malformed schema (bad id, type, scope, or a choice option
+    without choices) — a bad schema errors on read, it is never
+    silently dropped or repaired into something else.
+    """
+    plugins = load_plugins(plugins_dir)
+    if plugin_name not in plugins:
+        raise KeyError(f"Unknown plugin: {plugin_name!r}")
+    info = plugins[plugin_name]
+    raw = info.get("options")
+    if raw is None:
+        raw = info.get("manifest_options")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"Plugin {plugin_name!r} options must be a list")
+    schema: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Plugin {plugin_name!r} has a non-object option entry")
+        oid = entry.get("id")
+        if not isinstance(oid, str) or not oid or oid in seen:
+            raise ValueError(
+                f"Plugin {plugin_name!r} has a bad/duplicate option id: "
+                f"{oid!r}")
+        seen.add(oid)
+        otype = entry.get("type", "string")
+        if otype not in OPTION_TYPES:
+            raise ValueError(
+                f"Plugin {plugin_name!r} option {oid!r} has unknown "
+                f"type {otype!r}")
+        scope = entry.get("scope", "user")
+        if scope not in ("user", "project"):
+            raise ValueError(
+                f"Plugin {plugin_name!r} option {oid!r} has unknown "
+                f"scope {scope!r}")
+        norm: dict = {"id": oid, "type": otype, "scope": scope,
+                      "default": entry.get("default"),
+                      "description": entry.get("description", "")}
+        if otype == "choice":
+            choices = entry.get("choices")
+            if not isinstance(choices, list) or not choices:
+                raise ValueError(
+                    f"Plugin {plugin_name!r} choice option {oid!r} "
+                    "needs a non-empty choices list")
+            norm["choices"] = list(choices)
+        schema.append(norm)
+    return schema
+
+
+def coerce_plugin_option_value(option: dict, value):
+    """Validate and coerce one option value against its schema
+    entry. The original takes the value as text ("on/off, numbers,
+    choices"); JSON-native bools/numbers are accepted as the same
+    values. Raises ValueError on any mismatch — an out-of-schema
+    value is never stored."""
+    otype = option["type"]
+    oid = option["id"]
+    if otype == "bool":
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ("on", "true", "yes", "1"):
+            return True
+        if text in ("off", "false", "no", "0"):
+            return False
+        raise ValueError(
+            f"Option {oid!r} needs on/off (got {value!r})")
+    if otype == "number":
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Option {oid!r} needs a number (got {value!r})") from None
+    if otype == "integer":
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Option {oid!r} needs an integer (got {value!r})") from None
+        if number != int(number):
+            raise ValueError(
+                f"Option {oid!r} needs an integer (got {value!r})")
+        return int(number)
+    if otype == "choice":
+        text = str(value)
+        if text not in option["choices"]:
+            raise ValueError(
+                f"Option {oid!r} must be one of "
+                f"{option['choices']} (got {value!r})")
+        return text
+    return str(value)
+
+
+def get_plugin_option_values(plugin_name: str,
+                             plugins_dir: str | None = None,
+                             project_data: dict | None = None) -> dict:
+    """Current values for a plugin's options: schema defaults
+    overridden by stored values. User-scope values come from
+    plugins.json; project-scope values come from the given project
+    data (None means no project is open, so project-scope options
+    report their defaults)."""
+    schema = get_plugin_options(plugin_name, plugins_dir)
+    state = load_plugin_state(plugins_dir)
+    user_values = state.get("options") or {}
+    if not isinstance(user_values, dict):
+        user_values = {}
+    user_values = user_values.get(plugin_name, {})
+    if not isinstance(user_values, dict):
+        user_values = {}
+    project_values: dict = {}
+    if isinstance(project_data, dict):
+        all_project = project_data.get("plugin_options") or {}
+        if isinstance(all_project, dict):
+            project_values = all_project.get(plugin_name, {})
+            if not isinstance(project_values, dict):
+                project_values = {}
+    out: dict = {}
+    for opt in schema:
+        stored = project_values if opt["scope"] == "project" \
+            else user_values
+        out[opt["id"]] = stored.get(opt["id"], opt["default"])
+    return out
+
+
+def set_plugin_option(plugin_name: str, option_id: str, value,
+                      plugins_dir: str | None = None,
+                      project_data: dict | None = None) -> dict:
+    """Set one plugin option, or reset it to its default when
+    ``value`` is None (the original's "omit value to reset").
+    User-scope values are written to plugins.json immediately;
+    project-scope values are written into the given project data
+    dict and the caller must save the project (project_data=None
+    for a project-scope option raises, it never writes nowhere).
+    Returns {plugin, option, scope, value, reset} with the
+    effective value after the write."""
+    schema = get_plugin_options(plugin_name, plugins_dir)
+    option = next((o for o in schema if o["id"] == option_id), None)
+    if option is None:
+        raise ValueError(
+            f"Unknown option {option_id!r} for plugin {plugin_name!r}")
+    if value is None:
+        effective = option["default"]
+        reset = True
+    else:
+        effective = coerce_plugin_option_value(option, value)
+        reset = False
+    if option["scope"] == "project":
+        if not isinstance(project_data, dict):
+            raise ValueError(
+                f"Option {option_id!r} is project-scope; open a "
+                "project first")
+        all_project = project_data.get("plugin_options")
+        if not isinstance(all_project, dict):
+            all_project = {}
+            project_data["plugin_options"] = all_project
+        values = all_project.get(plugin_name)
+        if not isinstance(values, dict):
+            values = {}
+            all_project[plugin_name] = values
+        if reset:
+            values.pop(option_id, None)
+        else:
+            values[option_id] = effective
+    else:
+        state = load_plugin_state(plugins_dir)
+        all_options = state.get("options")
+        if not isinstance(all_options, dict):
+            all_options = {}
+            state["options"] = all_options
+        values = all_options.get(plugin_name)
+        if not isinstance(values, dict):
+            values = {}
+            all_options[plugin_name] = values
+        if reset:
+            values.pop(option_id, None)
+        else:
+            values[option_id] = effective
+        path = _state_path(plugins_dir)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2, sort_keys=True)
+    return {"plugin": plugin_name, "option": option_id,
+            "scope": option["scope"], "value": effective,
+            "reset": reset}
 
 
 def list_plugins(plugins_dir: str | None = None) -> list[dict]:

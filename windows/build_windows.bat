@@ -74,6 +74,18 @@ if not exist dist\VibeEdit\VibeEdit.exe (
   if not defined GITHUB_ACTIONS   pause
   exit /b 1
 )
+REM Round 6: package the FFmpeg GPLv3 licence text and the
+REM generated source offer into dist\VibeEdit. This step never
+REM fails the local build by itself: a dev build without licences
+REM must still not be distributed, and the warning below says so
+REM plainly. The CI workflow runs the same script again after
+REM bundling FFmpeg, and that step DOES fail the run if the
+REM licence source is missing.
+call scripts\package_licenses.bat
+if errorlevel 1 (
+  echo [VibeEdit] WARNING: licence packaging failed; do not distribute dist\VibeEdit until it succeeds.
+)
+cd /d "%~dp0"
 echo.
 echo [VibeEdit] Built: dist\VibeEdit\VibeEdit.exe
 echo [VibeEdit] Copy ffmpeg.exe and ffprobe.exe into dist\VibeEdit\ if FFmpeg is not in PATH.

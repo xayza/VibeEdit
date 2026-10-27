@@ -144,7 +144,7 @@ class TestMcpIntegrationTools(unittest.TestCase):
         self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 120)  # Round 5: 132 -> 120, 12 tools became real
+        self.assertEqual(len(honest), 116)  # Round 6: 120 -> 116, media_cuts + plugins_options/option/set became real
         for new in ("vibeedit_clip_link_audio",
                     "vibeedit_project_magnetic_get",
                     "vibeedit_project_magnetic_set",

@@ -38,11 +38,38 @@ No Python install, no separate FFmpeg install, no build step:
    `VibeEdit.exe` away from its folder on its own — the exe
    needs `_internal\` and the bundled FFmpeg next to it.
 
-FFmpeg licence note: the artifact bundles the gyan.dev FFmpeg
-essentials build. FFmpeg is GPL/LGPL-licensed software; the
-bundled build's licence terms travel with it (see the FFmpeg
-project's licence pages). If you redistribute the artifact,
-include the FFmpeg licence information for that build.
+FFmpeg licence and packaging checklist (round 6 — read before
+any public distribution of the artifact): the artifact bundles
+the gyan.dev FFmpeg essentials static build, which is GPLv3, NOT
+LGPL, and must never be described as "FFmpeg LGPL". The CI
+workflow now packages the licence files automatically: after
+copying `ffmpeg.exe`/`ffprobe.exe` into `dist\VibeEdit\` it runs
+`windows\scripts\package_licenses.bat`, which copies the GPLv3
+text (`windows\THIRD_PARTY_LICENSES\GPLv3.txt`) and generates
+`SOURCE_OFFER.txt` from THOSE binaries' real `-version` lines
+plus the bundle URL, and a following step fails the run if any
+of `THIRD_PARTY_LICENSES\GPLv3.txt`,
+`THIRD_PARTY_LICENSES\SOURCE_OFFER.txt` or
+`THIRD_PARTY_LICENSES\THIRD_PARTY_NOTICE.txt` is missing from
+the artifact. Before distributing any artifact by hand, verify
+the same three files yourself:
+1. `dist\VibeEdit\THIRD_PARTY_LICENSES\GPLv3.txt` exists and
+   starts with "GNU GENERAL PUBLIC LICENSE / Version 3, 29 June
+   2007".
+2. `SOURCE_OFFER.txt` in the same folder names the exact
+   `ffmpeg -version` / `ffprobe -version` first lines of the
+   binaries in that folder — if you replaced the binaries after
+   packaging, re-run `scripts\package_licenses.bat` first.
+3. Never ship `dist\VibeEdit` without that folder, and never
+   describe the bundled FFmpeg build as LGPL.
+Patent and codec notes are jurisdiction-dependent; nothing here
+is legal advice, and a real legal review is still required
+before a public release that bundles codecs. The workflow file
+itself still has to reach GitHub by real git or the web UI: the
+GitHub App used by this port is blocked from pushing workflow
+files (403), so until the user pushes
+`.github/workflows/build-windows.yml` that way, CI has not run
+and no exe exists to download.
 
 ## 1. Get the code
 

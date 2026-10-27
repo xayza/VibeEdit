@@ -55,16 +55,16 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 5)
+## Current status (honest, full-parity round 6)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **359
-  real-operation tools and 120 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **363
+  real-operation tools and 116 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design), and round 5 re-ran that check with the
+  shared-handler design), and round 6 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
@@ -87,8 +87,11 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   alphamerge/overlay, plus the Pillow pre-rendered segment), update
   defer/skip state, library/plugin search, declared-hook plugin
   execution, ffprobe media analysis, media proxies, single-instance
-  desktop handoff with browser fallback, and
-  454 tests OK on the Linux VM.
+  desktop handoff with browser fallback, scene-cut detection and
+  cut-list correction (`media_cuts`), plugin option read/set
+  (`plugins_options`/`plugins_option`) and the plugin on/off switch
+  (`plugins_set`), and
+  486 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K
@@ -107,10 +110,13 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   cloning provider model — none exists in either tree), real
   learned-segmentation execution (needs a user-supplied ONNX model
   + runtime), plugin registry fetch, a clean-Windows installer/.exe
-  (the FFmpeg bundle licence is now checked: the CI build is a
-  static GPLv3 gyan.dev build, so licence text + corresponding
-  source must be added as a packaging step before any public
-  redistribution — see `windows/PARITY.md`), and Windows CI.
+  (the FFmpeg bundle licence is now packaged, not just checked:
+  the full GPLv3 text from gnu.org plus a source offer generated
+  from the bundled binaries' real versions are copied into the
+  artifact by `windows/scripts/package_licenses.py` and the CI
+  workflow verifies all three licence files — but the workflow
+  still has to reach GitHub by real git/web UI and run green once
+  to prove it — see `windows/PARITY.md`), and Windows CI.
   `chat.stop`, `view.compare` and `view.safe-area`
   stay honest-error MCP tools by design (no chat session exists;
   Compare and Safe-area already exist as web-UI controls).

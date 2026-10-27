@@ -451,13 +451,16 @@ HONEST_SAMPLE = [
     "vibeedit_library_brand_pose",
     "vibeedit_library_export_pack", "vibeedit_library_import_pack", "vibeedit_library_analyze",
     "vibeedit_media_describe",  # Round 5: ocr/subjects/proxy/analysis left (now real)
-        "vibeedit_media_description", "vibeedit_media_digest", "vibeedit_media_cuts",
+        "vibeedit_media_description", "vibeedit_media_digest",
     "vibeedit_media_sync", "vibeedit_media_speech_map", "vibeedit_media_strip",
             "vibeedit_plugins_setup",  # Round 5: search/run/invoke left (now real)
-    "vibeedit_plugins_set", "vibeedit_plugins_set_overlays",
+    # Round 6: options/option/set left (now real); setup stays honest
+    # (Windows plugins are plain .py modules with no dependency
+    # recipes to re-run).
+    "vibeedit_plugins_set_overlays",
     "vibeedit_plugins_overlays", "vibeedit_plugins_view", "vibeedit_plugins_view_event",
     "vibeedit_plugins_proposal", "vibeedit_plugins_replace",     "vibeedit_plugins_actions",
-    "vibeedit_plugins_option", "vibeedit_plugins_options", "vibeedit_plugins_show_view",
+    "vibeedit_plugins_show_view",
     "vibeedit_clip_motion", "vibeedit_clip_backdrop", "vibeedit_clip_change_framing",
     "vibeedit_clip_send_to_agent",
     "vibeedit_music_replace", "vibeedit_narration_windows", "vibeedit_outcomes_import",
@@ -505,7 +508,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 120)  # Round 5: 132 -> 120, 12 tools became real
+        self.assertEqual(len(honest), 116)  # Round 6: 120 -> 116, media_cuts + plugins_options/option/set became real
 
 
 if __name__ == "__main__":

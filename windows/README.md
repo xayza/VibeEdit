@@ -110,6 +110,57 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
+## Full-parity vòng 6 — GPLv3 cho FFmpeg bundle, media_cuts thật, options plugin (mới nhất)
+
+- **Đóng gói giấy phép GPLv3 cho FFmpeg bundle (kết luận vòng 5 nay
+  làm thật):** toàn văn GPLv3 lấy từ trang chính thức của GNU
+  (`gnu.org/licenses/gpl-3.0.html`, đọc bằng trình duyệt) lưu tại
+  `windows/THIRD_PARTY_LICENSES/GPLv3.txt` kèm ghi chú nguồn ở
+  `THIRD_PARTY_LICENSES/README.md`. `scripts/package_licenses.py`
+  (gọi qua `scripts/package_licenses.bat`, `build_windows.bat`
+  cũng gọi ở cuối) copy file đó vào
+  `dist\VibeEdit\THIRD_PARTY_LICENSES\` và sinh `SOURCE_OFFER.txt`
+  từ chính binary trong build đó (dòng `-version` thật + bundle
+  URL khi có) cùng `THIRD_PARTY_NOTICE.txt`. Workflow CI nay có
+  bước packaging ngay sau bước bundle FFmpeg và bước kiểm tra làm
+  fail run nếu thiếu 1 trong 3 file; `CHECK_WINDOWS.md` có
+  checklist packaging trước khi phân phối. Chưa xong: lần chạy CI
+  xanh đầu tiên (workflow vẫn phải do người dùng đẩy bằng git
+  thật/web UI vì GitHub App 403) và rà soát pháp lý thật trước
+  khi phân phối công khai.
+- **`media_cuts` thật:** đọc đúng ngữ nghĩa gốc
+  (`CommandCatalog+Media.swift`) — đây là sửa danh sách cắt của
+  media đã phân tích, không phải phát hiện cắt thuần túy. Bản này
+  đo bằng FFmpeg scene filter (ngưỡng mặc định 0.4, thang khác
+  với minScore gốc nên không tuyên bố bằng nhau), lưu bản ghi
+  trên media entry; add/remove/clear/remeasure đúng ngữ nghĩa
+  gốc (xóa khớp trong một khoảng mẫu = một khung hình; đo lại
+  thì bỏ các sửa trước đó); `media_analysis` nay kèm theo danh
+  sách cắt đã sửa. Kiểm chứng trên clip tổng hợp đỏ 1s → xanh
+  1s: đúng 1 cắt ở ~1.0s; file chỉ có audio báo lỗi rõ thay vì
+  "không có cắt".
+- **Options plugin thật:** `plugins_options`/`plugins_option`
+  theo đúng ngữ nghĩa gốc — schema + scope + giá trị hiện tại;
+  ghi một option kèm kiểm tra theo schema, bỏ value thì reset
+  về default; user-scope lưu `plugins.json` (runtime state,
+  không push), project-scope lưu trong project data.
+  `plugins_set` nay là công tắc bật/tắt; per-hook switch vẫn báo
+  lỗi rõ vì bản này không có công tắc theo hook. `plugins_setup`
+  giữ honest: plugin Windows là module `.py` thuần, không có
+  dependency recipe để chạy lại.
+- **Còn honest vì lý do rõ, không code nửa vời:**
+  `media_strip` (cần filmstrip PNG + level record + speech-map +
+  transcript — tức toàn bộ pipeline đo `media.analyze` chưa có),
+  `media_sync` (cần provider tương quan âm thanh giữa hai bản
+  ghi — không có provider nào), `media_speech_map` (cần level
+  window 0.1s + tách Otsu của `media.analyze` chưa có). Cả ba
+  giữ nguyên báo lỗi trung thực kèm lý do trong `PARITY.md`.
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **363 thật / 116 honest**; **486 tests OK** trên Linux VM
+  (454 + 32 test vòng sáu mới). `vibeedit.spec` nay liệt kê 17
+  hidden import (`cuts` mới). Cây Swift không động, không hợp
+  nhất, chưa đẩy.
+
 ## Full-parity vòng 5 — rà soát 132 công cụ honest, nút chết giao diện, desktop, bộ cài (mới nhất)
 
 - **Rà soát toàn bộ 132 công cụ kiểm tra-và-báo-lỗi:** quét thực nghiệm
@@ -165,7 +216,9 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   registry (không có registry nào tồn tại), bộ cài/.exe + CI Windows
   (workflow vẫn phải do người dùng đẩy bằng git thật/web UI vì
   GitHub App bị chặn 403; .exe chưa build, CI chưa chạy; file
-  licence/source offer cho FFmpeg bundle chưa có trong artifact),
+  licence/source offer cho FFmpeg bundle nay đã có bước packaging
+  (script + workflow, vòng 6) nhưng vẫn cần lần chạy CI xanh đầu
+  tiên để chứng minh),
   tự thay app đang chạy (chỉ có handoff + hoãn/bỏ qua), và mọi kiểm
   chứng trên Windows thật.
 
@@ -512,7 +565,7 @@ Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export prese
   yet — it can only run on GitHub after it is pushed — so the
   exe appears only after its first green run, and it is never
   in the repo itself. The artifact bundles the gyan.dev FFmpeg
-  build (GPL/LGPL); see CHECK_WINDOWS.md for the licence note.
+  build (GPLv3); see CHECK_WINDOWS.md for the licence note.
 - **Exe easy-run behaviour:** `serve --open-browser` opens the
   editor URL once the server starts (browser failure never
   crashes the server), and the frozen exe with no arguments now
