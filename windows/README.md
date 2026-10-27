@@ -1,5 +1,22 @@
 # VibeEdit — Windows (Phase 8, final planned phase)
 
+## Chạy nhanh trong VS Code và cập nhật không cần tải ZIP
+
+- **Clone một lần duy nhất:** `git clone https://github.com/xayza/VibeEdit.git`
+- **Chạy trong VS Code:** mở thư mục `windows/` (không phải thư mục gốc của repo)
+  trong VS Code, rồi bấm **F5** (cấu hình `VibeEdit` trong `windows/.vscode/launch.json`),
+  hoặc vào Terminal → Run Task → **Run VibeEdit**. Giữ nguyên cửa sổ terminal
+  trong lúc dùng app; nếu trình duyệt không tự mở, tự gõ `http://127.0.0.1:8000/`;
+  muốn dừng app thì bấm **Ctrl+C** trong terminal đó.
+- **Cập nhật về sau, không cần tải ZIP nữa:** mở terminal trong thư mục `windows/`
+  (git tự tìm `.git` ở thư mục cha) rồi gõ `git pull`, hoặc bấm nút Pull trong
+  VS Code → Source Control, hoặc chạy `update_and_run.bat` / `update_and_run.ps1`
+  (tự `git pull --ff-only` rồi chạy server; nếu không có git hoặc pull lỗi thì
+  script chỉ cảnh báo và vẫn chạy code hiện có, không dừng lại).
+- **Lưu ý về bản ZIP:** thư mục tải ZIP về không có `.git` nên không pull được.
+  Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
+  `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
+
 ## Original-app layout (after the CapCut shell)
 
 - **Layout, in the structure of the original BashCut macOS app

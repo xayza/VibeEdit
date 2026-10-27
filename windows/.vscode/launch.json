@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "VibeEdit",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/vibeedit.py",
+      "args": ["serve", "--port", "8000", "--open-browser"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
