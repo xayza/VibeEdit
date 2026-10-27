@@ -1,6 +1,6 @@
 """Unit + render tests for the VibeEdit Windows MVP.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 Media is generated with FFmpeg (testsrc2 + sine tone) into a temp
 folder; no real user footage, no network, no Swift toolchain needed.
 """

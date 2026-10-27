@@ -4,7 +4,7 @@ combined rendering, karaoke by syllable, the agent-dock endpoint,
 and the 12 new MCP tools. Real FFmpeg renders where the claim is
 about rendering.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import http.client

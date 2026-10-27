@@ -1,6 +1,6 @@
 """CapCut-style shell redesign tests.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 
 The redesign moves existing panels into tool tabs and a right Details
 column; it must not rename, remove, or lose any element app.js uses,

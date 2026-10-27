@@ -3,7 +3,7 @@ encoding, still-image keyframe rendering, Inspector preset-strength
 UI wiring, beautified UI ids, and MCP expansion 6 (78 -> 90 tools).
 Real FFmpeg renders where the claim is about rendering.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import json
@@ -140,7 +140,7 @@ class TestVietnameseText(unittest.TestCase):
         # Regression for render.py's subprocess decoding: FFmpeg
         # stderr containing UTF-8 Vietnamese must survive decoding.
         proc = subprocess.run(
-            ["python3", "-c",
+            [sys.executable, "-c",
              "import sys; sys.stderr.buffer.write('xin chào'.encode('utf-8'))"],
             capture_output=True, text=True,
             encoding="utf-8", errors="replace")

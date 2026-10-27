@@ -1,7 +1,7 @@
 """Phase 8 tests: overlay still images, transition preview stills,
 review panel data, and MCP expansion 7 (90 -> 106 tools).
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import json

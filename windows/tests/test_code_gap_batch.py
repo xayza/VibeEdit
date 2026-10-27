@@ -2,7 +2,7 @@
 Compare + project switcher markers, close-gaps, track rename/remove,
 and the 17 new MCP tools (106 -> 123). Real FFmpeg render for eq.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import os

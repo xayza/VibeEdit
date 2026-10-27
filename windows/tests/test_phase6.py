@@ -4,7 +4,7 @@ behaviour (serve --open-browser + frozen no-arg default), and the
 browser opening is tested through a mock, and the workflow is
 validated by parsing its YAML (it can only run on GitHub).
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import os

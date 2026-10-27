@@ -1,6 +1,6 @@
 """Phase 0 data safety: duplicate uploads, backup retention, live MCP count.
 
-Run from windows/: python3 -m unittest discover -s tests -v
+Run from windows/: py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 Temp test data only (tempfile); no user project or media is touched.
 """
 import json

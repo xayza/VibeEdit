@@ -1,6 +1,6 @@
 """Phase 2 tests: transitions, keyframes, SRT, LUT/colour, MCP expansion.
 
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 Media is generated with FFmpeg into temp folders; no network, no Swift.
 """
 

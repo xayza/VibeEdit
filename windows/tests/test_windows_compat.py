@@ -5,7 +5,7 @@ Linux VM cannot run Windows, so they assert that the production
 code contains no POSIX-only or hardcoded-Windows assumptions, that
 the path/tool/font helpers behave as specified, and that the
 launcher/build/shortcut files exist and reference real files.
-Run from windows/:  python3 -m unittest discover -s tests -v
+Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
 """
 
 import os
