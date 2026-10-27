@@ -365,6 +365,25 @@ class Project:
     def rev(self) -> int:
         return int(self.data.get("rev", 0))
 
+    def set_format(self, width, height) -> dict:
+        """Change the project frame size (validated, saved by caller).
+
+        This changes the frame size for the next export only — it
+        does NOT rescale existing clips, which keep their timeline
+        positions and durations."""
+        try:
+            width = int(width)
+            height = int(height)
+        except (TypeError, ValueError):
+            raise ValueError("Format width and height must be integers")
+        if not 240 <= width <= 3840 or not 240 <= height <= 3840:
+            raise ValueError(
+                "Format width and height must each be between 240 and 3840")
+        self.data["format"]["width"] = width
+        self.data["format"]["height"] = height
+        self._bump()
+        return {"width": width, "height": height}
+
     def track(self, track_id: str) -> dict:
         for track in self.data["tracks"]:
             if track["id"] == track_id:

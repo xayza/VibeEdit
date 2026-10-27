@@ -16,6 +16,8 @@ Stdlib only (http.server). Endpoints:
   POST /api/otio               {} -> writes render/timeline.otio, returns it
   GET  /api/preview             latest export file, if any
   POST /api/media/upload       multipart file -> project media/
+  GET  /api/media/<id>         source media file, Range support (seek)
+  GET  /api/info               environment info (Python, FFmpeg tools)
   GET  /  /static/*            the web UI
 """
 
@@ -196,6 +198,8 @@ class State:
                 result = proj.add_track(op.get("kind", "video"),
                                         op.get("role", ""),
                                         op.get("name", ""))
+            elif kind == "set_format":
+                result = proj.set_format(op.get("width"), op.get("height"))
             elif kind == "set_project":
                 proj.data["name"] = op.get("name", proj.data["name"])
                 fmt = proj.data["format"]
@@ -275,7 +279,29 @@ def make_handler(state: State):
 
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/api/project":
+            if parsed.path == "/api/info":
+                # Real environment info only: a tool that cannot be
+                # found is reported as "not found", never invented.
+                import subprocess
+                info = {"python": sys.version.split()[0],
+                        "project_dir": state.project_dir,
+                        "ffmpeg": "not found", "ffprobe": "not found"}
+                from .render import find_tool
+                for tool in ("ffmpeg", "ffprobe"):
+                    try:
+                        path = find_tool(tool)
+                        out = subprocess.run(
+                            [path, "-version"], capture_output=True,
+                            text=True, encoding="utf-8", errors="replace",
+                            timeout=5)
+                        first = (out.stdout or "").splitlines()
+                        info[tool] = first[0].strip() if first else path
+                    except Exception:  # noqa: BLE001 - "not found" is data
+                        info[tool] = "not found"
+                self._send_json(info)
+            elif parsed.path.startswith("/api/media/"):
+                self._serve_media(parsed.path[len("/api/media/"):])
+            elif parsed.path == "/api/project":
                 with state.lock:
                     self._send_json(self._project_view())
             elif parsed.path == "/api/mcp-tools":
@@ -361,6 +387,76 @@ def make_handler(state: State):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _serve_media(self, raw_id: str):
+            """Serve one project source file, with HTTP Range support
+            so <video> can seek. ONLY files listed in the project
+            media list and inside <project>/media are served: an
+            unknown id is 404, and a stored path that resolves
+            outside the media folder is 404 (never a traversal)."""
+            media_id = urllib.parse.unquote(raw_id)
+            if not media_id or "/" in media_id or "\\" in media_id:
+                self._send_json({"error": "Unknown media"}, 404)
+                return
+            with state.lock:
+                try:
+                    medium = state.project.media(media_id)
+                except KeyError:
+                    self._send_json({"error": "Unknown media"}, 404)
+                    return
+                path = medium["path"]
+                if not os.path.isabs(path):
+                    path = os.path.join(state.project_dir, path)
+            media_dir = os.path.realpath(
+                os.path.join(state.project_dir, "media"))
+            real = os.path.realpath(path)
+            if os.path.commonpath([real, media_dir]) != media_dir:
+                self._send_json({"error": "Unknown media"}, 404)
+                return
+            if not os.path.isfile(real):
+                self._send_json({"error": "Media file missing"}, 404)
+                return
+            size = os.path.getsize(real)
+            mime, _ = mimetypes.guess_type(real)
+            start, end = 0, size - 1
+            status = 200
+            range_header = self.headers.get("Range")
+            if range_header and range_header.startswith("bytes="):
+                try:
+                    spec = range_header[len("bytes="):].strip()
+                    if "," in spec:
+                        raise ValueError("multi-range not supported")
+                    a, _, b = spec.partition("-")
+                    start = int(a) if a else max(0, size - int(b))
+                    end = int(b) if b else size - 1
+                except ValueError:
+                    self._send_json({"error": "Invalid Range"}, 400)
+                    return
+                if start < 0 or end >= size or start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                status = 206
+            length = end - start + 1
+            self.send_response(status)
+            self.send_header("Content-Type",
+                             mime or "application/octet-stream")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(length))
+            if status == 206:
+                self.send_header("Content-Range",
+                                 f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            with open(real, "rb") as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = fh.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
 
         def do_POST(self):
             parsed = urllib.parse.urlparse(self.path)
