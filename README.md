@@ -55,28 +55,49 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, Phase 0 — after code-gap batch 2)
+## Current status (honest, full-parity round 2 — after Phase 2)
 
-- **MCP: 144 of the original 249 tools** (live count from the app's
-  `/api/mcp-tools` endpoint; the number in docs goes stale as tools
-  are added). Every ported tool calls a real Project/export operation.
+- **MCP: 472 tools** (live count from the app's `/api/mcp-tools`
+  endpoint; the number in docs goes stale as tools are added): **334
+  real-operation tools and 138 check-and-error tools** that raise a
+  structured `NOT_AVAILABLE` error with the blocker and the port path,
+  never a fake success. This is NOT a claim of 249/249 original names:
+  original and Windows names differ through renaming, and the Windows
+  build has Windows-specific tools too; the original names still
+  missing are listed honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
-  copy/paste, split, undo/redo, markers, close gaps), source and
-  export preview, audio (volume, fades, ducking, loudnorm, waveform,
-  beat grid), captions (SRT, karaoke, text presets), colour (LUT,
-  adjustment layers, per-parameter sliders, keyframes), speed curves,
-  reverse/freeze, export presets, OTIO export/import, CLI + MCP,
-  example plugins with enable/disable, desktop window.
+  copy/paste, split, undo/redo, markers, close gaps), full magnetic
+  Main block-move + linked audio, source and export preview, audio
+  (volume, fades, ducking, loudnorm, waveform, beat grid), captions
+  (SRT, karaoke, text presets), colour (LUT, adjustment layers,
+  per-parameter sliders, keyframes), speed curves, reverse/freeze,
+  reframe (render-side, API/MCP), export presets, OTIO export/import,
+  review workflow (run/accept/verify + data sub-tools), CLI + MCP,
+  plugins with enable/disable/install, desktop window with clean
+  shutdown, Ctrl shortcuts, magnetic reorder, knowledge store,
+  skills read + write, caption transcription/generation/alignment
+  (where faster-whisper is installed), font import, and 369 tests
+  OK on the Linux VM.
 - **Partial:** Compare view is not frame-locked; ProRes/4K export
-  presets are mapped but not fully rendered; desktop clean shutdown
-  and HiDPI are untested on real Windows; Windows (Ctrl) shortcuts
-  are not standardised yet; tests are not yet clean on Windows.
+  presets are mapped but not fully rendered; plugin install works
+  (folder/zip, gated download, remove, metadata-only update check)
+  but executing manifest plugin code is remaining work; skills
+  read-side works (list/get/search) but the knowledge store and
+  skills write-side are missing; vision/OCR/cutout works only where
+  Tesseract/OpenCV are installed, otherwise it errors clearly;
+  motion transitions render except halftone (errors with its
+  pre-rendered-segment path); desktop/HiDPI/Ctrl shortcuts are
+  verified on Linux only, not yet in a real Windows window/browser.
 - **Still missing — planned to port (see `windows/PARITY.md` for the
-  full table with a port path per item):** vision/OCR/cutout,
-  knowledge/skills store for agents, full magnetic block-move +
-  linked audio, plugin install from URL, ~105 remaining original MCP
-  tool names, motion-only transition kinds, a clean-Windows
-  installer/.exe, and Windows CI.
+  full table with a port path per item):** voice provider
+  (generation/cloning; only a backend check exists), app updater
+  (only a status check exists), a learned segmentation model for
+  cutout, marker shifting on clip moves and close_gaps, web-UI
+  panels for the newer features (knowledge/skills/vision/plugin
+  install/reframe/link/magnetic), a clean-Windows installer/.exe,
+  and Windows CI. `chat.stop`, `view.compare` and `view.safe-area`
+  stay honest-error MCP tools by design (no chat session exists;
+  Compare and Safe-area already exist as web-UI controls).
 - **Verification split, stated plainly:** the user has verified the
   server starting, the UI opening, and media/timeline on real Windows
   (Python 3.12.10, FFmpeg 9.0.2); unit tests and renders have been

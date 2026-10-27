@@ -17,7 +17,43 @@
   Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
   `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
 
-## Phase 0 — bảng parity và an toàn dữ liệu (mới nhất)
+## Vòng rà soát thứ hai — knowledge, skills ghi, reorder, marker, font, caption MCP (mới nhất)
+
+Vòng hai đối chiếu lại toàn bộ source gốc với code Windows sau đợt
+full-parity đầu, sửa các dòng cũ còn sót trong README này (một số mục
+vẫn ghi MCP 144/249 và liệt kê vision/knowledge/magnetic/motion là
+chưa làm dù đã port xong), rồi bổ sung tiếp những gì bổ sung được:
+
+- **Knowledge store (21 công cụ):** lessons/facts/prefs/claims/
+  proposals/memo/history/verdicts/revert/migrate, lưu trong chính
+  project data (đi cùng save/backup/undo của project); nội dung đều
+  do người gọi cung cấp, không bịa lesson/fact nào.
+- **Skills ghi:** save (header provenance "User-written", từ chối ghi
+  đè nếu không có overwrite), enable/disable (state `skills.json`),
+  export (nguyên văn hoặc copy ra dest), remove (cần confirm=true),
+  propose (bản nháp dưới `proposals/`, không liệt kê thành skill
+  đang hoạt động).
+- **Magnetic reorder + marker:** `reorder_main` dời clip Main tới
+  trước một clip khác hoặc xuống cuối, các clip ở giữa dời theo cùng
+  linked audio, không đổi duration; marker nay dời theo khi chèn/xóa/
+  trim cuối magnetic trên Main (marker trong đoạn bị xóa/trim co về
+  đầu đoạn). Chưa dời marker khi move clip và khi close_gaps.
+- **Caption MCP:** transcribe/generate/align thành công cụ MCP thật
+  (dùng faster-whisper khi máy có cài; không có thì báo lỗi rõ, không
+  đổi timing, không bịa phụ đề); `media_transcribe` là alias thật.
+- **Font import + voice/update check:** import .ttf/.otf vào thư mục
+  fonts của app (tên duy nhất, không ghi đè) và font đó trở thành
+  candidate cho renderer; `voice_check` kiểm tra thật (piper binary,
+  edge-tts module, số voiceover take); `app_update_check` trả trạng
+  thái thật (version hiện tại, chưa có kênh updater).
+- **Vẫn giữ trung thực:** `chat.stop`, `view.compare`, `view.safe-area`
+  là công cụ MCP báo lỗi (không có chat session để dừng; Compare và
+  Safe-area đã có sẵn dưới dạng điều khiển trong giao diện web, MCP
+  headless không có viewer để bật/tắt).
+- **Kiểm chứng:** 369 tests OK trên Linux VM (359 trước vòng hai + 10
+  test vòng hai mới).
+
+## Phase 0 — bảng parity và an toàn dữ liệu
 
 Mục tiêu sản phẩm là **chuyển TOÀN BỘ BashCut gốc macOS thành ứng dụng
 Windows mang tên VibeEdit** — không giới hạn ở MVP hay Giai đoạn 1, và
@@ -26,18 +62,23 @@ không chủ động bỏ tính năng nào của bản gốc. Bảng parity đ�
 missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
 chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
 
-Trạng thái hiện tại: **MCP 144/249 công cụ gốc** (số live đọc từ
+Trạng thái hiện tại (sau đợt full-parity vòng 2): **MCP 472 công cụ
+(334 thao tác thật, 138 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
-mới). Đã hoạt động: project/media/timeline/preview/audio/captions/
-effects/export cơ bản, CLI + MCP, plugin mẫu, cửa sổ desktop pywebview.
-Hoạt động một phần: Compare chưa khóa khung hình, export preset ProRes/
-4K mới assert mapping chưa render đầy đủ; desktop tắt sạch, HiDPI,
-phím tắt Ctrl và test chạy trên Windows đã làm xong về code ở
-Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên Windows
-thật. Còn thiếu và sẽ port tiếp (không bỏ):
-vision/OCR/cutout, kho kiến thức/skill cho agent, magnetic đầy đủ +
-linked audio, cài plugin từ URL, ~105 tên công cụ MCP còn lại,
-transition motion-only, bộ cài/.exe cho máy Windows sạch và Windows CI.
+mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
+linked audio + reorder, cài plugin, skills (đọc + ghi), knowledge
+store, vision (khi máy có backend), motion transitions, reframe,
+caption transcribe/generate/align (khi máy có faster-whisper), font
+import. Hoạt động một phần: Compare chưa khóa khung hình, export
+preset ProRes/4K mới assert mapping chưa render đầy đủ; desktop tắt
+sạch, HiDPI, phím tắt Ctrl và test chạy trên Windows đã làm xong về
+code ở Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên
+Windows thật. Còn thiếu và sẽ port tiếp (không bỏ): bộ cài/.exe cho
+máy Windows sạch, Windows CI, voice provider (tạo/clone giọng nói),
+app updater (chỉ mới có update-check dạng trạng thái), model
+segmentation học sâu cho cutout, panel giao diện cho các tính năng
+mới (knowledge/skills/vision/plugin install/reframe/link/magnetic),
+và một số tên gốc lẻ — xem `PARITY.md` để có danh sách thật.
 
 An toàn dữ liệu (Phase 0):
 - Upload trùng tên không còn ghi đè: file thứ hai lưu thành `tên-2.ext`,
@@ -64,6 +105,44 @@ còn nguyên, đối chiếu thay đổi riêng của cây Swift, tạo tag/bả
 trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — chưa làm
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
+
+## Full-parity batch — MCP, magnetic, plugin install, skills, vision, motion (mới nhất)
+
+- **MCP 144 → 472 công cụ** (334 thao tác thật, 138 kiểm tra-và-báo-lỗi
+  trung thực, 0 trùng tên): wrapper cho hầu hết tên gốc còn thiếu
+  (timeline/clip/source/playhead/layer/captions/project/export/plugin/
+  jobs/review/media/audio/doctor/EDL/selects/variants/plan/workflow/
+  checkpoint/batch/library) và công cụ báo lỗi có cấu trúc cho các
+  tên chưa port được (agent/chat/show/ui/voice/image-provider/
+  knowledge/skills-write-side/updater...), không bao giờ trả thành
+  công giả. Đợt này còn sửa 3 công cụ mồ côi của đợt trước (có mô tả
+  kiểu thật nhưng không có handler) và thêm test quét toàn bộ
+  registry để lần sau còn sót là test fail ngay.
+- **Magnetic Main + linked audio đầy đủ:** xóa/chèn/di chuyển/trim
+  trên Main dời các clip sau theo; `link_audio`/`unlink_audio` hai
+  chiều, di chuyển/trim/tách video kéo audio theo, xóa video xóa
+  luôn audio gắn liền. Tắt được bằng magnetic toggle (mặc định bật).
+  Giới hạn: chưa có reorder khối, marker không dời theo ripple.
+- **Cài plugin:** folder hoặc .zip, kiểm tra manifest trước khi copy
+  (từ chối id xấu, traversal, symlink, bundle nhiều thư mục, >50
+  MiB, trùng id), cài xong ở trạng thái tắt, download URL là bước
+  riêng cần xác nhận; plugin manifest nay được liệt kê và bật/tắt
+  được. Còn thiếu: thực thi code của plugin dạng manifest.
+- **Skills + vision:** `windows/skills/` có 4 skill (1 chép nguyên văn
+  từ cây gốc, 3 ghi rõ suy ra từ tài liệu gốc) với endpoint và công
+  cụ MCP list/get/search thật; vision (OCR Tesseract, faces OpenCV
+  Haar, cutout OpenCV grabCut) chạy thật khi máy có backend, nếu
+  không thì báo lỗi rõ tên backend thiếu — không bundle model nào.
+- **Motion transitions + reframe:** 13 loại motion render thật
+  (spin/swing/arc/diamond/crash-out/infinite-out/screen-in/screen-out/
+  dip-black/color-shift/flicker/kaleidoscope-xấp-xỉ); halftone vẫn
+  báo lỗi kèm hướng pre-rendered segment; reframe crop-trước-scale
+  qua API/MCP (chưa có form trong giao diện).
+- **Kiểm chứng:** 359 tests OK trên Linux VM (347 trước đợt này + 12
+  test tích hợp mới); smoke server trên project tạm (magnetic,
+  skills, renderability, cổng download có xác nhận). Chưa kiểm tra
+  trên Windows thật: toàn bộ tính năng mới của đợt này, cửa sổ
+  desktop, phím Ctrl trong trình duyệt thật, suite chạy bằng `py`.
 
 ## Phase 2 — desktop hoàn thiện, phím tắt Windows, test chạy trên Windows
 
@@ -104,8 +183,8 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   720p/900p/1080p, render HiDPI, phím Ctrl trong trình duyệt
   Windows thật, và toàn bộ test chạy bằng `py` trên Windows.
 
-## Code-gap batch 2 (mới nhất)
-Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP hiện tại: 144/249 công cụ gốc. Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope).
+## Code-gap batch 2
+Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP lúc đó: 144 công cụ (đã tăng lên 472 ở các đợt full-parity sau). Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope). Tất cả các mục này đã được bổ sung ở các đợt full-parity sau đó, trừ model segmentation học sâu cho cutout — xem `PARITY.md` để biết trạng thái thật hiện tại.
 
 ## Cửa sổ desktop thật (không phải tab trình duyệt)
 
@@ -145,7 +224,7 @@ Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export prese
   buttons. The input runs real safe commands (list clips, export
   draft, review, stats, workspace, undo/redo); anything else gets an
   honest reply that no LLM is connected in-app, with the real MCP
-  command `python windows\vibeedit.py mcp <project-folder>` (144
+  command `python windows\vibeedit.py mcp <project-folder>` (472
   tools). No fake AI replies, no fake timeline edits, no fake
   voices. There is no terminal emulator in the web UI — use your
   own terminal for the MCP agent.
@@ -576,8 +655,9 @@ built and downloaded from a green Actions run (the workflow
 exists but has not run yet — it can only run on GitHub after
 the user pushes the workflow file, which the GitHub App
 connection cannot write), voice providers, additional
-transcription providers, or the remaining ~105 original MCP
-tools (144 of 249 ported). Still open: a visual UI check in a
+transcription providers, or the remaining original MCP tool
+names (see `PARITY.md` for the honest list; MCP is now 472
+tools: 334 real-operation and 138 check-and-error). Still open: a visual UI check in a
 real browser on Windows. See the Phase 8 list in
 `VibeEdit/docs/windows-port.md` for what is left, all of which
 needs the user's Windows or macOS machine.
@@ -655,8 +735,7 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-144 tools (123 after code-gap batch 1 + 21 new code-gap batch 2 tools: timeline redo, adjustments/beats/track/media queries, speed curves, reverse, freeze, review run/accept/verify, library add/list/place/remove, brand set/get, export presets, plugin list/enable/disable; marker move and ducking get already existed) — see the code-gap batch 2 tests for the newest 23. Every tool calls a real Project or export
-operation; none is a stub.
+472 tools (334 real-operation tools and 138 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split and the remaining original names. Every real tool calls a real Project, export, store or backend operation; none is a stub.
 
 ## Tests
 
