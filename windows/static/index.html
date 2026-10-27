@@ -17,7 +17,7 @@
     <button id="btnRedo">Redo</button>
     <button id="btnExportReport" class="secondary">Export report</button>
     <button id="btnExportDraft" class="secondary">Export draft</button>
-    <button id="btnExportFull" class="primary">Export video</button>
+    <label>Tỉ lệ <select id="formatPreset"><option value="1920x1080">16:9</option><option value="1080x1920">9:16</option><option value="1080x1080">1:1</option><option value="1080x1350">4:5</option><option value="1080x1440">3:4</option><option value="1440x1080">4:3</option><option value="1920x810">21:9</option><option value="custom">Tùy chỉnh…</option></select></label><button id="btnSettings" title="Cài đặt">⚙</button><button id="btnExportFull" class="primary">Export video</button>
   </div>
   <div id="status" class="status"></div>
 </header>
@@ -219,11 +219,12 @@
   <main class="centre-col">
     <div class="player-head"><div class="player-tabs"><button type="button" id="playerTabTimeline" class="player-tab active">Timeline</button><button type="button" id="playerTabSource" class="player-tab">Source</button></div><span class="player-sub">Preview: latest export</span><span class="player-view-controls"><button type="button" id="btnPreviewFit" class="secondary">Fit</button><button type="button" id="btnPreviewCompare" class="secondary">Compare</button><button type="button" id="btnPreviewSafe" class="secondary">Safe area</button></span></div>
 <section class="preview-wrap">
-  <video id="preview" controls preload="metadata"></video>
+  <video id="preview" controls preload="metadata"></video><img id="previewImage" hidden alt="Xem trước ảnh">
   <div id="safeAreaOverlay" class="safe-area" hidden></div>
 <div id="playerSourceNote" class="player-note" hidden>Source view is not available yet — the preview above shows the latest export. Export a draft to update it.</div>
-  <div class="player-controls"><button type="button" id="btnPreviewBack" class="secondary">⏮ Start</button><button type="button" id="btnPreviewPlay" class="secondary">▶ Play / Pause</button></div>
+  <div class="player-controls"><button type="button" id="btnPreviewBack" class="secondary">⏮ Start</button><button type="button" id="btnPreviewPlay" class="secondary">▶ Play / Pause</button><button type="button" id="btnPreviewExport" class="secondary">Xem bản xuất</button></div>
   <div class="preview-meta">
+    <span id="formatLabel">—</span>
     <span id="previewLabel">No export yet — export to preview here.</span>
     <span>Playhead: <b id="playheadLabel">0.00s</b></span>
     <span>Timeline: <b id="durationLabel">0.00s</b></span>
@@ -318,6 +319,24 @@
   <div id="tracks"></div>
   <pre id="timelineText"></pre>
 </section>
+<div class="settings-modal" id="settingsPanel" hidden>
+  <h3>⚙ Cài đặt</h3>
+  <button type="button" id="btnSettingsClose" class="secondary">Đóng</button>
+  <h4>Tỉ lệ khung hình</h4>
+  <p><small>Đổi tỉ lệ chỉ đổi kích thước khung hình cho lần xuất tiếp theo — các clip hiện có KHÔNG bị co giãn hay di chuyển.</small></p>
+  <label>Preset <select id="settingsFormatPreset"><option value="1920x1080">16:9</option><option value="1080x1920">9:16</option><option value="1080x1080">1:1</option><option value="1080x1350">4:5</option><option value="1080x1440">3:4</option><option value="1440x1080">4:3</option><option value="1920x810">21:9</option><option value="custom">Tùy chỉnh…</option></select></label>
+  <label>Chiều rộng tùy chỉnh (px) <input id="settingsFormatWidth" type="number" min="240" max="3840" value="1080"></label>
+  <label>Chiều cao tùy chỉnh (px) <input id="settingsFormatHeight" type="number" min="240" max="3840" value="1920"></label>
+  <button type="button" id="btnFormatCustom" class="primary">Áp dụng kích thước tùy chỉnh</button>
+  <h4>Xem trước</h4>
+  <button type="button" id="btnSettingsFit" class="secondary">Bật / tắt Fit</button>
+  <button type="button" id="btnSettingsSafe" class="secondary">Bật / tắt Safe area</button>
+  <h4>Thông tin project</h4>
+  <div id="settingsProjectInfo">Đang tải…</div>
+  <h4>Môi trường</h4>
+  <div id="settingsEnvInfo">Đang tải…</div>
+  <label><input type="checkbox" id="settingsAgentCollapsed"> Thu gọn panel AGENT (chỉ lưu trong trình duyệt này)</label>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>
