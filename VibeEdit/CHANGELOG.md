@@ -1,3 +1,12 @@
+## VibeEdit Windows port — Original-app layout (after the CapCut shell)
+
+- Top bar: project name, "Edited rev N", Export report + Export video.
+- Left rail + Voice panel: import + place voiceover audio on a Voiceover track is real; voice generation, cloning and recording are honestly labelled not available yet.
+- Centre: Timeline/Source tabs, Fit, Compare (not available yet, labelled), Safe-area guide, playback controls, current/total time.
+- Right: INSPECTOR (Video/Audio/Text/Color/Speed mapped to the real inspector) stacked above an always-visible AGENT dock (real safe commands + honest "no LLM connected in-app" replies + MCP connection guide, 106 tools; no terminal emulator in the web UI).
+- Timeline: toolbar Add/Split/Delete/Add Layer/Sections/Ask agent/zoom, time ruler, red playhead, tracks Captions/Overlay/Main/Adjustment/Background/Dialogue/Voiceover/Music/Sfx, Main clips with filename + duration, Captions word chips, real FFmpeg-decoded waveform strips on audio tracks via /api/waveform, and an honest capabilities panel.
+- 150 tests OK (see windows/tests/test_original_ui.py and test_waveform_timeline.py).
+
 # Changelog
 
 ## VibeEdit Windows port — CapCut-style shell redesign (after Phase 8)

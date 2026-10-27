@@ -1,5 +1,47 @@
 # VibeEdit — Windows (Phase 8, final planned phase)
 
+## Original-app layout (after the CapCut shell)
+
+- **Layout, in the structure of the original BashCut macOS app
+  (inspiration only — no artwork, logos, or code copied):** top bar
+  with project name, "Edited rev N" from real project data, and
+  Export report (opens Review) beside Export video; left rail
+  Media / Audio / Text / Stickers / Effects / Transitions / Filters
+  / Voice; centre Timeline / Source tabs, preview with Fit, Compare
+  (honestly not available yet) and Safe-area (display-only guide)
+  controls, playback controls and current / total time; right
+  column with INSPECTOR tabs Video / Audio / Text / Color / Speed
+  (mapped to the real inspector) stacked above an always-visible
+  AGENT dock; bottom timeline toolbar with Add, Split, Delete, Add
+  Layer, Sections, Ask agent, zoom, time ruler and a red playhead.
+- **Voice panel (new):** provider/voice selectors, Clone voice from
+  a reference file, Generate takes, Record voiceover, and Import a
+  voiceover take. Only import + place on a Voiceover track is real;
+  generation, cloning and recording are labelled not available in
+  the Windows port yet. The Voiceover form creates a Voiceover
+  audio track if none exists (`add_track` op) and adds the clip.
+- **AGENT dock (answers "where is the AI chat"):** always visible
+  on the right, with provider selector, chat history, message input
+  and Workspace / Project context / Survey / Write VO / Review
+  buttons. The input runs real safe commands (list clips, export
+  draft, review, stats, workspace, undo/redo); anything else gets an
+  honest reply that no LLM is connected in-app, with the real MCP
+  command `python windows\vibeedit.py mcp <project-folder>` (106
+  tools). No fake AI replies, no fake timeline edits, no fake
+  voices. There is no terminal emulator in the web UI — use your
+  own terminal for the MCP agent.
+- **Timeline presentation:** tracks in Captions / Overlay / Main /
+  Adjustment / Background / Dialogue / Voiceover / Music / Sfx
+  order (project tracks plus labelled empty rows, never fake
+  tracks); Main clips show filename + duration; Captions show
+  word-level karaoke chips; Dialogue / Voiceover / Music tracks
+  show waveform strips decoded from the real file via
+  `/api/waveform` (FFmpeg RMS peaks, normalised — silence is all
+  zeros, an undecodable file draws no strip instead of a fake
+  shape); a collapsible "What this timeline can do" panel lists
+  what works and what does not yet (in-app LLM generation, voice
+  cloning/recording, VieNeu TTS, silence cutting).
+
 ## CapCut-style shell redesign (after Phase 8)
 
 - **Layout, in the spirit of the user's CapCut desktop reference
