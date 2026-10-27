@@ -539,8 +539,8 @@ TOOLS.extend([
     {"name": "vibeedit_app_update_check", "description": "Report update status: current version and the fact that no updater channel is configured in this build."},
     {"name": "vibeedit_app_update_download", "description": "Download a release asset to a file and verify its SHA-256 when given (never executes it; install manually after quitting VibeEdit)."},
     {"name": "vibeedit_vision_cutout_model", "description": "Cut out the foreground with a user-supplied ONNX segmentation model file (clear error when the model file or ONNX Runtime is absent; never falls back silently to grabCut)."},
-    {"name": "vibeedit_app_update_later", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
-    {"name": "vibeedit_app_update_skip", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
+    {"name": "vibeedit_app_update_later", "description": "Defer an update: record that a version should be offered again only after remind_after (now + remind_in_days, default 7); stored in updater.json next to vibeedit_core, no channel needed."},
+    {"name": "vibeedit_app_update_skip", "description": "Skip an update: record a version in updater.json so it is never offered again; stored next to vibeedit_core, no channel needed."},
     {"name": "vibeedit_voice_clone_add", "description": "Not available in this Windows build: voice cloning needs a cloning provider model and none is available here (generation via Edge/Piper is wired; cloning is not)."},
     {"name": "vibeedit_voice_clone_list", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
     {"name": "vibeedit_voice_clone_remove", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
@@ -556,14 +556,14 @@ TOOLS.extend([
     {"name": "vibeedit_image_style", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
     {"name": "vibeedit_image_disclose", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
     {"name": "vibeedit_image_cutout", "description": "Cut out the foreground of an image with OpenCV grabCut (raises a clear error naming the missing backend when OpenCV is absent)."},
-    {"name": "vibeedit_library_search", "description": "Not available in this Windows build: no library search provider is wired in this build."},
+    {"name": "vibeedit_library_search", "description": "Search the project's saved library items by name, text or media id (local project data only; no provider)."},
     {"name": "vibeedit_library_generate", "description": "Not available in this Windows build: no library generation provider is wired in this build."},
     {"name": "vibeedit_library_brand_pose", "description": "Not available in this Windows build: no brand-pose engine is wired in this build."},
     {"name": "vibeedit_library_export_pack", "description": "Not available in this Windows build: no library pack exporter is wired in this build."},
     {"name": "vibeedit_library_import_pack", "description": "Not available in this Windows build: no library pack importer is wired in this build."},
     {"name": "vibeedit_library_analyze", "description": "Not available in this Windows build: no library analyzer is wired in this build."},
-    {"name": "vibeedit_media_ocr", "description": "Not available in this Windows build: no OCR/vision provider is wired in this build; vision is another agent's job."},
-    {"name": "vibeedit_media_subjects", "description": "Not available in this Windows build: no vision provider is wired in this build; vision is another agent's job."},
+    {"name": "vibeedit_media_ocr", "description": "Recognise text in a project media entry or image file with Tesseract (alias of vision_text; clear error when Tesseract is absent)."},
+    {"name": "vibeedit_media_subjects", "description": "Detect faces in a project media entry or image file with OpenCV Haar cascades (alias of vision_faces; clear error when OpenCV is absent)."},
     {"name": "vibeedit_media_describe", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
     {"name": "vibeedit_media_description", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
     {"name": "vibeedit_media_digest", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
@@ -571,9 +571,9 @@ TOOLS.extend([
     {"name": "vibeedit_media_sync", "description": "Not available in this Windows build: no audio-sync provider is wired in this build."},
     {"name": "vibeedit_media_speech_map", "description": "Not available in this Windows build: no speech-mapping provider is wired in this build."},
     {"name": "vibeedit_media_strip", "description": "Not available in this Windows build: no media-strip provider is wired in this build."},
-    {"name": "vibeedit_media_proxy", "description": "Not available in this Windows build: no proxy-generation workflow is wired in this build."},
-    {"name": "vibeedit_media_analysis", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
-    {"name": "vibeedit_media_analyze", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
+    {"name": "vibeedit_media_proxy", "description": "Generate a low-resolution proxy file for a project video entry with FFmpeg (H.264, scaled to the given width, default 540px; the proxy is a derived file, not a new timeline media entry)."},
+    {"name": "vibeedit_media_analysis", "description": "Media analysis for a project media entry: stored metadata enriched with a live ffprobe probe (streams, duration, resolution) when the file exists."},
+    {"name": "vibeedit_media_analyze", "description": "Media analysis for a project media entry: stored metadata enriched with a live ffprobe probe (streams, duration, resolution) when the file exists."},
     {"name": "vibeedit_knowledge_add_lesson", "description": "Add a caller-supplied lesson to the project knowledge store (starts proposed)."},
     {"name": "vibeedit_knowledge_approve", "description": "Approve a lesson or proposal (args: lesson= or proposal=)."},
     {"name": "vibeedit_knowledge_claims", "description": "List claims in the project knowledge store."},
@@ -605,7 +605,7 @@ TOOLS.extend([
     {"name": "vibeedit_skills_save", "description": "Write a caller-supplied skill file (user-written provenance header; refuses overwrite unless overwrite=true)."},
     {"name": "vibeedit_plugins_install", "description": "Install a plugin from a local folder or .zip bundle (manifest validated before copying; URL sources must be downloaded first with plugins_download)."},
     {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (no network; unknown unless the installed manifest carries update metadata)."},
-    {"name": "vibeedit_plugins_search", "description": "Not available in this Windows build: plugin search is not supported in this build; only the local plugins folder is scanned."},
+    {"name": "vibeedit_plugins_search", "description": "Search locally discovered plugins by name, description or hook (local plugins folder only; no registry)."},
     {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: plugin setup is not supported in this build."},
     {"name": "vibeedit_plugins_set", "description": "Not available in this Windows build: plugin setting is not supported in this build; use plugin_enable/plugin_disable for enable state."},
     {"name": "vibeedit_plugins_set_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
@@ -615,8 +615,8 @@ TOOLS.extend([
     {"name": "vibeedit_plugins_proposal", "description": "Not available in this Windows build: no plugin proposal workflow exists in this build."},
     {"name": "vibeedit_plugins_replace", "description": "Not available in this Windows build: plugin replacement is not supported in this build."},
     {"name": "vibeedit_plugins_remove", "description": "Remove an installed plugin folder (refuses while the plugin is enabled; disable first)."},
-    {"name": "vibeedit_plugins_run", "description": "Not available in this Windows build: running arbitrary plugin code is not supported through this tool; use the documented plugin hooks via the web server."},
-    {"name": "vibeedit_plugins_invoke", "description": "Not available in this Windows build: invoking arbitrary plugin code is not supported through this tool."},
+    {"name": "vibeedit_plugins_run", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
+    {"name": "vibeedit_plugins_invoke", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
     {"name": "vibeedit_plugins_actions", "description": "Not available in this Windows build: no plugin action host exists in this headless server."},
     {"name": "vibeedit_plugins_option", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
     {"name": "vibeedit_plugins_options", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
@@ -647,7 +647,7 @@ TOOLS.extend([
     {"name": "vibeedit_context_get", "description": "Not available in this Windows build: no live editor context exists in this headless server; use project_get, timeline_get and the playhead_* tools."},
     {"name": "vibeedit_source_toggle_playback", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
     {"name": "vibeedit_timeline_header_compact", "description": "Not available in this Windows build: no timeline header UI exists in this headless server."},
-    {"name": "vibeedit_vision_cutout", "description": "Not available in this Windows build: no vision cutout provider/model is wired in this build; vision is another agent's job."},
+    {"name": "vibeedit_vision_cutout", "description": "Cut out the foreground of an image with OpenCV grabCut (raises a clear error naming the missing backend when OpenCV is absent)."},
     {"name": "vibeedit_vision_faces", "description": "Detect faces in an image with OpenCV Haar cascades (raises a clear error naming the missing backend when OpenCV is absent)."},
     {"name": "vibeedit_vision_text", "description": "Recognise text in an image with Tesseract (raises a clear error naming the missing backend when Tesseract is absent)."},
     {"name": "vibeedit_clip_link_audio", "description": "Link a Dialogue audio clip to a video clip so linked edits move together."},
@@ -846,11 +846,14 @@ class MCPServer:
             from .plugins import list_plugins
             available = [p["name"] for p in list_plugins()
                          if p["name"] != "_errors"]
-            raise self._na(name, "plugin install/update/search/view "
-                           "is not supported in this build; the local "
-                           f"plugin system holds: {available or 'none'}. "
-                           "Plugin install/update is another agent's job; "
-                           "no untrusted code is copied or executed")
+            raise self._na(name, "plugin setup/view/overlay/proposal/"
+                           "replacement workflows are not supported in "
+                           "this build; the local plugin system holds: "
+                           f"{available or 'none'}. "
+                           "Plugin install, search and hook execution "
+                           "are real (plugins_install/plugins_search/"
+                           "plugins_run); no untrusted code is copied "
+                           "or executed outside those paths")
         if name.startswith("vibeedit_voice_") or name in (
                 "vibeedit_acme_voice_fast", "vibeedit_speech_rate"):
             found = importlib.util.find_spec("vibeedit_core.voice")
@@ -858,10 +861,11 @@ class MCPServer:
                            "wired in this build (generation via Edge/Piper "
                            "is wired separately); nothing is cloned")
         if name.startswith("vibeedit_agent_kit"):
-            found = importlib.util.find_spec("vibeedit_core.skills")
-            raise self._na(name, "agent-kit install/update is tied to "
-                           f"the skills store, which is absent "
-                           f"(found: {found is not None})")
+            raise self._na(name, "agent-kit install/update is a "
+                           "separate original workflow with no "
+                           "equivalent in this build; the skills store "
+                           "(vibeedit_core.skills) exists separately "
+                           "and is covered by the real skills_* tools")
         # Every other honest tool: its description (in TOOLS) already
         # states the exact blocker; the raised error repeats it.
         desc = next((t["description"] for t in TOOLS
@@ -891,6 +895,10 @@ class MCPServer:
         "vibeedit_transcript_words": "vibeedit_captions_words",
         "vibeedit_library_save_selection": "vibeedit_library_add",
         "vibeedit_voice_speak": "vibeedit_voice_synthesize",
+        # Round 5 aliases: original dotted names for vision tools
+        # that already exist under their vision_* names.
+        "vibeedit_media_ocr": "vibeedit_vision_text",
+        "vibeedit_media_subjects": "vibeedit_vision_faces",
     }
 
     def call(self, name: str, args: dict) -> dict:
@@ -989,6 +997,21 @@ class MCPServer:
             return result
         if name == "vibeedit_library_list":
             return {"items": self._require().library_list()}
+        if name == "vibeedit_library_search":
+            proj = self._require()
+            query = str(args.get("query", "") or "").strip().lower()
+            items = proj.library_list()
+            if query:
+                def _matches(entry):
+                    inner = entry.get("item", {}) or {}
+                    hay = " ".join(str(v) for v in (
+                        entry.get("id", ""), entry.get("name", ""),
+                        inner.get("id", ""), inner.get("text", ""),
+                        inner.get("media", ""))).lower()
+                    return query in hay
+                items = [e for e in items if _matches(e)]
+            return {"query": args.get("query", ""), "items": items,
+                    "count": len(items)}
         if name == "vibeedit_library_place":
             proj = self._require()
             result = proj.library_place(
@@ -1228,6 +1251,25 @@ class MCPServer:
             from .export_ops import media_metadata
             proj = self._require()
             return media_metadata(proj.data, proj.folder, args["media"])
+        if name in ("vibeedit_media_analysis", "vibeedit_media_analyze"):
+            # Round 5: ffprobe-based analysis is the analysis the
+            # build can actually do — same data as media_metadata.
+            from .export_ops import media_metadata
+            if not args.get("media"):
+                raise ValueError("media_analysis needs media")
+            proj = self._require()
+            return media_metadata(proj.data, proj.folder, args["media"])
+        if name == "vibeedit_media_proxy":
+            from .render import generate_proxy
+            if not args.get("media"):
+                raise ValueError("media_proxy needs media")
+            proj = self._require()
+            medium = proj.media(args["media"])
+            src = self._media_abs(proj, medium)
+            import os as _os
+            out = args.get("out") or _os.path.join(
+                proj.folder, "render", medium["id"] + "_proxy.mp4")
+            return generate_proxy(src, out, args.get("width", 540))
         if name == "vibeedit_project_duplicate":
             from .export_ops import duplicate_project
             import os
@@ -2430,6 +2472,37 @@ class MCPServer:
         if name in ("vibeedit_plugins_list", "vibeedit_plugins_reload"):
             from .plugins import list_plugins
             return {"plugins": list_plugins()}
+        if name == "vibeedit_plugins_search":
+            from .plugins import list_plugins
+            query = str(args.get("query", "") or "").strip().lower()
+            plugins = [p for p in list_plugins(args.get("plugins_dir"))
+                       if p["name"] != "_errors"]
+            if query:
+                plugins = [p for p in plugins
+                           if query in p["name"].lower()
+                           or query in p.get("description", "").lower()
+                           or any(query in h.lower()
+                                  for h in p.get("hooks", []))]
+            return {"query": args.get("query", ""), "plugins": plugins,
+                    "count": len(plugins)}
+        if name in ("vibeedit_plugins_run", "vibeedit_plugins_invoke"):
+            # Round 5: run one DECLARED hook of an ENABLED plugin
+            # via the round-4 apply_plugin path (disabled plugins
+            # are refused there; undeclared hooks are refused
+            # there). This is not arbitrary code execution beyond
+            # that documented path.
+            from .plugins import apply_plugin
+            plugin = args.get("plugin") or args.get("plugin_id")
+            hook = args.get("hook")
+            item = args.get("item") or args.get("item_id")
+            if not plugin or not hook or not item:
+                raise ValueError(
+                    "plugins_run needs plugin, hook and item")
+            proj = self._require()
+            result = apply_plugin(proj, plugin, hook, item,
+                                  plugins_dir=args.get("plugins_dir"))
+            self._save()
+            return {"plugin": plugin, "hook": hook, "item": result}
         if name == "vibeedit_plugins_validate":
             from .plugins import load_plugins, load_plugin_state
             plugins = load_plugins()
@@ -3294,6 +3367,19 @@ class MCPServer:
             return prepare_update(args["url"], args["dest"],
                                   args.get("sha256"),
                                   args.get("app_pid"))
+        if name == "vibeedit_app_update_later":
+            from .updater import defer_update
+            version = args.get("version") or args.get("latest_version")
+            if not version:
+                raise ValueError("app_update_later needs version")
+            return defer_update(version,
+                                args.get("remind_in_days", 7))
+        if name == "vibeedit_app_update_skip":
+            from .updater import skip_update
+            version = args.get("version") or args.get("latest_version")
+            if not version:
+                raise ValueError("app_update_skip needs version")
+            return skip_update(version)
         if name in ("vibeedit_captions_transcribe",
                     "vibeedit_media_transcribe"):
             from .transcribe import transcribe_media

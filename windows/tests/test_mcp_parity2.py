@@ -441,24 +441,22 @@ HONEST_SAMPLE = [
     "vibeedit_playback_toggle", "vibeedit_playback_stop",
     "vibeedit_playback_shuttle_forward", "vibeedit_playback_shuttle_back",
     "vibeedit_view_fullscreen", "vibeedit_view_inspector_pane", "vibeedit_view_library_pane",
-    "vibeedit_app_update", "vibeedit_app_update_later",
-    "vibeedit_app_update_skip",
-    "vibeedit_voice_clone_add", "vibeedit_voice_clone_list", "vibeedit_voice_clone_remove",
+    "vibeedit_app_update",         "vibeedit_voice_clone_add", "vibeedit_voice_clone_list", "vibeedit_voice_clone_remove",
     # Round 3: generation (synthesize/speak/lines/use/fit/place) is
     # real now, so those names left this honest-error sample; only
     # cloning (no provider model) stays honest.
     "vibeedit_image_generate", "vibeedit_image_generate_list", "vibeedit_image_style",
     "vibeedit_image_disclose",
-    "vibeedit_library_search", "vibeedit_library_generate", "vibeedit_library_brand_pose",
+    "vibeedit_library_generate",  # Round 5: library_search left (now real)
+    "vibeedit_library_brand_pose",
     "vibeedit_library_export_pack", "vibeedit_library_import_pack", "vibeedit_library_analyze",
-    "vibeedit_media_ocr", "vibeedit_media_subjects", "vibeedit_media_describe",
-    "vibeedit_media_description", "vibeedit_media_digest", "vibeedit_media_cuts",
+    "vibeedit_media_describe",  # Round 5: ocr/subjects/proxy/analysis left (now real)
+        "vibeedit_media_description", "vibeedit_media_digest", "vibeedit_media_cuts",
     "vibeedit_media_sync", "vibeedit_media_speech_map", "vibeedit_media_strip",
-    "vibeedit_media_proxy", "vibeedit_media_analysis", "vibeedit_media_analyze",
-    "vibeedit_plugins_search",
-    "vibeedit_plugins_setup", "vibeedit_plugins_set", "vibeedit_plugins_set_overlays",
+            "vibeedit_plugins_setup",  # Round 5: search/run/invoke left (now real)
+    "vibeedit_plugins_set", "vibeedit_plugins_set_overlays",
     "vibeedit_plugins_overlays", "vibeedit_plugins_view", "vibeedit_plugins_view_event",
-    "vibeedit_plugins_proposal", "vibeedit_plugins_replace",     "vibeedit_plugins_run", "vibeedit_plugins_invoke", "vibeedit_plugins_actions",
+    "vibeedit_plugins_proposal", "vibeedit_plugins_replace",     "vibeedit_plugins_actions",
     "vibeedit_plugins_option", "vibeedit_plugins_options", "vibeedit_plugins_show_view",
     "vibeedit_clip_motion", "vibeedit_clip_backdrop", "vibeedit_clip_change_framing",
     "vibeedit_clip_send_to_agent",
@@ -507,7 +505,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real
+        self.assertEqual(len(honest), 120)  # Round 5: 132 -> 120, 12 tools became real
 
 
 if __name__ == "__main__":

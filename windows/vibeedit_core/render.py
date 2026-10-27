@@ -705,6 +705,43 @@ def render_halftone_segment(a_path: str, b_path: str, out_path: str,
             "height": height, "duration": float(duration_s)}
 
 
+def generate_proxy(src: str, out_path: str, width: int = 540) -> dict:
+    """Transcode ``src`` to a low-resolution proxy file (round 5).
+
+    H.264 / yuv420p video scaled to ``width`` (default 540px,
+    aspect preserved, height auto and even) plus AAC audio, veryfast
+    preset. The proxy is a derived file for fast preview/editing —
+    it is NOT registered as a new timeline media entry. Raises
+    ValueError when the source has no video stream (an audio-only
+    file needs no video proxy) and propagates FFmpeg failures.
+    """
+    info = probe_media(src)
+    if not info.get("width"):
+        raise ValueError(
+            "generate_proxy needs a video source; %s has no video "
+            "stream" % (src,))
+    try:
+        width = int(width)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("proxy width must be an integer") from exc
+    if width < 2:
+        raise ValueError("proxy width must be >= 2")
+    if width % 2:
+        width -= 1
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)),
+                exist_ok=True)
+    cmd = [find_tool("ffmpeg"), "-y", "-v", "error",
+           "-i", src, "-vf", "scale=%d:-2" % (width,),
+           "-c:v", "libx264", "-preset", "veryfast",
+           "-pix_fmt", "yuv420p", "-c:a", "aac",
+           "-movflags", "+faststart", out_path]
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    out_info = probe_media(out_path)
+    return {"path": out_path, "width": out_info.get("width"),
+            "height": out_info.get("height"),
+            "duration": out_info.get("duration"), "source": src}
+
+
 def export_preset_info(name: str, project_width: int,
                        project_height: int) -> dict:
     """Resolve an export preset name to concrete parameters. Aliases

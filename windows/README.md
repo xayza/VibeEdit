@@ -50,8 +50,9 @@ chưa làm dù đã port xong), rồi bổ sung tiếp những gì bổ sung đ�
   là công cụ MCP báo lỗi (không có chat session để dừng; Compare và
   Safe-area đã có sẵn dưới dạng điều khiển trong giao diện web, MCP
   headless không có viewer để bật/tắt).
-- **Kiểm chứng:** 404 tests OK trên Linux VM (384 trước vòng bốn + 20
-  test vòng bốn mới: 11 ghi âm/plugin/Compare, 3 halftone, 6 updater).
+- **Kiểm chứng:** 454 tests OK trên Linux VM (404 trước vòng năm + 50
+  test vòng năm mới: 14 công cụ MCP, 20 desktop, 14 nút chết giao
+  diện, 2 đường dẫn skills khi đóng băng).
 
 ## Phase 0 — bảng parity và an toàn dữ liệu
 
@@ -62,14 +63,17 @@ không chủ động bỏ tính năng nào của bản gốc. Bảng parity đ�
 missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
 chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
 
-Trạng thái hiện tại (sau đợt full-parity vòng 4): **MCP 479 công cụ
-(347 thao tác thật, 132 kiểm tra-và-báo-lỗi)** — số live đọc từ
+Trạng thái hiện tại (sau đợt full-parity vòng 5): **MCP 479 công cụ
+(359 thao tác thật, 120 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
 linked audio + reorder, cài plugin, skills (đọc + ghi), knowledge
 store, vision (khi máy có backend), motion transitions, reframe,
 caption transcribe/generate/align (khi máy có faster-whisper), font
-import. Hoạt động một phần: Compare chưa khóa khung hình, export
+import, hoãn/bỏ qua cập nhật, tìm library/plugin, chạy plugin qua hook
+đã khai báo, phân tích media bằng ffprobe, proxy media, desktop
+single-instance + fallback trình duyệt khi thiếu pywebview/WebView2.
+Hoạt động một phần: Compare chưa khóa khung hình, export
 preset ProRes/4K mới assert mapping chưa render đầy đủ; desktop tắt
 sạch, HiDPI, phím tắt Ctrl và test chạy trên Windows đã làm xong về
 code ở Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên
@@ -106,7 +110,66 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
-## Full-parity vòng 4 — ghi âm voiceover, Compare wipe, plugin manifest, halftone, updater handoff (mới nhất)
+## Full-parity vòng 5 — rà soát 132 công cụ honest, nút chết giao diện, desktop, bộ cài (mới nhất)
+
+- **Rà soát toàn bộ 132 công cụ kiểm tra-và-báo-lỗi:** quét thực nghiệm
+  cho thấy chỉ `vision_cutout` là sai mô tả (handler đã thật từ trước,
+  chỉ sửa mô tả); 12 công cụ chuyển thành thật, honest còn **120**,
+  thật lên **359**, tổng giữ **479**: `app_update_later`/`skip` (ghi
+  lựa chọn hoãn/bỏ qua version vào `updater.json`, hoạt động cả khi
+  chưa cấu hình kênh; `later` lưu `remind_after` = nay + số ngày, mặc
+  định 7; ghi file kiểu temp+replace, không ghi đè `releases_url`),
+  `library_search`, `plugins_search`/`run`/`invoke` (chạy đúng hook đã
+  khai báo của plugin đang bật qua `apply_plugin`, plugin tắt bị từ
+  chối), `media_ocr`/`media_subjects` (alias của `vision_text`/
+  `vision_faces` đã thật), `media_analysis`/`analyze` (metadata +
+  ffprobe trực tiếp), `media_proxy` (transcode proxy H.264, file dẫn
+  xuất, không đăng ký thành media timeline). 120 còn lại chia 3 nhóm
+  ghi rõ trong `PARITY.md` mục 8: kiểm tra theo thiết kế (headless),
+  cần provider/model không tồn tại, cần state/workflow chưa có.
+- **Quét nút chết giao diện:** toàn bộ ~130 nút trong `index.html` +
+  `app.js` đối chiếu với route thật trong `server.py` — không phát
+  hiện endpoint giả nào. Sửa 4 điểm: nút Plugins trên topbar nay cuộn
+  tới panel Plugins thật ở cột Details (thông điệp cũ "chưa có panel"
+  là sai); tab Source của player nay giữ preview và hiện file nguồn
+  đã chọn (trước đây ẩn cả khung preview nên ghi chú không bao giờ
+  hiện); panel Captions nay có nút mở trong panel Text (trước đây
+  không có nút nào mở được nó); nút Write VO đổi nhãn trung thực
+  "Write VO — chưa có (cần AI viết kịch bản)" thay vì bấm chỉ để báo
+  không có. Test quét khẳng định 0 nút bấm-không-làm-gì (trừ nút đã
+  ghi rõ là chưa có kèm lý do).
+- **Desktop:** chạy lần 2 trên cùng cổng tự mở trình duyệt tới
+  instance đang chạy và thoát (probe HTTP bằng stdlib, không lock
+  file); thiếu pywebview hoặc WebView2 lỗi thì rơi về trình duyệt kèm
+  thông điệp tiếng Việt không dấu thay vì traceback; cổng ngoài
+  1–65535 bị từ chối trước khi bind; launcher desktop ưu tiên
+  `.venv\Scripts\python.exe` khi có.
+- **Bộ cài:** `vibeedit.spec` nay đóng gói cả data `skills/` (trước
+  đây thiếu — app đóng băng sẽ liệt kê 0 skill) và liệt kê rõ 16
+  hidden import `vibeedit_core.*`; `build_windows.bat` sửa dòng echo
+  chứa dấu ngoặc trong block ngoặc, thêm kiểm tra file exe sau build
+  và xử lý lỗi pip/venv; `skills.py` nay có nhánh `_MEIPASS` như
+  `plugins.py`. **Giấy phép bundle FFmpeg (kiểm chứng từ
+  ffmpeg.org/legal.html + LICENSE + gyan.dev, không phải tư vấn pháp
+  lý):** build CI tải là build tĩnh GPLv3 của gyan.dev, không phải
+  LGPL — khi phân phối phải kèm text GPLv3 + nguồn tương ứng cho đúng
+  build đó + ghi nhận; workflow hiện chưa kèm các file này nên phải
+  bổ sung thành bước packaging trước khi phân phối công khai.
+- **Đối chiếu lại + tài liệu:** test vòng ba chạy lại vẫn đủ 249 tên
+  gốc; `PARITY.md` cập nhật trạng thái vòng năm (kể cả bảng phân loại
+  120 honest và kết luận giấy phép FFmpeg đầy đủ); chưa hợp nhất,
+  không động cây Swift.
+- **Vẫn còn thật (không bịa):** clone giọng (cần model provider
+  clone), thực thi model segmentation học sâu cho cutout (cần model
+  ONNX + runtime do người dùng cung cấp), fetch cập nhật plugin từ
+  registry (không có registry nào tồn tại), bộ cài/.exe + CI Windows
+  (workflow vẫn phải do người dùng đẩy bằng git thật/web UI vì
+  GitHub App bị chặn 403; .exe chưa build, CI chưa chạy; file
+  licence/source offer cho FFmpeg bundle chưa có trong artifact),
+  tự thay app đang chạy (chỉ có handoff + hoãn/bỏ qua), và mọi kiểm
+  chứng trên Windows thật.
+
+## Full-parity vòng 4 — ghi âm voiceover, Compare wipe, plugin manifest, halftone, updater handoff
 
 - **Ghi âm voiceover trong app:** panel Voice ghi âm bằng
   MediaRecorder/getUserMedia của trình duyệt (quyền micro do trình
@@ -707,7 +770,7 @@ the user pushes the workflow file, which the GitHub App
 connection cannot write), voice providers, additional
 transcription providers, or the remaining original MCP tool
 names (see `PARITY.md` for the honest list; MCP is now 479
-tools: 347 real-operation and 132 check-and-error). Still open: a visual UI check in a
+tools: 359 real-operation and 120 check-and-error). Still open: a visual UI check in a
 real browser on Windows. See the Phase 8 list in
 `VibeEdit/docs/windows-port.md` for what is left, all of which
 needs the user's Windows or macOS machine.
@@ -814,6 +877,10 @@ bên sửa cùng file gây conflict.
 ### Giới hạn còn lại trên máy Windows sạch (đọc trước khi dùng)
 
 - Chưa có `.exe`/installer: phải cài Python + FFmpeg tay như trên.
+  Lưu ý giấy phép: nếu sau này phân phối kèm binary FFmpeg từ build
+  tĩnh của gyan.dev thì đó là GPLv3, phải kèm text GPLv3 + nguồn
+  tương ứng cho đúng build đó + ghi nhận (xem `PARITY.md` mục 10) —
+  không gọi artifact đó là "FFmpeg LGPL".
 - Chưa từng chạy toàn bộ test suite bằng `py` trên Windows thật;
   chưa kiểm chứng cửa sổ desktop/pywebview, HiDPI, phím tắt Ctrl,
   micro ghi âm, giọng Edge/Piper thật, OCR/cutout thật và footage
@@ -889,7 +956,7 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-479 tools (347 real-operation tools and 132 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 4 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub.
+479 tools (359 real-operation tools and 120 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 6 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub.
 
 ## Tests
 

@@ -22,10 +22,20 @@ installer itself, and with no channel configured the behaviour
 stays status-only. The ``app.update`` MCP tool therefore stays a
 check-and-error tool for replacing the running app, while
 ``app_update_prepare`` (download + verify + handoff) is real.
+
+Round 5 adds defer/skip state: ``app_update_later`` and
+``app_update_skip`` are real even with no channel configured —
+they record the user's choice in the same ``updater.json`` file
+that holds the channel (never clobbering ``releases_url``):
+``skipped_versions`` is a list of versions never to offer again,
+and ``deferred`` records one version plus the UTC time after
+which it may be offered again (``remind_after``). ``update_status``
+reports both, so ``app_update_check`` shows them.
 """
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -38,18 +48,41 @@ class UpdaterUnavailable(Exception):
     """No updater channel is configured, or the channel failed."""
 
 
-def _channel_from_file() -> str | None:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+def _state_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "updater.json")
+
+
+def _read_state() -> dict:
+    """Whole updater.json as a dict; missing/corrupt files read as
+    {} so a broken state file never blocks a defer/skip choice
+    (the write below then replaces it with valid state)."""
+    path = _state_path()
     if not os.path.isfile(path):
-        return None
+        return {}
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
-        return None
-    url = data.get("releases_url") if isinstance(data, dict) else None
-    return url or None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_state(data: dict) -> dict:
+    """Write updater.json atomically (temp file + replace) so a
+    crash mid-write cannot leave a half-written state file."""
+    path = _state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, path)
+    return data
+
+
+def _channel_from_file() -> str | None:
+    return _read_state().get("releases_url") or None
 
 
 def get_channel() -> str | None:
@@ -57,22 +90,80 @@ def get_channel() -> str | None:
     return os.environ.get("VIBEEDIT_RELEASES_URL") or _channel_from_file()
 
 
+def defer_update(version: str, remind_in_days: int = 7) -> dict:
+    """Record "remind me later" for ``version`` (round 5, real
+    even with no channel configured).
+
+    Stores ``deferred`` = {"version", "deferred_at",
+    "remind_after"} (UTC ISO timestamps, remind_after = now +
+    remind_in_days) in updater.json, preserving any existing
+    keys (notably ``releases_url`` and ``skipped_versions``).
+    ``remind_in_days`` must be >= 0. Returns the stored record.
+    """
+    version = str(version or "").strip()
+    if not version:
+        raise ValueError("defer_update needs a version")
+    try:
+        days = int(remind_in_days)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("remind_in_days must be an integer") from exc
+    if days < 0:
+        raise ValueError("remind_in_days must be >= 0")
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    record = {"version": version,
+              "deferred_at": now.isoformat().replace("+00:00", "Z"),
+              "remind_after": (now + datetime.timedelta(days=days)
+                               ).isoformat().replace("+00:00", "Z")}
+    state = _read_state()
+    state["deferred"] = record
+    _write_state(state)
+    return {"deferred": record, "status": "deferred"}
+
+
+def skip_update(version: str) -> dict:
+    """Record "never offer this version again" (round 5, real
+    even with no channel configured).
+
+    Appends ``version`` to ``skipped_versions`` in updater.json
+    (deduplicated), preserving every other key. Returns the
+    skipped version plus the full skipped list.
+    """
+    version = str(version or "").strip()
+    if not version:
+        raise ValueError("skip_update needs a version")
+    state = _read_state()
+    skipped = [v for v in state.get("skipped_versions", [])
+               if isinstance(v, str)]
+    if version not in skipped:
+        skipped.append(version)
+    state["skipped_versions"] = skipped
+    _write_state(state)
+    return {"skipped": version, "skipped_versions": skipped,
+            "status": "skipped"}
+
+
 def update_status() -> dict:
     """Current version + channel status. Never touches the network
-    when no channel is configured."""
+    when no channel is configured. Round 5: also reports the
+    defer/skip state so app_update_check shows it."""
     channel = get_channel()
+    state = _read_state()
+    base = {"current_version": CURRENT_VERSION,
+            "update_channel": channel,
+            "deferred": state.get("deferred"),
+            "skipped_versions": [v for v in
+                                 state.get("skipped_versions", [])
+                                 if isinstance(v, str)]}
     if not channel:
-        return {"current_version": CURRENT_VERSION,
-                "update_channel": None,
-                "status": "no updater configured in this build; "
+        base["status"] = ("no updater configured in this build; "
                           "set VIBEEDIT_RELEASES_URL to a real "
                           "VibeEdit releases API URL, or write "
                           "updater.json next to vibeedit_core, to "
-                          "enable update checks"}
-    return {"current_version": CURRENT_VERSION,
-            "update_channel": channel,
-            "status": "updater channel configured; call "
-                      "app_update_check with check=true to query it"}
+                          "enable update checks")
+        return base
+    base["status"] = ("updater channel configured; call "
+                      "app_update_check with check=true to query it")
+    return base
 
 
 def check_latest(channel: str | None = None) -> dict:

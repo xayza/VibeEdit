@@ -139,6 +139,7 @@
       <label>Duration (frames) <input id="addTextDur" type="number" value="90" min="1"></label>
       <button type="submit" class="primary">Add text</button>
     </form>
+    <button type="button" class="secondary" data-tab="captions">Captions (SRT / karaoke / phiên âm)</button>
 </section>
 <section class="panel tool-panel" data-panel="stickers" hidden>
 <h3>Stickers</h3>
@@ -279,7 +280,7 @@
   <video id="preview" controls preload="metadata"></video><img id="previewImage" hidden alt="Xem trước ảnh">
   <div id="compareWrap" hidden><div id="compareWipe" class="compare-wipe"><span class="compare-label compare-label-before">Before (nguồn)</span><video id="previewCompareSource" preload="metadata"></video><div class="compare-after"><video id="previewCompareExport" controls preload="metadata"></video><span class="compare-label compare-label-after">After (bản xuất)</span></div><div id="compareDivider" class="compare-divider" title="Kéo để so sánh"></div></div><div class="compare-controls"><label>Wipe <input id="compareRange" type="range" min="0" max="100" value="50"></label><span id="compareSyncNote" class="compare-note"></span></div></div>
   <div id="safeAreaOverlay" class="safe-area" hidden></div>
-<div id="playerSourceNote" class="player-note" hidden>Source view is not available yet — the preview above shows the latest export. Export a draft to update it.</div>
+<div id="playerSourceNote" class="player-note" hidden>Source view: chọn một file nguồn ở ô Nguồn bên dưới để xem file gốc (video/ảnh) thay cho bản xuất.</div>
   <div class="player-controls"><button type="button" id="btnPreviewBack" class="secondary">⏮ Start</button><button type="button" id="btnPreviewPlay" class="secondary">▶ Play / Pause</button><button type="button" id="btnPreviewExport" class="secondary">Xem bản xuất</button><button type="button" id="btnPreviewCompareMode" class="secondary">So sánh: nguồn / bản xuất</button></div>
   <div class="source-range"><label>Nguồn <select id="sourceMedia"></select></label><label>In (frames) <input id="sourceIn" type="number" min="0" value="0"></label><label>Out (frames) <input id="sourceOut" type="number" min="0" value="0"></label><button type="button" id="btnSourceMarkIn" class="secondary">Đánh dấu In (I)</button><button type="button" id="btnSourceMarkOut" class="secondary">Đánh dấu Out (O)</button><button type="button" id="btnSourceInsert" class="primary">Chèn (E)</button><button type="button" id="btnSourceOverwrite" class="secondary">Ghi đè (Q)</button><span id="sourceRangeStatus"></span></div>
   <div class="preview-meta">
@@ -361,7 +362,7 @@
       <button type="button" id="btnAgentWorkspace" class="secondary">Workspace…</button>
       <button type="button" id="btnAgentContext" class="secondary">Project context</button>
       <button type="button" id="btnAgentSurvey" class="secondary">Survey</button>
-      <button type="button" id="btnAgentWriteVO" class="secondary">Write VO</button>
+      <button type="button" id="btnAgentWriteVO" class="secondary" title="Chưa có — cần AI viết kịch bản trong app (không có LLM nối trong app); dùng Voice panel để import voiceover hoặc agent MCP để soạn lời" data-unavailable="Chưa có — cần AI viết kịch bản trong app (không có LLM nối trong app); dùng Voice panel để import voiceover hoặc agent MCP để soạn lời">Write VO — chưa có (cần AI viết kịch bản)</button>
       <button type="button" id="btnAgentReview" class="secondary">Review</button>
     </div>
     <p class="agent-note">Write VO (AI script writing) is not available in-app yet — use the Voice panel to import voiceover audio, or an external agent via MCP.</p>

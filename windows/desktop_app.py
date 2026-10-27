@@ -34,6 +34,29 @@ Phase 2 rules (desktop completion):
 If pywebview is not installed, this prints exactly what to install
 in Vietnamese and falls back to the browser route (server in the
 foreground, browser opened), instead of crashing silently.
+
+Round 5 rules (desktop completion):
+- Single instance, stdlib only, no lock files: before starting a
+  server, the chosen port is probed with a plain HTTP GET /. If a
+  VibeEdit server already answers there, this process opens the
+  browser to the existing instance and exits instead of starting
+  a second server or silently taking a new port. If something
+  else (not VibeEdit) answers on that port, the port-in-use
+  message is printed and the process exits without touching the
+  foreign service. A different --port still means a separate
+  instance by design: the port IS the instance identity.
+- The pywebview-missing fallback and the port-taken path share
+  one helper (_browser_fallback), so the fallback can no longer
+  crash with a bare traceback when the port is taken: it
+  re-probes and either hands off to the existing instance or
+  prints the port-in-use message.
+- If the desktop window itself fails to open (for example the
+  WebView2 runtime is missing even though pywebview is
+  installed), the server is shut down cleanly and the browser
+  fallback runs, instead of a traceback being the only output.
+- Startup messages stay unaccented Vietnamese, and the port is
+  validated (1..65535) before anything binds, so --port 0 can no
+  longer start a server whose printed URL would be wrong.
 """
 
 from __future__ import annotations
@@ -43,7 +66,9 @@ import errno
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
+import webbrowser
 
 try:
     import webview  # type: ignore  # pywebview, Windows WebView2
@@ -130,6 +155,98 @@ def port_in_use_message(port: int) -> str:
     )
 
 
+def already_running_message(port: int) -> str:
+    """Short Vietnamese message for the single-instance handoff."""
+    return (
+        f"VibeEdit dang chay roi tren cong {port}. Mo lai cua so cu "
+        "thay vi mo them mot ban moi.\n"
+        "Neu muon mo project khac, dong cua so VibeEdit dang chay "
+        "truoc, hoac chay voi cong khac: "
+        f"python desktop_app.py --port {port + 1}"
+    )
+
+
+def probe_existing_instance(port: int, timeout: float = 2.0) -> str | None:
+    """Probe what, if anything, already answers on a port.
+
+    Returns "vibeedit" when an HTTP server on 127.0.0.1:port
+    answers GET / with a body containing "VibeEdit" (the web UI
+    index page always contains it), "other" when something
+    answers but is not recognisably VibeEdit (any HTTP status,
+    including an error status, proves a foreign service is
+    listening), and None when nothing answers (connection
+    refused, timeout, or any other probe failure). Never raises,
+    never writes any file, and never sends anything but a plain
+    GET / to localhost, so it cannot disturb a foreign service.
+    """
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            body = resp.read(262144).decode("utf-8", errors="replace")
+            return "vibeedit" if "VibeEdit" in body else "other"
+    except urllib.error.HTTPError:
+        # An HTTP error status still proves something is listening
+        # and answering on this port, just not VibeEdit.
+        return "other"
+    except Exception:  # noqa: BLE001 - refused/timeout = no instance
+        return None
+
+
+def open_existing_instance(port: int) -> bool:
+    """Open the browser to an already-running instance.
+
+    Best-effort and never raising: returns False when no browser
+    could be opened, so the caller can still print the URL for
+    the user to open by hand.
+    """
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        return bool(webbrowser.open(url))
+    except Exception:  # noqa: BLE001 - browser opening is best-effort
+        return False
+
+
+def _hand_off_to_existing(port: int) -> int:
+    """Print the already-running message and open the browser."""
+    print(already_running_message(port))
+    if open_existing_instance(port):
+        print(f"Da mo http://127.0.0.1:{port}/ trong trinh duyet.")
+    else:
+        print(f"Khong mo trinh duyet tu dong duoc; tu mo "
+              f"http://127.0.0.1:{port}/ .")
+    return 0
+
+
+def _browser_fallback(project: str | None, port: int) -> int:
+    """Browser route shared by every no-window path.
+
+    Used when pywebview is missing and when the desktop window
+    failed to open. Unlike the old fallback, a taken port can no
+    longer surface as a bare traceback: the port is probed first,
+    and a bind failure re-probes, so the outcome is either a
+    handoff to the existing VibeEdit instance or the
+    port-in-use message. Returns a process exit code.
+    """
+    probe = probe_existing_instance(port)
+    if probe == "vibeedit":
+        return _hand_off_to_existing(port)
+    if probe == "other":
+        print(port_in_use_message(port))
+        return 2
+    try:
+        run_server(project, port=port, open_browser_flag=True)
+        return 0
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            if probe_existing_instance(port) == "vibeedit":
+                return _hand_off_to_existing(port)
+            print(port_in_use_message(port))
+            return 2
+        print(f"Khong khoi dong duoc server: {exc}")
+        print("Kiem tra thu muc project va quyen ghi, roi chay lai.")
+        return 1
+
+
 def start_desktop_server(project: str | None, port: int):
     """Start the web server in a background thread.
 
@@ -186,6 +303,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", default=None,
                         help="Project folder (default: windows/projects/default)")
     args = parser.parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        print(f"Cong {args.port} khong hop le. Chon cong tu 1 den 65535, "
+              "vi du: python desktop_app.py --port 8000")
+        return 2
+    # Single instance first, before any warning: a second launch
+    # must hand off instantly, not print FFmpeg warnings for an
+    # instance it will never start.
+    probe = probe_existing_instance(args.port)
+    if probe == "vibeedit":
+        if args.project is not None:
+            print("Luu y: tham so --project bi bo qua khi mo lai ban "
+                  "dang chay; ban dang chay giu nguyen project cua no.")
+        return _hand_off_to_existing(args.port)
+    if probe == "other":
+        print(port_in_use_message(args.port))
+        return 2
     enable_dpi_awareness()
     ffmpeg = check_ffmpeg()
     if ffmpeg["missing"]:
@@ -196,12 +329,16 @@ def main(argv: list[str] | None = None) -> int:
         print("    pip install pywebview")
         print("Sau do chay lai: python desktop_app.py")
         print("Tam thoi mo bang trinh duyet thay the...")
-        run_server(args.project, port=args.port, open_browser_flag=True)
-        return 0
+        return _browser_fallback(args.project, args.port)
     try:
         server, thread = start_desktop_server(args.project, args.port)
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
+            # Race: something bound the port between the probe and
+            # the bind. Hand off if it is VibeEdit, else the usual
+            # port-in-use message; never a traceback.
+            if probe_existing_instance(args.port) == "vibeedit":
+                return _hand_off_to_existing(args.port)
             print(port_in_use_message(args.port))
             return 2
         print(f"Khong khoi dong duoc server: {exc}")
@@ -214,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print("Mo cua so desktop VibeEdit...")
     print("Dong cua so de thoat sach (server se tu tat, cong duoc giai phong).")
+    webview_failed = False
     try:
         webview.create_window("VibeEdit", f"http://127.0.0.1:{args.port}/",
                               width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT,
@@ -221,6 +359,19 @@ def main(argv: list[str] | None = None) -> int:
         webview.start()
     except KeyboardInterrupt:
         print("\nNhan Ctrl+C, dang tat server...")
+    except Exception as exc:  # noqa: BLE001 - e.g. WebView2 missing
+        # The window failed (pywebview installed but no usable
+        # WebView2 runtime is the common Windows case). Do not let
+        # a traceback be the only output: shut down cleanly, then
+        # fall back to the browser route below. Only the exception
+        # class name is printed, never raw exception text, so a
+        # path with accents in it cannot mojibake a plain cmd
+        # window.
+        webview_failed = True
+        print("Khong mo duoc cua so desktop (co the thieu WebView2 "
+              "Runtime tren may nay).")
+        print(f"Loai loi: {type(exc).__name__}")
+        print("Tam thoi mo bang trinh duyet thay the...")
     finally:
         # Clean shutdown on every exit path: window closed, Ctrl+C,
         # or a webview error. Without this the old code returned
@@ -229,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Da tat server, cong da duoc giai phong.")
         else:
             print("Server dang tat (cho thread ket thuc)...")
+    if webview_failed:
+        return _browser_fallback(args.project, args.port)
     return 0
 
 

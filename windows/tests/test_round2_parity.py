@@ -199,7 +199,7 @@ class TestRound2Tools(unittest.TestCase):
         self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real
+        self.assertEqual(len(honest), 120)  # Round 5: 132 -> 120, 12 tools became real
         for new in ("vibeedit_knowledge_add_lesson",
                     "vibeedit_knowledge_verdicts",
                     "vibeedit_skills_save", "vibeedit_skills_propose",

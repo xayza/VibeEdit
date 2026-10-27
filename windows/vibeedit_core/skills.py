@@ -23,11 +23,34 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 
-# windows/vibeedit_core/skills.py -> windows/skills/
-DEFAULT_SKILLS_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills")
-)
+
+def _default_skills_dir() -> str:
+    """skills/ folder: bundled data under _MEIPASS (or next to the
+    executable) for a frozen app — same frozen-app reasoning as
+    plugins._plugins_dir() — file-relative in a source checkout
+    (windows/vibeedit_core/skills.py -> windows/skills/). Without
+    the frozen branch, a frozen app would resolve skills/ relative
+    to the bundled module path and silently list zero skills even
+    though the spec now ships the skills/ data folder (round 5)."""
+    if getattr(sys, "frozen", False):
+        for base in (getattr(sys, "_MEIPASS", None),
+                     os.path.dirname(os.path.abspath(sys.executable))):
+            if base:
+                candidate = os.path.join(base, "skills")
+                if os.path.isdir(candidate):
+                    return candidate
+        return os.path.join(getattr(sys, "_MEIPASS",
+                                    os.path.dirname(
+                                        os.path.abspath(sys.executable))),
+                            "skills")
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "..", "skills"))
+
+
+DEFAULT_SKILLS_DIR = _default_skills_dir()
 
 # Original skill names are lowercase, hyphenated (CommandCatalog+Skills:
 # "Skill name (lowercase, hyphenated)"). Accept letters, digits,

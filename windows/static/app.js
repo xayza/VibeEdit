@@ -540,7 +540,20 @@ if (btnQuick) btnQuick.addEventListener("click", () => {
   else setMediaStatus("Chưa chọn file media nào để thêm.", true);
 });
 const btnPlugins = $("btnPlugins");
-if (btnPlugins) btnPlugins.addEventListener("click", () => setStatus("Plugins: 2 plugin mẫu trong windows/plugins/ — uppercase_text và vivid_color, chạy qua plugin hook. Chưa có panel cài đặt plugin trong bản Windows này."));
+if (btnPlugins) btnPlugins.addEventListener("click", () => {
+  // Round 5: this used to be a status-only message claiming there was
+  // no plugin panel. There IS one: the Plugins panel in the Details
+  // column (apply a sample plugin to the selected clip, enable/disable
+  // installed plugins) and plugin install/download in the More tab.
+  // So the top-bar button now scrolls to the real Details panel.
+  const col = document.querySelector(".details-col");
+  if (col) {
+    col.scrollIntoView({ behavior: "smooth", block: "start" });
+    col.classList.add("details-flash");
+    setTimeout(() => col.classList.remove("details-flash"), 1600);
+  }
+  setStatus("Plugins: xem panel Plugins ở cột Details bên phải (áp dụng plugin mẫu cho clip đang chọn, bật/tắt plugin đã cài); cài plugin mới ở tab More.");
+});
 const btnReviewTop = $("btnReviewTop");
 if (btnReviewTop) btnReviewTop.addEventListener("click", () => {
   const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
@@ -1026,8 +1039,23 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     if (wrap) wrap.hidden = false; if (note) note.hidden = true;
   });
   if (tabSrc) tabSrc.addEventListener("click", () => {
+    // Round 5: the old handler hid .preview-wrap, which CONTAINS
+    // playerSourceNote, so the note never showed and the whole preview
+    // (including the Source In/Out controls) vanished — a dead tab.
+    // Source preview really exists (showSourcePreview, GET
+    // /api/media/<id>), so Source now shows the selected source file,
+    // and only asks the user to pick one when none is selected.
     tabSrc.classList.add("active"); if (tabTl) tabTl.classList.remove("active");
-    if (wrap) wrap.hidden = true; if (note) note.hidden = false;
+    if (wrap) wrap.hidden = false; if (note) note.hidden = true;
+    const sel = $("sourceMedia");
+    const mediaId = (sel && sel.value) || previewMediaId;
+    const medium = mediaId ? project.media.find((m) => m.id === mediaId) : null;
+    if (medium) {
+      showSourcePreview(medium);
+      setStatus("Đang xem file nguồn: " + baseNameOf(medium) + " — bấm ▶ để phát.");
+    } else {
+      setStatus("Chọn một file nguồn ở ô Nguồn bên dưới rồi bấm Source để xem file gốc.", true);
+    }
   });
   const fitBtn = $("btnPreviewFit");
   if (fitBtn && wrap) fitBtn.addEventListener("click", () => { wrap.classList.toggle("fit-contain"); setStatus(wrap.classList.contains("fit-contain") ? "Preview fit: contain." : "Preview fit: default."); });
