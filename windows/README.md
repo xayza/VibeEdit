@@ -245,6 +245,12 @@ Kiểm chứng: py_compile, node --check, MCP 479 = 403 + 76, test 249
 tên gốc vẫn đủ, full suite trên Linux VM, smoke server project tạm.
 Chi tiết ở [`PARITY.md`](PARITY.md) mục vòng 15.
 
+## Giao diện vòng 17 — thanh công cụ lên hàng ngang trên cùng, sửa lệch playhead timeline
+
+- **Thanh công cụ dọc thành hàng ngang trên cùng (kiểu CapCut):** `<nav class="tool-rail">` dời ra khỏi cột trái, thành hàng full-width ngay dưới topbar; đủ 12 nút theo đúng thứ tự cũ (Media, Audio, Text, Stickers, Effects, Transitions, Filters, Voice, Knowledge, Vision, Timeline, More) với cùng data-tab/data-action nên handler chuyển panel giữ nguyên; cột panel công cụ vẫn ở bên trái preview, thu từ 356px về 280px; cột AI Agent giữ 340px; màn hẹp hàng tự cuộn ngang trong chính nó.
+- **Sửa lệch playhead:** nguyên nhân là thước và lane dùng hai gốc tọa độ khác nhau — vạch lane đặt trong `.track-lane` (sau cột nhãn 128px + gap 10px) còn thước đứng riêng với gốc là mép trái timeline-wrap, lệch đúng 138px. Cách sửa: `.ruler` thêm `margin-left: 138px` (94px ở breakpoint ≤720px, nơi nhãn thu về 84px) để hai gốc trùng nhau; handler click thước dùng `rect.left` của ruler nên tự đúng theo, không cần sửa JS. Test `tests/test_round17.py` (12 test mới) chứng minh tick thước = vạch lane = vị trí clip tại cùng thời điểm (sai số ≤1px) và click thước đặt playhead đúng trong 1 frame.
+- Kiểm chứng: node --check, py_compile, 60 test mục tiêu OK, full suite 617 test OK trên Linux VM; MCP giữ 479 = 403 + 76; cây Swift không động, không merge.
+
 ## Full-parity vòng 13 — kiểm chứng tích hợp end-to-end, rà soát docs, checklist test Windows
 
 - **Export tổng hợp (test `tests/test_round13.py`, dữ liệu giả lập

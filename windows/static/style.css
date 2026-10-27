@@ -223,21 +223,26 @@ form { margin: 0; }
 .tool-col {
   display: flex;
   flex-shrink: 0;
-  width: 356px;
+  width: 280px;
   max-width: 92vw;
   border-right: 1px solid var(--line);
   background: var(--bg-panel);
   min-height: 420px;
 }
+/* Round 17: the tool switcher is a horizontal CapCut-style row above
+   the workbench (not a vertical rail inside tool-col). Buttons keep
+   their data-tab/data-action wiring; only the layout changed. */
 .tool-rail {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 76px;
+  flex-direction: row;
+  gap: 6px;
+  width: auto;
   flex-shrink: 0;
-  padding: 10px 6px;
-  border-right: 1px solid var(--line);
+  padding: 8px 12px;
+  border-right: 0;
+  border-bottom: 1px solid var(--line);
   background: #0d0d0f;
+  overflow-x: auto;
 }
 .rail-btn {
   background: transparent;
@@ -245,9 +250,10 @@ form { margin: 0; }
   border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: 12px;
-  padding: 10px 4px;
+  padding: 8px 14px;
   text-align: center;
-  white-space: normal;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .rail-btn:hover { background: var(--bg-panel2); color: var(--text); }
 .rail-btn.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
@@ -466,6 +472,13 @@ form { margin: 0; }
   position: relative;
   cursor: pointer;
   overflow: hidden;
+  /* Round 17: shared origin with the lanes. Track rows are
+     label (128px) + gap (10px) + lane, so the ruler's left edge
+     must sit 138px in, otherwise every ruler tick/playhead and
+     every ruler click is offset from the clips by exactly that
+     constant. The lane playhead, clips and ruler ticks all use
+     the same left = t * pxPerSec inside their own box. */
+  margin-left: 138px;
 }
 .ruler .playhead {
   position: absolute;
@@ -569,9 +582,11 @@ form { margin: 0; }
 /* ---------- Narrow windows: stack, never break ---------- */
 @media (max-width: 720px) {
   .track-label { width: 84px; }
+  /* Round 17: ruler origin follows the narrow label (84 + 10). */
+  .ruler { margin-left: 94px; }
   .top-actions { margin-left: 0; }
   .preview-wrap video { height: auto; max-height: 46vh; }
-  .tool-rail { width: 60px; }
+  .tool-rail { width: auto; }
 }
 
 /* ---- Original-app layout (structure of the original editor) ---- */
@@ -630,13 +645,14 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 #settingsProjectInfo, #settingsEnvInfo { font-size: 12px; color: var(--muted); background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; word-break: break-word; }
 @media (max-width: 1100px) {
   .workbench { flex-wrap: nowrap; overflow-x: auto; }
-  .tool-col { width: 300px; border-right: 1px solid var(--line); border-bottom: 0; }
+  .tool-col { width: 280px; border-right: 1px solid var(--line); border-bottom: 0; }
   .details-col { width: 280px; border-left: 1px solid var(--line); border-top: 0; }
 }
 
 /* ---- Media Library grid + timeline fit + Agent convenience (original-app shell) ---- */
-/* Original shell: NO top icon toolbar (removed from index.html); the
-   far-left vertical rail is the only tool switcher, as in the original. */
+/* Original shell: the tool switcher is a horizontal row above the
+   workbench (round 17, CapCut-style); the tool panels column sits
+   at the left of the preview. */
 #mediaList { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; list-style: none; margin: 0; padding: 0; }
 .media-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-panel2); padding: 8px; cursor: pointer; position: relative; overflow: hidden; }
 .media-card:hover { border-color: var(--line-strong); }
@@ -753,7 +769,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    down so 300 + 300 + 260 = 860, the original editor minimum, fits. */
 @media (max-width: 1160px) {
   .workbench { overflow: hidden; }
-  .tool-col { width: 300px; }
+  .tool-col { width: 280px; }
   .details-col { width: 300px; }
 }
 /* Below the original editor minimum (860): columns step to 280; the
@@ -772,7 +788,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .tool-rail { overflow-y: auto; min-height: 0; }
 @media (max-height: 899px) {
   /* Original railLabelsMinHeight 900: compact tiles, internal scroll. */
-  .rail-btn { padding: 5px 4px; font-size: 11px; }
+  .rail-btn { padding: 6px 12px; font-size: 11px; }
 }
 /* Viewer fits its pane (original Fit), controls stay visible. */
 .centre-col { display: flex; flex-direction: column; overflow: hidden; }
@@ -797,7 +813,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* ---------- Round 14: original-app presentation (layout first) ---------- */
 .timeline-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tl-timecode { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.tool-col.tool-col-collapsed { width: 76px; }
+/* Round 17: the rail now lives outside tool-col (horizontal row above
+   the workbench), so collapsing hides the whole panels column. */
+.tool-col.tool-col-collapsed { display: none; }
 .tool-col.tool-col-collapsed .tool-panels { display: none; }
 .track-row { margin-top: 4px; }
 .track-lane { min-height: 30px; }

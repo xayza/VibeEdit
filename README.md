@@ -55,7 +55,7 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 15)
+## Current status (honest, full-parity round 15; UI round 17)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
   endpoint; the number in docs goes stale as tools are added): **403
@@ -67,6 +67,11 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   shared-handler design), and round 15 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
+- **UI round 17:** the tool rail moved to a horizontal top row
+  (CapCut-style, same 12 tools, same handlers); the timeline ruler
+  and lane playheads now share one origin (ruler margin equals the
+  track-label width plus gap), so ruler ticks, the ruler playhead,
+  the lane playheads and clips align at the same time; 617 tests OK.
 - **Working:** project/media/timeline editing (cut, trim, move,
   copy/paste, split, undo/redo, markers, close gaps), full magnetic
   Main block-move + linked audio, source and export preview, audio

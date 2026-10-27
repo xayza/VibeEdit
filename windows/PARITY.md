@@ -8,7 +8,7 @@ còn thiếu trong bảng này đều ghi trạng thái
 đã biết. Không có tính năng gốc nào bị ghi là "out of scope" hay
 "not planned" ở đây.
 
-Trạng thái hiện tại (đợt full-parity vòng 15):
+Trạng thái hiện tại (đợt full-parity vòng 15; giao diện vòng 17):
 **MCP 479 công cụ** (số live đọc từ `/api/mcp-tools` trong app; số
 trong tài liệu này là số tại thời điểm viết và sẽ cũ đi khi thêm công
 cụ mới — app luôn là nguồn đúng nhất). Trong 479 công cụ có **403

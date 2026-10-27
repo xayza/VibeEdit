@@ -23,7 +23,21 @@
   <div id="status" class="status"></div>
 </header>
 <div id="welcomePanel" class="welcome-panel" hidden><h3>Chào mừng đến VibeEdit</h3><p>Chọn một project gần đây để mở, hoặc tạo project mới. Nút Reveal chỉ mở được thư mục trên Windows; nút Copy chỉ sao chép đường dẫn.</p><div id="welcomeRecent"></div>    <label>Chuyển project <select id="projectSelect"></select></label><button id="btnProjectOpen" class="secondary">Mở project</button><input id="projectNewName" type="text" placeholder="Tên project mới"><button id="btnProjectCreate" class="secondary">Tạo project</button>
-<button type="button" id="btnWelcomeOpen" class="secondary">Mở project đã chọn</button><button type="button" id="btnWelcomeCreate" class="secondary">Tạo project mới</button><button type="button" id="btnWelcomeReveal" class="secondary">Reveal thư mục project (Windows)</button><button type="button" id="btnWelcomeCopyPath" class="secondary">Copy đường dẫn project</button><button type="button" id="btnWelcomeClose" class="secondary">Đóng</button><div id="welcomeStatus"></div></div><div class="workbench">
+<button type="button" id="btnWelcomeOpen" class="secondary">Mở project đã chọn</button><button type="button" id="btnWelcomeCreate" class="secondary">Tạo project mới</button><button type="button" id="btnWelcomeReveal" class="secondary">Reveal thư mục project (Windows)</button><button type="button" id="btnWelcomeCopyPath" class="secondary">Copy đường dẫn project</button><button type="button" id="btnWelcomeClose" class="secondary">Đóng</button><div id="welcomeStatus"></div></div><nav class="tool-rail" aria-label="Library menu">
+<button type="button" class="rail-btn" data-tab="media">Media</button>
+<button type="button" class="rail-btn" data-tab="audio">Audio</button>
+<button type="button" class="rail-btn" data-tab="text">Text</button>
+<button type="button" class="rail-btn" data-tab="stickers">Stickers</button>
+<button type="button" class="rail-btn" data-tab="effects">Effects</button>
+<button type="button" class="rail-btn" data-tab="transitions">Transitions</button>
+<button type="button" class="rail-btn" data-tab="filters">Filters</button>
+<button type="button" class="rail-btn" data-tab="voice">Voice</button>
+<button type="button" class="rail-btn" data-tab="knowledge">Knowledge</button>
+<button type="button" class="rail-btn" data-tab="vision">Vision</button>
+<button type="button" class="rail-btn" data-action="timeline">Timeline</button>
+<button type="button" class="rail-btn" data-tab="templates">More</button>
+</nav>
+<div class="workbench">
 <aside class="agent-col" aria-label="AI Agent Workspace">
   <section class="panel agent-dock" id="agentDock">
     <h3>AI AGENT</h3>
@@ -50,20 +64,7 @@
   </section>
 </aside>
   <div class="tool-col">
-    <nav class="tool-rail" aria-label="Library menu">
-<button type="button" class="rail-btn" data-tab="media">Media</button>
-<button type="button" class="rail-btn" data-tab="audio">Audio</button>
-<button type="button" class="rail-btn" data-tab="text">Text</button>
-<button type="button" class="rail-btn" data-tab="stickers">Stickers</button>
-<button type="button" class="rail-btn" data-tab="effects">Effects</button>
-<button type="button" class="rail-btn" data-tab="transitions">Transitions</button>
-<button type="button" class="rail-btn" data-tab="filters">Filters</button>
-<button type="button" class="rail-btn" data-tab="voice">Voice</button>
-<button type="button" class="rail-btn" data-tab="knowledge">Knowledge</button>
-<button type="button" class="rail-btn" data-tab="vision">Vision</button>
-<button type="button" class="rail-btn" data-action="timeline">Timeline</button>
-<button type="button" class="rail-btn" data-tab="templates">More</button>
-</nav>
+    
     <div class="tool-panels">
 <section class="panel tool-panel" data-panel="media">
 <div class="import-dropzone" id="importDropzone"><div class="import-dropzone-label">+ Import</div><p>Drag and drop videos, photos, and audio files here</p><div class="panel">
