@@ -764,22 +764,46 @@ class Project:
             existing.append({"at": at, prop: float(value)})
         return self.set_keyframes(item_id, existing)
 
+    # Per-parameter eq ranges (FFmpeg eq filter, verified on FFmpeg 8):
+    # brightness -1..1 (neutral 0), contrast 0..2 (neutral 1),
+    # saturation 0..3 (neutral 1), gamma 0.1..10 (neutral 1).
+    EQ_RANGES = {"brightness": (-1.0, 1.0), "contrast": (0.0, 2.0),
+                 "saturation": (0.0, 3.0), "gamma": (0.1, 10.0)}
+    EQ_NEUTRAL = {"brightness": 0.0, "contrast": 1.0,
+                  "saturation": 1.0, "gamma": 1.0}
+
     def set_color(self, item_id: str, lut: str | None = None,
                   preset: str | None = None,
                   strength: float | None = None,
-                  preset_strength: float | None = None) -> dict:
+                  preset_strength: float | None = None,
+                  eq: dict | None = None,
+                  clear_eq: bool = False,
+                  clear_lut: bool = False) -> dict:
         """Set a clip's colour: a .cube LUT file and/or an eq preset,
         plus an optional LUT strength (0..1, default 1.0 = full LUT)
         and an optional eq preset strength (0..1, default 1.0 = full
         preset, 0 = preset skipped; see eq_preset_filter).
 
-        A missing or invalid LUT is a hard error, never a silent skip.
+        Code-gap batch: ``eq`` sets per-parameter FFmpeg eq values
+        (brightness/contrast/saturation/gamma), stored on the clip as
+        ``color["eq"]`` and rendered by _color_filters; this is the
+        Windows equivalent of the original's individual colour sliders
+        (the old code only had named presets). ``clear_eq``/``clear_lut``
+        remove those parts. A missing or invalid LUT is a hard error,
+        never a silent skip.
         """
         _, item = self.item(item_id)
         color = dict(item.get("color") or {})
         if lut is not None:
-            validate_cube(lut)
-            color["lut"] = lut
+            if lut == "":
+                color.pop("lut", None)
+                color.pop("strength", None)
+            else:
+                validate_cube(lut)
+                color["lut"] = lut
+        if clear_lut:
+            color.pop("lut", None)
+            color.pop("strength", None)
         if preset is not None:
             if preset not in COLOR_PRESETS:
                 raise ValueError(
@@ -796,14 +820,142 @@ class Project:
             if not 0.0 <= preset_strength <= 1.0:
                 raise ValueError("Colour preset strength must be 0..1")
             color["preset_strength"] = preset_strength
+        if clear_eq:
+            color.pop("eq", None)
+        if eq is not None:
+            if not isinstance(eq, dict) or not eq:
+                raise ValueError("eq must be a non-empty object")
+            merged = dict(color.get("eq") or {})
+            for key, value in eq.items():
+                if key not in self.EQ_RANGES:
+                    raise ValueError(
+                        f"Unknown eq parameter: {key!r} "
+                        f"(choose one of {', '.join(sorted(self.EQ_RANGES))})")
+                value = float(value)
+                lo, hi = self.EQ_RANGES[key]
+                if not lo <= value <= hi:
+                    raise ValueError(
+                        f"eq {key} must be {lo}..{hi}, got {value}")
+                merged[key] = value
+            color["eq"] = merged
         if not color:
-            raise ValueError("Provide a LUT path and/or a colour preset")
-        color.setdefault("strength", 1.0)
+            if clear_eq or clear_lut:
+                item["color"] = {}
+                self._bump()
+                return item
+            raise ValueError("Provide a LUT path, a colour preset, "
+                             "and/or eq parameters")
+        if "lut" in color:
+            color.setdefault("strength", 1.0)
         if "preset" in color:
             color.setdefault("preset_strength", 1.0)
         item["color"] = color
         self._bump()
         return item
+
+    def overwrite_insert(self, media_id: str, in_frame: int, out_frame: int,
+                         at: int, track_id: str | None = None) -> dict:
+        """Insert a source range at ``at``, overwriting whatever it
+        covers on the target track (original Q workflow). Overlapping
+        clips are trimmed at the edges, a clip spanning the whole
+        range is split into left/right parts, and clips fully inside
+        the range are deleted. Returns the new clip.
+        """
+        import copy as _copy
+        if out_frame <= in_frame:
+            raise ValueError("Source Out must be after Source In")
+        medium = self.media(media_id)
+        if track_id is None:
+            want_kind = medium.get("kind") or "video"
+            if want_kind == "video":
+                track_id = next(
+                    (t["id"] for t in self.data["tracks"]
+                     if t["kind"] == "video" and t.get("role") == "main"),
+                    None)
+            if not track_id:
+                track_id = next(
+                    (t["id"] for t in self.data["tracks"]
+                     if t["kind"] == want_kind),
+                    self.data["tracks"][0]["id"])
+        track = self.track(track_id)
+        dur = out_frame - in_frame
+        end = at + dur
+        kept = []
+        for item in track["items"]:
+            istart, iend = item["at"], item["at"] + item["dur"]
+            if iend <= at or istart >= end:
+                kept.append(item)
+            elif istart < at and iend > end:
+                speed = item.get("speed") or 1.0
+                left = dict(item)
+                left["dur"] = at - istart
+                right = _copy.deepcopy(item)
+                right["id"] = _new_id("c")
+                right["in"] = item["in"] + int(round((end - istart) / speed))
+                right["dur"] = iend - end
+                right["at"] = end
+                kept.extend([left, right])
+            elif istart < at:
+                item["dur"] = at - istart
+                kept.append(item)
+            elif iend > end:
+                speed = item.get("speed") or 1.0
+                delta = end - istart
+                item["in"] = item["in"] + int(round(delta / speed))
+                item["dur"] = iend - end
+                item["at"] = end
+                kept.append(item)
+            # else: fully inside the range -> dropped
+        track["items"] = sorted(kept, key=lambda i: i["at"])
+        return self.add_clip(media_id, track_id, at, in_frame, dur)
+
+    def close_gaps(self, track_id: str | None = None) -> dict:
+        """Close gaps on one track: shift each clip left so it starts
+        where the previous clip ends (first clip moves to frame 0).
+        The Windows equivalent of a magnetic/gap-closing delete. Only
+        the given track is touched; other tracks are unchanged.
+        Returns the track id and the list of moved item ids.
+        """
+        if track_id is None:
+            track_id = next((t["id"] for t in self.data["tracks"]
+                             if t.get("role") == "main"),
+                            self.data["tracks"][0]["id"])
+        track = self.track(track_id)
+        moved = []
+        cursor = 0
+        for item in sorted(track["items"], key=lambda i: i["at"]):
+            if item["at"] != cursor:
+                item["at"] = cursor
+                moved.append(item["id"])
+            cursor = item["at"] + item["dur"]
+        track["items"].sort(key=lambda i: i["at"])
+        self._bump()
+        return {"track": track_id, "moved": moved}
+
+    def rename_track(self, track_id: str, name: str) -> dict:
+        """Rename a track (name only; id, kind and role unchanged)."""
+        track = self.track(track_id)
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Track name must not be empty")
+        track["name"] = name
+        self._bump()
+        return track
+
+    def remove_track(self, track_id: str) -> dict:
+        """Remove a track, but only when it holds no items — removing
+        a populated track would silently delete clips, so that is a
+        hard error instead. The Main track (role 'main') is protected.
+        """
+        track = self.track(track_id)
+        if track.get("role") == "main":
+            raise ValueError("Cannot remove the Main track")
+        if track["items"]:
+            raise ValueError("Track still has clips; delete them first")
+        self.data["tracks"] = [t for t in self.data["tracks"]
+                               if t["id"] != track_id]
+        self._bump()
+        return {"deleted": track_id}
 
     # -- Phase 3: markers ---------------------------------------------
     def add_marker(self, text: str, at_frame: int) -> dict:

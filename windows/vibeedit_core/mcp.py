@@ -9,6 +9,8 @@ which Phase 1 implements the core timeline/project subset below.
 Phase 2 added 14 more tools, Phase 3 another 15 (38 total),
 Phase 4 another 16 (54 total), Phase 5 another 12 (66 total),
 Phase 6 another 12 (78 total), and Phase 7 another 12 (90 total).
+Later batches (original-app shell, finishing, media/timeline, and the
+code-gap batch) brought the total to 123 real tools.
 
 Protocol: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Supported methods: ``initialize``, ``ping``, ``tools/list``,
@@ -244,6 +246,43 @@ TOOLS = [
      "description": "Read the project duration in frames and seconds."},
     {"name": "vibeedit_clip_at_time",
      "description": "Find the main-track clip covering a timeline frame, or null."},
+    # Code-gap batch: 17 more real tools (106 -> 123). Each calls a
+    # real Project operation or a real scan of the project document;
+    # none returns canned data.
+    {"name": "vibeedit_clip_color_eq",
+     "description": "Set per-parameter eq colour (brightness/contrast/saturation/gamma) on a clip."},
+    {"name": "vibeedit_clip_color_eq_get",
+     "description": "Read a clip's per-parameter eq colour values (or {})."},
+    {"name": "vibeedit_source_insert",
+     "description": "Insert a marked source range (in/out frames) as a clip at a timeline frame."},
+    {"name": "vibeedit_close_gaps",
+     "description": "Close gaps on a track by shifting later clips left."},
+    {"name": "vibeedit_project_list",
+     "description": "List project folders next to the open project folder."},
+    {"name": "vibeedit_track_rename",
+     "description": "Rename a track (id, kind and role unchanged)."},
+    {"name": "vibeedit_track_remove",
+     "description": "Remove an empty, non-Main track."},
+    {"name": "vibeedit_beat_nearest",
+     "description": "Find the detected beat nearest to a time in seconds."},
+    {"name": "vibeedit_marker_at_time",
+     "description": "Find markers at or before a timeline frame."},
+    {"name": "vibeedit_clip_overlap_check",
+     "description": "Check whether a clip placed at a frame would overlap on a track."},
+    {"name": "vibeedit_media_usage",
+     "description": "List every clip that uses a given media id."},
+    {"name": "vibeedit_project_search_text",
+     "description": "Search text items whose text contains a query string."},
+    {"name": "vibeedit_track_duration",
+     "description": "Read a track's end frame and clip count."},
+    {"name": "vibeedit_clip_text_get",
+     "description": "Read a single item's text, or null for non-text items."},
+    {"name": "vibeedit_clip_color_reset",
+     "description": "Clear a clip's eq colour and LUT (keeps preset if set)."},
+    {"name": "vibeedit_timeline_clip_count",
+     "description": "Count clips per track and in total."},
+    {"name": "vibeedit_source_overwrite",
+     "description": "Overwrite the timeline at a frame with a marked source range (original Q)."},
 ]
 
 
@@ -1064,6 +1103,142 @@ class MCPServer:
                     "seconds": round(proj.duration_seconds(), 3)}
         if name == "vibeedit_clip_at_time":
             return {"clip": self._require().clip_at_time(int(args["frame"]))}
+        # Code-gap batch tools (real implementations only).
+        if name == "vibeedit_clip_color_eq":
+            proj = self._require()
+            result = proj.set_color(args["item"], eq=args.get("eq") or {})
+            self._save()
+            return result
+        if name == "vibeedit_clip_color_eq_get":
+            _, item = self._require().item(args["item"])
+            return {"eq": (item.get("color") or {}).get("eq") or {}}
+        if name == "vibeedit_source_insert":
+            proj = self._require()
+            in_frame = int(args.get("in", 0))
+            out_frame = int(args["out"])
+            if out_frame <= in_frame:
+                raise ValueError("Source Out must be after Source In")
+            track_id = args.get("track")
+            if not track_id:
+                medium = proj.media(args["media"])
+                want_kind = medium.get("kind") or "video"
+                if want_kind == "video":
+                    track_id = next(
+                        (t["id"] for t in proj.data["tracks"]
+                         if t["kind"] == "video" and t.get("role") == "main"),
+                        None)
+                if not track_id:
+                    track_id = next(
+                        (t["id"] for t in proj.data["tracks"]
+                         if t["kind"] == want_kind),
+                        proj.data["tracks"][0]["id"])
+            result = proj.add_clip(args["media"], track_id,
+                                   int(args.get("at", 0)), in_frame,
+                                   out_frame - in_frame,
+                                   float(args.get("speed", 1.0)))
+            self._save()
+            return result
+        if name == "vibeedit_close_gaps":
+            proj = self._require()
+            result = proj.close_gaps(args.get("track"))
+            self._save()
+            return result
+        if name == "vibeedit_project_list":
+            import os
+            proj = self._require()
+            root = os.path.dirname(os.path.abspath(proj.folder))
+            out = []
+            if os.path.isdir(root):
+                for entry in sorted(os.listdir(root)):
+                    folder = os.path.join(root, entry)
+                    if not os.path.isdir(folder):
+                        continue
+                    found = find_project_file(folder)
+                    if found:
+                        out.append({"name": entry, "folder": folder,
+                                    "current": os.path.abspath(folder)
+                                    == os.path.abspath(proj.folder)})
+            return {"projects": out, "root": root}
+        if name == "vibeedit_track_rename":
+            proj = self._require()
+            result = proj.rename_track(args["track"], args["name"])
+            self._save()
+            return result
+        if name == "vibeedit_track_remove":
+            proj = self._require()
+            result = proj.remove_track(args["track"])
+            self._save()
+            return result
+        if name == "vibeedit_beat_nearest":
+            return {"beat": self._require().nearest_beat(
+                float(args["seconds"]))}
+        if name == "vibeedit_marker_at_time":
+            frame = int(args["frame"])
+            markers = [m for m in self._require().data.get("markers", [])
+                       if int(m.get("at", 0)) <= frame]
+            markers.sort(key=lambda m: int(m.get("at", 0)))
+            return {"markers": markers}
+        if name == "vibeedit_clip_overlap_check":
+            proj = self._require()
+            track = proj.track(args["track"])
+            at = int(args["at"])
+            dur = int(args.get("dur", 0))
+            overlap = []
+            for item in track["items"]:
+                if at < item["at"] + item["dur"] and \
+                        at + dur > item["at"]:
+                    overlap.append(item["id"])
+            return {"overlap": overlap, "free": not overlap}
+        if name == "vibeedit_media_usage":
+            proj = self._require()
+            media_id = args["media"]
+            used = []
+            for track in proj.data["tracks"]:
+                for item in track["items"]:
+                    if item.get("media") == media_id:
+                        used.append({"track": track["id"],
+                                     "id": item["id"], "at": item["at"],
+                                     "dur": item["dur"]})
+            return {"media": media_id, "clips": used}
+        if name == "vibeedit_project_search_text":
+            query = (args.get("query") or "").lower()
+            found = []
+            for track in self._require().data["tracks"]:
+                for item in track["items"]:
+                    if query and query in (item.get("text") or "").lower():
+                        found.append({"track": track["id"],
+                                      "id": item["id"],
+                                      "text": item["text"]})
+            return {"items": found}
+        if name == "vibeedit_track_duration":
+            proj = self._require()
+            track = proj.track(args["track"])
+            end = max((item["at"] + item["dur"] for item in track["items"]),
+                      default=0)
+            return {"track": track["id"], "end_frame": end,
+                    "clips": len(track["items"])}
+        if name == "vibeedit_clip_text_get":
+            _, item = self._require().item(args["item"])
+            return {"text": item.get("text")}
+        if name == "vibeedit_clip_color_reset":
+            proj = self._require()
+            result = proj.set_color(args["item"], clear_eq=True,
+                                    clear_lut=True)
+            self._save()
+            return result
+        if name == "vibeedit_timeline_clip_count":
+            proj = self._require()
+            per_track = {t["id"]: len(t["items"])
+                         for t in proj.data["tracks"]}
+            return {"per_track": per_track,
+                    "total": sum(per_track.values())}
+        if name == "vibeedit_source_overwrite":
+            proj = self._require()
+            result = proj.overwrite_insert(
+                args["media"], int(args.get("in", 0)), int(args["out"]),
+                int(args.get("at", 0)), args.get("track"))
+            self._save()
+            return result
         raise ValueError(f"Unknown tool: {name}")
 
 

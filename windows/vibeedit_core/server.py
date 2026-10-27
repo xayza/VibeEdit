@@ -106,6 +106,68 @@ class State:
     def save(self) -> None:
         save_project(self.project.data, self.path)
 
+    def projects_root(self) -> str:
+        """Parent folder holding all project folders (windows/projects)."""
+        return os.path.dirname(os.path.abspath(self.project_dir))
+
+    def list_projects(self) -> list[dict]:
+        """Project folders under projects_root that contain a project
+        file. Only immediate subdirectories are listed; no invented
+        entries, and folders without a project file are skipped."""
+        root = self.projects_root()
+        out = []
+        if os.path.isdir(root):
+            for name in sorted(os.listdir(root)):
+                folder = os.path.join(root, name)
+                if not os.path.isdir(folder):
+                    continue
+                found = find_project_file(folder)
+                if not found:
+                    continue
+                try:
+                    data = load_project(found)
+                    pname = data.get("name") or name
+                except Exception:
+                    pname = name
+                out.append({"name": pname, "folder": name,
+                            "path": folder,
+                            "current": os.path.abspath(folder)
+                            == os.path.abspath(self.project_dir)})
+        return out
+
+    def open_project(self, folder: str) -> dict:
+        """Restart-free project switch (code-gap batch): resolve
+        ``folder`` (a project folder name, a folder path, or a project
+        file path) strictly inside projects_root, load it, and point
+        this server state at it (project, path, project_dir, cleared
+        undo/redo and last export). Raises on traversal or a missing
+        project file instead of silently staying on the old project.
+        """
+        root = self.projects_root()
+        if os.path.isabs(folder):
+            candidate = os.path.abspath(folder)
+        else:
+            candidate = os.path.abspath(os.path.join(root, folder))
+        if os.path.isfile(candidate):
+            candidate = os.path.dirname(candidate)
+        if os.path.commonpath([candidate, root]) != root:
+            raise ValueError("Project folder must be inside projects/")
+        found = find_project_file(candidate)
+        if not found:
+            raise FileNotFoundError(f"No project file in folder: {folder}")
+        os.makedirs(os.path.join(candidate, "media"), exist_ok=True)
+        os.makedirs(os.path.join(candidate, "render"), exist_ok=True)
+        data = load_project(found)
+        self.project = Project(data, candidate)
+        self.path = found
+        self.project_dir = candidate
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.last_export = None
+        self.last_report = None
+        return {"name": data.get("name"), "folder": candidate,
+                "rev": data.get("rev")}
+
     def apply(self, op: dict) -> dict:
         proj = self.project
         if op.get("op") == "srt_export":
@@ -163,7 +225,44 @@ class State:
                 result = proj.set_color(op["item"], op.get("lut"),
                                         op.get("preset"),
                                         op.get("strength"),
-                                        op.get("preset_strength"))
+                                        op.get("preset_strength"),
+                                        eq=op.get("eq"),
+                                        clear_eq=bool(op.get("clear_eq")),
+                                        clear_lut=bool(op.get("clear_lut")))
+            elif kind == "close_gaps":
+                result = proj.close_gaps(op.get("track"))
+            elif kind == "source_overwrite":
+                result = proj.overwrite_insert(
+                    op["media"], int(op.get("in", 0)), int(op["out"]),
+                    int(op.get("at", 0)), op.get("track"))
+            elif kind == "source_insert":
+                # Source viewer In/Out insert (original E/Q workflow,
+                # as buttons): mark a range on a source media file and
+                # insert it as a clip at the playhead (or given frame).
+                in_frame = int(op.get("in", 0))
+                out_frame = int(op.get("out"))
+                if out_frame <= in_frame:
+                    raise ValueError(
+                        "Source Out must be after Source In")
+                medium = proj.media(op["media"])
+                track_id = op.get("track")
+                if not track_id:
+                    want_kind = medium.get("kind") or "video"
+                    if want_kind == "video":
+                        track_id = next(
+                            (t["id"] for t in proj.data["tracks"]
+                             if t["kind"] == "video"
+                             and t.get("role") == "main"),
+                            None)
+                    if not track_id:
+                        track_id = next(
+                            (t["id"] for t in proj.data["tracks"]
+                             if t["kind"] == want_kind),
+                            proj.data["tracks"][0]["id"])
+                result = proj.add_clip(op["media"], track_id,
+                                       int(op.get("at", 0)), in_frame,
+                                       out_frame - in_frame,
+                                       float(op.get("speed", 1.0)))
             elif kind == "add_marker":
                 result = proj.add_marker(op["text"], int(op["at"]))
             elif kind == "remove_marker":
@@ -316,6 +415,10 @@ def make_handler(state: State):
             elif parsed.path == "/api/project":
                 with state.lock:
                     self._send_json(self._project_view())
+            elif parsed.path == "/api/projects":
+                with state.lock:
+                    self._send_json({"projects": state.list_projects(),
+                                     "current": state.project_dir})
             elif parsed.path == "/api/mcp-tools":
                 # Phase 5 agent dock: the live tool registry from
                 # mcp.py (names + descriptions), not a hardcoded list.
@@ -521,6 +624,32 @@ def make_handler(state: State):
                     if parsed.path == "/api/project":
                         op = self._read_json()
                         result = state.apply(op)
+                        self._send_json({"ok": True, "result": result,
+                                         **self._project_view()})
+                    elif parsed.path == "/api/project/open":
+                        body = self._read_json()
+                        result = state.open_project(body["folder"])
+                        self._send_json({"ok": True, "result": result,
+                                         **self._project_view()})
+                    elif parsed.path == "/api/project/create":
+                        body = self._read_json()
+                        name = (body.get("name") or "").strip()
+                        if not name or "/" in name or "\\" in name \
+                                or ".." in name:
+                            raise ValueError(
+                                "Project name must be a plain folder name")
+                        root = state.projects_root()
+                        folder = os.path.join(root, name)
+                        if os.path.exists(folder):
+                            raise ValueError(
+                                f"Project folder already exists: {name}")
+                        os.makedirs(os.path.join(folder, "media"),
+                                    exist_ok=True)
+                        os.makedirs(os.path.join(folder, "render"),
+                                    exist_ok=True)
+                        path = os.path.join(folder, PROJECT_FILENAME)
+                        save_project(new_project(name), path)
+                        result = state.open_project(folder)
                         self._send_json({"ok": True, "result": result,
                                          **self._project_view()})
                     elif parsed.path == "/api/undo":

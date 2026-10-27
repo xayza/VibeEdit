@@ -358,6 +358,18 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
             preset, float(color.get("preset_strength", 1.0)))
         if eq_filter:
             filters.append(eq_filter)
+    # Code-gap batch: per-parameter eq sliders (original's individual
+    # colour controls). Chained after any preset filter; only the
+    # parameters actually stored are emitted, so a brightness-only
+    # adjustment does not touch contrast/saturation.
+    eq = color.get("eq") or {}
+    if isinstance(eq, dict) and eq:
+        parts = []
+        for key in ("brightness", "contrast", "saturation", "gamma"):
+            if key in eq:
+                parts.append(f"{key}={float(eq[key]):g}")
+        if parts:
+            filters.append("eq=" + ":".join(parts))
     return filters
 
 
