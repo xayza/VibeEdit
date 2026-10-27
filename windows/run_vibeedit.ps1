@@ -27,8 +27,16 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
   Read-Host "Nhan Enter de thoat"
   exit 1
 }
-if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-  Write-Host "[LOI] Khong tim thay FFmpeg. Vui long cai FFmpeg va them vao PATH."
+# Chap nhan FFmpeg o 3 cho, giong nhu bo render: thu muc chi dinh
+# trong VIBEEDIT_FFMPEG_DIR, FFmpeg co tren PATH, hoac ffmpeg.exe
+# cung thu muc voi launcher nay. Truoc day chi chap nhan PATH nen
+# nguoi dung da cai dung theo huong dan van bi chan o day.
+$ffmpegOk = $false
+if ($env:VIBEEDIT_FFMPEG_DIR -and (Test-Path (Join-Path $env:VIBEEDIT_FFMPEG_DIR "ffmpeg.exe"))) { $ffmpegOk = $true }
+elseif (Get-Command ffmpeg -ErrorAction SilentlyContinue) { $ffmpegOk = $true }
+elseif (Test-Path (Join-Path $scriptDir "ffmpeg.exe")) { $ffmpegOk = $true }
+if (-not $ffmpegOk) {
+  Write-Host "[LOI] Khong tim thay FFmpeg. Hay lam 1 trong 3 cach: them FFmpeg vao PATH, dat ffmpeg.exe cung thu muc voi VibeEdit, hoac dat bien moi truong VIBEEDIT_FFMPEG_DIR tro toi thu muc chua ffmpeg.exe."
   Read-Host "Nhan Enter de thoat"
   exit 1
 }

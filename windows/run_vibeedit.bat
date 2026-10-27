@@ -29,12 +29,18 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+REM Chap nhan FFmpeg o 3 cho, giong nhu bo render: thu muc chi dinh
+REM trong VIBEEDIT_FFMPEG_DIR, FFmpeg co tren PATH, hoac ffmpeg.exe
+REM cung thu muc voi launcher nay. Truoc day chi chap nhan PATH nen
+REM nguoi dung da cai dung theo huong dan van bi chan o day.
+if defined VIBEEDIT_FFMPEG_DIR if exist "%VIBEEDIT_FFMPEG_DIR%\ffmpeg.exe" goto :ffmpegok
 where ffmpeg >nul 2>nul
-if errorlevel 1 (
-  echo [LOI] Khong tim thay FFmpeg. Vui long cai FFmpeg va them vao PATH, hoac dat ffmpeg.exe cung thu muc voi VibeEdit.
-  pause
-  exit /b 1
-)
+if not errorlevel 1 goto :ffmpegok
+if exist "%VE_DIR%ffmpeg.exe" goto :ffmpegok
+echo [LOI] Khong tim thay FFmpeg. Hay lam 1 trong 3 cach: them FFmpeg vao PATH, dat ffmpeg.exe cung thu muc voi VibeEdit, hoac dat bien moi truong VIBEEDIT_FFMPEG_DIR tro toi thu muc chua ffmpeg.exe.
+pause
+exit /b 1
+:ffmpegok
 
 echo [OK] Da thay Python va FFmpeg.
 start "VibeEdit Server" /min python "%VE_APP%" serve --port 8000
