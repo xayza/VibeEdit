@@ -628,3 +628,36 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   .tool-col { width: 300px; border-right: 1px solid var(--line); border-bottom: 0; }
   .details-col { width: 280px; border-left: 1px solid var(--line); border-top: 0; }
 }
+
+/* ---- Media Library grid + timeline fit + Agent convenience (original-app shell) ---- */
+/* Original shell: NO top icon toolbar (removed from index.html); the
+   far-left vertical rail is the only tool switcher, as in the original. */
+#mediaList { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; list-style: none; margin: 0; padding: 0; }
+.media-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-panel2); padding: 8px; cursor: pointer; position: relative; overflow: hidden; }
+.media-card:hover { border-color: var(--accent); }
+.media-thumb { display: block; width: 100%; height: 84px; object-fit: cover; background: #000; border-radius: 4px; }
+.media-thumb-audio { display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--accent); }
+.media-card-body { padding: 6px 2px 2px; }
+.media-card-name { font-size: 12px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-card-meta { font-size: 11px; color: var(--muted); }
+.media-card-id { font-size: 10px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-added-badge { position: absolute; top: 10px; right: 10px; background: var(--ok); color: #062a1a; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 999px; }
+.media-add-btn { width: 100%; margin-top: 6px; font-size: 11px; padding: 5px 6px; }
+.media-add-status { font-size: 12px; color: var(--muted); min-height: 17px; margin: 6px 0; word-break: break-word; }
+.media-add-status:empty { display: none; }
+/* Timeline fully visible: no vertical scrolling inside the timeline;
+   rows are compact so all 8 standard tracks fit, horizontal scroll only. */
+.timeline-wrap { overflow-y: hidden; overflow-x: auto; max-height: none; }
+#tracks { overflow-y: hidden; }
+.track-row { margin-top: 4px; }
+.track-lane { min-height: 34px; }
+.track-label { padding: 6px 10px 0; }
+.clip { top: 3px; bottom: 3px; padding: 4px 10px; }
+#timelineText { max-height: 64px; overflow-y: auto; }
+/* Agent dock: wider, chat input pinned at the bottom of the dock. */
+.details-col { width: 380px; }
+.details-col .agent-dock { display: flex; flex-direction: column; max-height: none; flex: 1; min-height: 0; }
+.details-col .agent-dock .agent-chat { flex: 1; min-height: 120px; overflow-y: auto; }
+.agent-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.agent-chips button { font-size: 11px; padding: 5px 8px; }
+#agentChatForm { flex-shrink: 0; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }

@@ -79,13 +79,85 @@ function renderKeyframes() {
     catch (err) { setStatus(err.message, true); }
   }));
 }
+function mediaBaseName(m) { return (m.path || "").split(/[\\/]/).pop() || m.id; }
+function mediaDurationS(m) {
+  if (m.duration) return Number(m.duration);
+  if (m.frames) return Number(m.frames) / fps();
+  return null;
+}
+function mediaDurationLabel(m) {
+  const s = mediaDurationS(m);
+  if (s === null || isNaN(s)) return "—";
+  const mm = Math.floor(s / 60), ss = Math.round(s % 60);
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+function mediaDurFrames(m) {
+  if (m.frames) return Number(m.frames);
+  if (m.duration) return Math.max(1, Math.round(Number(m.duration) * fps()));
+  return null;
+}
+function mediaIsUsed(m) {
+  return project.tracks.some((t) => t.items.some((it) => it.media === m.id));
+}
+function setMediaStatus(msg, isError) {
+  const el = $("mediaAddStatus");
+  if (el) { el.textContent = msg; el.style.color = isError ? "#c96f68" : "#b8b1a6"; }
+  setStatus(msg, isError);
+}
+function freePosition(track, durFrames) {
+  const items = [...track.items].sort((a, b) => a.at - b.at);
+  if (!items.length) return 0;
+  const fits = (at) => !items.some((it) => at < it.at + it.dur && at + durFrames > it.at);
+  if (fits(playheadFrame)) return playheadFrame;
+  return Math.max(...items.map((it) => it.at + it.dur));
+}
+async function addMediaToTimeline(mediaId) {
+  const m = project.media.find((x) => x.id === mediaId);
+  if (!m) { setMediaStatus("Không tìm thấy file media này.", true); return; }
+  const isAudio = m.kind === "audio";
+  const track = isAudio
+    ? (project.tracks.find((t) => t.kind === "audio") || null)
+    : (project.tracks.find((t) => t.role === "main") || project.tracks.find((t) => t.kind === "video") || null);
+  if (!track) { setMediaStatus("Không có track phù hợp cho file này.", true); return; }
+  const dur = mediaDurFrames(m);
+  if (!dur) { setMediaStatus(`Không thêm được ${mediaBaseName(m)}: file này không có thời lượng ghi nhận, hãy dùng form Add clip và nhập Duration thủ công.`, true); return; }
+  const at = freePosition(track, dur);
+  try {
+    const data = await api("/api/project", { op: "add_clip", media: m.id, track: track.id, at, in: 0, dur, speed: 1 });
+    await load();
+    const newId = data.result && data.result.id;
+    if (newId) {
+      selectClipAndPreview(newId);
+      const tl = document.querySelector(".timeline-wrap");
+      const el = document.querySelector(`#tracks .clip.selected`);
+      if (tl && el) tl.scrollLeft = Math.max(0, el.offsetLeft - 100);
+      setMediaStatus(`Đã thêm ${mediaBaseName(m)} vào timeline (${track.name}) lúc ${(at / fps()).toFixed(2)}s — bấm ▶ để phát.`);
+    } else setMediaStatus(`Đã thêm ${mediaBaseName(m)} vào timeline.`);
+  } catch (err) { setMediaStatus(`Không thêm được ${mediaBaseName(m)}: ${err.message}`, true); }
+}
 function renderMedia() {
-  $("mediaList").innerHTML = project.media.map((m) =>
-    `<li class="media-item" data-media="${m.id}" title="Bấm để xem file này">${m.id} — ${m.path} (${m.kind || "?"})</li>`).join("") || "<li>No media yet.</li>";
-  $("mediaList").querySelectorAll("[data-media]").forEach((li) => li.addEventListener("click", () => loadMediaPreview(li.dataset.media)));
+  const used = new Set();
+  for (const t of project.tracks) for (const it of t.items) if (it.media) used.add(it.media);
+  $("mediaList").innerHTML = project.media.map((m) => {
+    const name = mediaBaseName(m);
+    const dims = (m.width && m.height) ? `${m.width}×${m.height}` : "";
+    const icon = m.kind === "audio" ? "♪" : (m.kind === "image" ? "🖼" : "🎬");
+    const thumb = m.kind === "audio"
+      ? `<div class="media-thumb media-thumb-audio" title="Audio — không có thumbnail">♪</div>`
+      : `<img class="media-thumb" src="/api/thumbnail/${encodeURIComponent(m.id)}" alt="" loading="lazy" onerror="this.style.display='none'">`;
+    return `<li class="media-card" data-media="${m.id}" title="Bấm để xem file này, bấm đúp để thêm vào timeline">${thumb}<div class="media-card-body"><div class="media-card-name">${icon} ${name}</div><div class="media-card-meta">${m.kind || "?"} · ${mediaDurationLabel(m)}${dims ? " · " + dims : ""}</div><div class="media-card-id">${m.id}</div></div>${used.has(m.id) ? '<span class="media-added-badge">Đã thêm</span>' : ""}<button type="button" class="media-add-btn primary" data-add-media="${m.id}">Thêm vào timeline</button></li>`;
+  }).join("") || "<li>No media yet.</li>";
+  $("mediaList").querySelectorAll(".media-card").forEach((li) => {
+    li.addEventListener("click", (e) => { if (!e.target.closest("[data-add-media]")) loadMediaPreview(li.dataset.media); });
+    li.addEventListener("dblclick", () => addMediaToTimeline(li.dataset.media));
+  });
+  $("mediaList").querySelectorAll("[data-add-media]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); addMediaToTimeline(b.dataset.addMedia); }));
   $("addMedia").innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("beatMedia").innerHTML = project.media.map((m) =>
+    `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
+  const tm = $("transcribeMedia");
+  if (tm) tm.innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   const vm = $("voiceMedia");
   if (vm) vm.innerHTML = project.media.map((m) =>
@@ -412,6 +484,39 @@ $("addClipForm").addEventListener("submit", async (e) => {
     if (newId) { selectClipAndPreview(newId); setStatus("Clip đã thêm — đang xem file gốc của clip, bấm ▶ để phát."); }
     else setStatus("Clip added.");
   } catch (err) { setStatus(err.message, true); }
+});
+const btnQuick = $("btnAddClipQuick");
+if (btnQuick) btnQuick.addEventListener("click", () => {
+  const sel = $("addMedia");
+  if (sel && sel.value) addMediaToTimeline(sel.value);
+  else setMediaStatus("Chưa chọn file media nào để thêm.", true);
+});
+const btnPlugins = $("btnPlugins");
+if (btnPlugins) btnPlugins.addEventListener("click", () => setStatus("Plugins: 2 plugin mẫu trong windows/plugins/ — uppercase_text và vivid_color, chạy qua plugin hook. Chưa có panel cài đặt plugin trong bản Windows này."));
+const btnReviewTop = $("btnReviewTop");
+if (btnReviewTop) btnReviewTop.addEventListener("click", () => {
+  const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
+  const r = $("btnReview"); if (r) r.click();
+});
+const transcribeForm = $("transcribeForm");
+if (transcribeForm) transcribeForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    setStatus("Đang phiên âm (faster-whisper)…");
+    const data = await api("/api/project", { op: "transcribe", media: $("transcribeMedia").value, track: "t1", model: $("transcribeModel").value });
+    setStatus(`Đã phiên âm: ${data.result.added.length} đoạn phụ đề đã thêm vào track Captions.`);
+    await load();
+  } catch (err) { setStatus(`Phiên âm thất bại: ${err.message}`, true); }
+});
+const pluginForm = $("pluginForm");
+if (pluginForm) pluginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!selectedId) { const r = $("pluginResult"); if (r) r.textContent = "Hãy chọn một clip trên timeline trước."; return; }
+  try {
+    const data = await api("/api/plugin", { plugin: $("pluginSelect").value, item: selectedId });
+    const r = $("pluginResult"); if (r) r.textContent = `Đã áp dụng ${$("pluginSelect").value} cho clip ${data.item.id}.`;
+    await load();
+  } catch (err) { const r = $("pluginResult"); if (r) r.textContent = `Plugin thất bại: ${err.message}`; }
 });
 $("addTextForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -744,6 +849,11 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       input.focus();
     }
   }
+  document.querySelectorAll("[data-agent-chip]").forEach((b) => b.addEventListener("click", () => {
+    const input = $("agentChatInput"); const form = $("agentChatForm");
+    if (input) input.value = b.dataset.agentChip;
+    if (form) form.requestSubmit();
+  }));
   const chatForm = $("agentChatForm");
   if (chatForm) chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
