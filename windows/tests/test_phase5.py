@@ -216,7 +216,7 @@ class TestPhase5McpAndDock(unittest.TestCase):
 
     def test_tool_count_is_78(self):
         # Phase 7: 78 Phase 6 tools + 12 Phase 7 tools = 90.
-        self.assertEqual(len(TOOLS), 144)  # Code-gap batch 2: 123 -> 144
+        self.assertEqual(len(TOOLS), 472)  # Phase B1: 144 -> 472
         names = [t["name"] for t in TOOLS]
         for expected in ("vibeedit_clip_color_preset_strength",
                          "vibeedit_tool_status",
@@ -260,9 +260,9 @@ class TestPhase5McpAndDock(unittest.TestCase):
         self.assertIn("vivid", self.server.call(
             "vibeedit_color_preset_list", {})["presets"])
         self.assertEqual(self.server.call(
-            "vibeedit_mcp_tools_list", {})["count"], 144)  # Code-gap batch
+            "vibeedit_mcp_tools_list", {})["count"], 472)  # Phase B1
         dock = self.server.call("vibeedit_agent_dock_info", {})
-        self.assertEqual(dock["tool_count"], 144)  # Code-gap batch
+        self.assertEqual(dock["tool_count"], 472)  # Phase B1
         self.assertIn("mcp", dock["command"])
         text = self.proj.add_text("t1", "hi", 0, 30)
         listed = self.server.call("vibeedit_text_list", {})
@@ -327,7 +327,7 @@ class TestAgentDockEndpoint(unittest.TestCase):
                 resp = conn.getresponse()
                 self.assertEqual(resp.status, 200)
                 data = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(data["count"], 144)  # Code-gap batch: 106 -> 123
+                self.assertEqual(data["count"], 472)  # Phase B1: 144 -> 472
                 self.assertTrue(any(
                     t["name"] == "vibeedit_agent_dock_info"
                     for t in data["tools"]))

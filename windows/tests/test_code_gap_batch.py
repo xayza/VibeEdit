@@ -220,7 +220,7 @@ class TestOverwrite(unittest.TestCase):
 
 class TestNewMcpTools(unittest.TestCase):
     def test_tool_count_is_123(self):
-        self.assertEqual(len(TOOLS), 144)  # Code-gap batch 2: 123 -> 144
+        self.assertEqual(len(TOOLS), 472)  # Phase B1: 144 -> 472
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("vibeedit_clip_color_eq",

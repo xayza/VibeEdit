@@ -298,7 +298,7 @@ class TestMCPPhase7(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count_is_90(self):
-        self.assertEqual(len(TOOLS), 144)  # Code-gap batch 2: 123 -> 144
+        self.assertEqual(len(TOOLS), 472)  # Phase B1: 144 -> 472
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
 
