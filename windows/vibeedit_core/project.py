@@ -457,7 +457,13 @@ class Project:
         if track["kind"] == "text":
             raise ValueError("Cannot place a media clip on a text track")
         if dur is None:
+            # Some containers report no nb_frames even though ffprobe
+            # recorded a duration in seconds — derive frames from it
+            # instead of failing with "duration must be positive".
             dur = int(medium.get("frames") or 0)
+            if not dur and medium.get("duration"):
+                dur = int(round(float(medium["duration"])
+                              * fps_value(self.data["format"]["fps"])))
         if dur <= 0:
             raise ValueError("Clip duration must be positive")
         if speed <= 0:

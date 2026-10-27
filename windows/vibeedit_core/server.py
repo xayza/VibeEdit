@@ -194,6 +194,16 @@ class State:
                     ratio=op.get("ratio"))
             elif kind == "project_stats":
                 result = proj.project_stats()
+            elif kind == "transcribe":
+                from .transcribe import transcribe_media
+                medium = proj.media(op["media"])
+                mpath = medium["path"]
+                if not os.path.isabs(mpath):
+                    mpath = os.path.join(proj.folder, mpath)
+                result = transcribe_media(
+                    proj, mpath, op.get("track", "t1"),
+                    model=op.get("model", "tiny"))
+                result = {"added": [it["id"] for it in result]}
             elif kind == "add_track":
                 result = proj.add_track(op.get("kind", "video"),
                                         op.get("role", ""),
@@ -299,6 +309,8 @@ def make_handler(state: State):
                     except Exception:  # noqa: BLE001 - "not found" is data
                         info[tool] = "not found"
                 self._send_json(info)
+            elif parsed.path.startswith("/api/thumbnail/"):
+                self._serve_thumbnail(parsed.path[len("/api/thumbnail/"):])
             elif parsed.path.startswith("/api/media/"):
                 self._serve_media(parsed.path[len("/api/media/"):])
             elif parsed.path == "/api/project":
@@ -377,6 +389,50 @@ def make_handler(state: State):
                     self._send_json({"error": "Not found"}, 404)
             else:
                 self._send_json({"error": "Not found"}, 404)
+
+        def _media_file(self, media_id):
+            """Return (medium, real_path) for a project media id, or
+            None when unknown / outside <project>/media (traversal)."""
+            if not media_id or "/" in media_id or "\\" in media_id:
+                return None
+            with state.lock:
+                try:
+                    medium = state.project.media(media_id)
+                except KeyError:
+                    return None
+                path = medium["path"]
+                if not os.path.isabs(path):
+                    path = os.path.join(state.project_dir, path)
+            media_dir = os.path.realpath(
+                os.path.join(state.project_dir, "media"))
+            real = os.path.realpath(path)
+            if os.path.commonpath([real, media_dir]) != media_dir:
+                return None
+            if not os.path.isfile(real):
+                return None
+            return medium, real
+
+        def _serve_thumbnail(self, raw_id: str):
+            """GET /api/thumbnail/<id>: first-frame PNG for video, the
+            original file for still images, 404 for unknown ids,
+            traversal, audio (no thumbnail exists) and undecodable
+            files — never a fake frame."""
+            from .thumbnail import generate_thumbnail, thumbnail_path
+            media_id = urllib.parse.unquote(raw_id)
+            found = self._media_file(media_id)
+            if not found:
+                self._send_json({"error": "Unknown media"}, 404)
+                return
+            medium, real = found
+            try:
+                thumb = generate_thumbnail(
+                    real, thumbnail_path(state.project_dir, media_id),
+                    medium.get("kind", ""))
+            except (ValueError, RuntimeError, FileNotFoundError):
+                self._send_json({"error": "No thumbnail for this media"},
+                                404)
+                return
+            self._serve_file(thumb)
 
         def _serve_file(self, path: str):
             mime, _ = mimetypes.guess_type(path)
@@ -532,6 +588,28 @@ def make_handler(state: State):
                             ass_text = fh.read()
                         self._send_json({"ok": True, "report": report,
                                          "ass": ass_text})
+                    elif parsed.path == "/api/plugin":
+                        from .plugins import apply_plugin, load_plugins
+                        body = self._read_json()
+                        state.undo_stack.append(state.project.snapshot())
+                        if len(state.undo_stack) > 50:
+                            state.undo_stack.pop(0)
+                        state.redo_stack.clear()
+                        try:
+                            info = load_plugins().get(body["plugin"], {})
+                            hook = next((k for k, v in info.items()
+                                         if callable(v)), None)
+                            if not hook:
+                                raise ValueError(
+                                    f"Plugin {body['plugin']!r} has no hook")
+                            item = apply_plugin(state.project,
+                                                body["plugin"], hook,
+                                                body["item"])
+                            state.save()
+                        except Exception:
+                            state.project.restore(state.undo_stack.pop())
+                            raise
+                        self._send_json({"ok": True, "item": item})
                     elif parsed.path == "/api/stats":
                         self._read_json()
                         self._send_json({"ok": True,
