@@ -105,7 +105,37 @@ TRANSITION_XFADE = {
     "barn-door": "horzopen", "rectcrop": "rectcrop",
     "circlecrop": "circlecrop", "distance": "distance",
 }
-TRANSITION_KINDS = sorted(TRANSITION_XFADE)
+# Phase B6 motion kinds: rendered by render.py motion chains, not by
+# xfade. Defined literally here (NOT imported from render.py) to avoid
+# a circular import, since render.py imports from project.py. Keep in
+# sync with render.MOTION_TRANSITIONS. "halftone" is a known original
+# kind that no FFmpeg filter chain reproduces; it is accepted nowhere
+# as renderable and must error with its pre-rendered-segment path.
+MOTION_TRANSITION_KINDS = {
+    "spin", "swing", "arc", "arc-right", "diamond", "crash-out",
+    "infinite-out", "screen-in", "screen-out", "dip-black",
+    "color-shift", "flicker", "kaleidoscope",
+}
+UNRENDERABLE_TRANSITION_KINDS = {"halftone"}
+TRANSITION_KINDS = sorted(set(TRANSITION_XFADE) | MOTION_TRANSITION_KINDS)
+
+
+def validate_reframe(window) -> dict:
+    """Validate a reframe window (source-frame fractions, top-left
+    origin). Returns a normalised dict; raises on malformed windows
+    instead of silently rendering the full frame."""
+    if not isinstance(window, dict):
+        raise ValueError("reframe must be an object with x, y, w, h")
+    try:
+        x, y, w, h = (float(window["x"]), float(window["y"]),
+                      float(window["w"]), float(window["h"]))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("reframe needs numeric x, y, w, h")
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1):
+        raise ValueError("reframe x/y/w/h must be fractions in range")
+    if x + w > 1 or y + h > 1:
+        raise ValueError("reframe window must fit inside the source frame")
+    return {"x": x, "y": y, "w": w, "h": h}
 
 # Honest FFmpeg eq presets for the original colour/adjustment idea.
 # Values are eq filter arguments; "none" applies nothing.
@@ -314,6 +344,8 @@ def new_project(name: str, width: int = 1080, height: int = 1920,
         "tracks": copy.deepcopy(DEFAULT_TRACKS),
         "transitions": [],
         "markers": [],
+        # Phase B2: magnetic Main is ON by default (see set_magnetic).
+        "magnetic": True,
     }
 
 
@@ -587,7 +619,8 @@ class Project:
         return medium
 
     def add_clip(self, media_id: str, track_id: str, at: int, in_frame: int = 0,
-                 dur: int | None = None, speed: float = 1.0) -> dict:
+                 dur: int | None = None, speed: float = 1.0,
+                 reframe=None) -> dict:
         medium = self.media(media_id)
         track = self.track(track_id)
         if track["kind"] == "text":
@@ -606,6 +639,34 @@ class Project:
             raise ValueError("Speed must be positive")
         item = {"id": _new_id("c"), "media": media_id, "in": int(in_frame),
                 "dur": int(dur), "at": int(at), "speed": float(speed)}
+        if reframe is not None:
+            item["reframe"] = validate_reframe(reframe)
+        if self.magnetic_enabled and self._is_main_track(track) \
+                and int(at) >= 0:
+            # Magnetic insert (Phase B2): landing strictly inside a
+            # clip is refused (an insert never splits a clip), but
+            # inserting at a boundary or in a gap shifts every clip
+            # at/after the insertion point right by the new duration
+            # (with its linked audio), instead of raising overlap.
+            for other in track["items"]:
+                o_start = int(other["at"])
+                if o_start < int(at) < o_start + int(other["dur"]):
+                    raise ValueError(
+                        "Magnetic insert cannot land inside a clip: "
+                        "insert at a clip boundary or in a gap")
+            changes: dict = {}
+            for other in track["items"]:
+                if int(other["at"]) >= int(at):
+                    self._shift_with_partners(changes, track, other,
+                                              int(dur))
+            planned = self._build_planned(changes)
+            self._check_planned(planned)
+            self._apply_planned(changes)
+            self._shift_markers_at(int(at), int(dur))
+            track["items"].append(item)
+            track["items"].sort(key=lambda i: i["at"])
+            self._bump()
+            return item
         self._check_overlap(track, item)
         track["items"].append(item)
         track["items"].sort(key=lambda i: i["at"])
@@ -635,22 +696,66 @@ class Project:
         if edge == "start":
             if not (start < to_frame < end):
                 raise ValueError("Trim start must fall strictly inside the item")
-            item["in"] = int(item.get("in", 0)) + (to_frame - start)
-            item["dur"] = end - to_frame
-            item["at"] = to_frame
+            new_at, new_dur = to_frame, end - to_frame
+            new_in = int(item.get("in", 0)) + (to_frame - start)
+            start_delta = to_frame - start
         elif edge == "end":
             if not (start < to_frame < end):
                 raise ValueError("Trim end must fall strictly inside the item")
-            item["dur"] = to_frame - start
+            new_at, new_dur = start, to_frame - start
+            new_in = int(item.get("in", 0))
+            start_delta = 0
         else:
             raise ValueError("edge must be 'start' or 'end'")
+        # Linked partners take the same edge trim, by the same
+        # timeline delta (start trims advance both partners' source
+        # offset, end trims shorten both). A partner that would be
+        # left with no duration refuses the whole trim.
+        changes: dict = {item["id"]: (track["id"], new_at, new_dur)}
+        in_updates = [(item, new_in)] if edge == "start" else []
+        for partner_track, partner in self._link_partners(item):
+            p_start = int(partner["at"])
+            if edge == "start":
+                p_at = p_start + start_delta
+                p_dur = int(partner["dur"]) - start_delta
+                p_in = int(partner.get("in", 0)) + start_delta
+            else:
+                p_at = p_start
+                p_dur = int(partner["dur"]) - (end - to_frame)
+                p_in = int(partner.get("in", 0))
+            if p_dur <= 0:
+                raise ValueError(
+                    f"Trim would leave linked clip {partner['id']} "
+                    f"with no duration")
+            changes[partner["id"]] = (partner_track["id"], p_at, p_dur)
+            if edge == "start":
+                in_updates.append((partner, p_in))
+        # Magnetic Main (direct edits only): an end-trim shortens
+        # the clip's span, so followers shift left by the trimmed
+        # amount; a start-trim leaves the end unchanged, so
+        # followers stay. Trimming a linked audio clip trims its
+        # Main video but does not ripple Main followers.
+        if self.magnetic_enabled and edge == "end" \
+                and self._is_main_track(track):
+            for follower in self._main_followers(track, item):
+                self._shift_with_partners(changes, track, follower,
+                                          -(end - to_frame))
+        planned = self._build_planned(changes)
+        self._check_planned(planned)
+        self._apply_planned(changes)
+        if self.magnetic_enabled and edge == "end" \
+                and self._is_main_track(track):
+            self._collapse_markers(to_frame, end, to_frame)
+            self._shift_markers_at(end, -(end - to_frame))
+        for target, in_value in in_updates:
+            target["in"] = in_value
         self._bump()
         return item
 
-    def split(self, item_id: str, at_frame: int) -> dict:
-        """Split at a timeline frame. Left half keeps the ID (original rule)."""
-        track, item = self.item(item_id)
-        at_frame = int(at_frame)
+    def _split_one(self, track: dict, item: dict, at_frame: int) -> dict:
+        """Split one item at a timeline frame: no link handling, no
+        rev bump. The left half keeps the id; returns the right half.
+        Raises before mutating when the point is outside the item."""
         start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
         if not (start < at_frame < end):
             raise ValueError("Split point must fall strictly inside the item")
@@ -673,6 +778,55 @@ class Project:
         item["dur"] = at_frame - start
         track["items"].append(right)
         track["items"].sort(key=lambda i: i["at"])
+        return right
+
+    def split(self, item_id: str, at_frame: int) -> dict:
+        """Split at a timeline frame. Left half keeps the ID (original rule).
+
+        A linked partner is split at the same timeline point (it
+        must cover the point, else the whole split is refused) and
+        the links are rewired so left halves link to each other and
+        right halves link to each other (the original linked-split
+        rule). Splitting a Main clip changes no span, so magnetic
+        followers do not move."""
+        track, item = self.item(item_id)
+        at_frame = int(at_frame)
+        start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
+        if not (start < at_frame < end):
+            raise ValueError("Split point must fall strictly inside the item")
+        partners = self._link_partners(item)
+        for _partner_track, partner in partners:
+            p_start = int(partner["at"])
+            p_end = p_start + int(partner["dur"])
+            if not (p_start < at_frame < p_end):
+                raise ValueError(
+                    f"Linked clip {partner['id']} does not cover "
+                    f"the split point {at_frame}; split is refused")
+        # Every split below is pre-validated, so nothing here can
+        # fail part-way: the split is atomic without a snapshot.
+        split_partners = []
+        for partner_track, partner in partners:
+            split_partners.append(
+                (partner_track, partner,
+                 self._split_one(partner_track, partner, at_frame)))
+        right = self._split_one(track, item, at_frame)
+        if self._linked_audio_ids(item):
+            # Split video: every linked audio was split above.
+            item["linked_audio"] = [p["id"] for _, p, _r in split_partners]
+            right["linked_audio"] = [r["id"] for _, _p, r in split_partners]
+            for _, partner, right_partner in split_partners:
+                partner["linked_video"] = item["id"]
+                right_partner["linked_video"] = right["id"]
+        elif self._linked_video_id(item) is not None:
+            # Split audio: its video partner was split above; the
+            # right video half must point at the right audio half.
+            _partner_track, partner, right_partner = split_partners[0]
+            item["linked_video"] = partner["id"]
+            right["linked_video"] = right_partner["id"]
+            video_audio = self._linked_audio_ids(partner)
+            right_partner["linked_audio"] = [
+                right["id"] if aid == item["id"] else aid
+                for aid in video_audio]
         self._bump()
         return right
 
@@ -683,24 +837,95 @@ class Project:
             raise ValueError("Cannot move a media clip onto a text track")
         if dest["kind"] != "text" and "media" not in item:
             raise ValueError("Cannot move a text item onto a media track")
-        old_track, old_at = track, item["at"]
-        track["items"].remove(item)
-        item["at"] = int(at)
-        try:
-            self._check_overlap(dest, item)
-        except ValueError:
-            track["items"].append(item)
-            track["items"].sort(key=lambda i: i["at"])
-            item["at"] = old_at
-            raise
-        dest["items"].append(item)
-        dest["items"].sort(key=lambda i: i["at"])
+        old_track, old_at = track, int(item["at"])
+        new_at = int(at)
+        delta = new_at - old_at
+        changes: dict = {item["id"]: (dest["id"], new_at, int(item["dur"]))}
+        # Linked partners follow by the same delta on their own
+        # tracks, with the same overlap validation as the move.
+        for partner_track, partner in self._link_partners(item):
+            self._add_shift(changes, partner["id"], partner_track["id"],
+                            int(partner["at"]) + delta,
+                            int(partner["dur"]))
+        if self.magnetic_enabled:
+            if old_track["id"] == dest["id"] \
+                    and self._is_main_track(track):
+                # Same-track Main move: followers shift by the delta.
+                # Clip order is preserved: jumping over the previous
+                # clip is refused (reordering is not a plain move;
+                # the original has a separate reorder operation).
+                ordered = sorted(track["items"], key=lambda i: i["at"])
+                idx = next(i for i, other in enumerate(ordered)
+                           if other["id"] == item["id"])
+                if idx > 0:
+                    prev = ordered[idx - 1]
+                    if new_at < int(prev["at"]) + int(prev["dur"]):
+                        raise ValueError(
+                            "Magnetic move cannot jump over the "
+                            "previous Main clip (clip order is "
+                            "preserved)")
+                for follower in ordered[idx + 1:]:
+                    self._shift_with_partners(changes, track, follower,
+                                              delta)
+            elif self._is_main_track(old_track) \
+                    and not self._is_main_track(dest):
+                # Leaving Main: followers close the gap, as on delete.
+                for follower in self._main_followers(old_track, item):
+                    self._shift_with_partners(changes, old_track, follower,
+                                              -int(item["dur"]))
+            elif not self._is_main_track(old_track) \
+                    and self._is_main_track(dest):
+                # Entering Main: clips at/after the destination shift
+                # right to make room; landing inside a clip is refused.
+                for other in dest["items"]:
+                    o_start = int(other["at"])
+                    if o_start < new_at < o_start + int(other["dur"]):
+                        raise ValueError(
+                            "Magnetic move cannot land inside a "
+                            "Main clip")
+                for other in dest["items"]:
+                    if int(other["at"]) >= new_at:
+                        self._shift_with_partners(changes, dest, other,
+                                                  int(item["dur"]))
+        planned = self._build_planned(changes)
+        self._check_planned(planned)
+        self._apply_planned(changes)
         self._bump()
         return item
 
     def delete(self, item_id: str) -> None:
         track, item = self.item(item_id)
-        track["items"].remove(item)
+        dur = int(item["dur"])
+        removed = {item["id"]}
+        changes: dict = {}
+        surviving_video = None
+        partners = self._link_partners(item)
+        if self._linked_audio_ids(item):
+            # Deleting the video takes its audio with it (original rule).
+            for _partner_track, partner in partners:
+                removed.add(partner["id"])
+        elif self._linked_video_id(item) is not None:
+            # Deleting the audio alone keeps its video, unlinked
+            # (original rule): only the link field is cleared.
+            surviving_video = partners[0][1]
+        if self.magnetic_enabled and self._is_main_track(track):
+            for follower in self._main_followers(track, item):
+                self._shift_with_partners(changes, track, follower, -dur)
+        planned = self._build_planned(changes, removed)
+        self._check_planned(planned)
+        self._apply_planned(changes, removed)
+        if self.magnetic_enabled and self._is_main_track(track):
+            start = int(item["at"])
+            self._collapse_markers(start, start + dur, start)
+            self._shift_markers_at(start + dur, -dur)
+        if surviving_video is not None:
+            remaining = [aid for aid in
+                         self._linked_audio_ids(surviving_video)
+                         if aid != item["id"]]
+            if remaining:
+                surviving_video["linked_audio"] = remaining
+            else:
+                surviving_video.pop("linked_audio", None)
         self._bump()
 
     def set_speed(self, item_id: str, speed: float) -> dict:
@@ -809,7 +1034,12 @@ class Project:
         duration} with duration in frames. Duration must be 0.1–2.0 s
         and must not exceed the shorter adjacent clip.
         """
-        if kind not in TRANSITION_XFADE:
+        if kind in UNRENDERABLE_TRANSITION_KINDS:
+            raise ValueError(
+                f"Transition kind {kind!r} cannot be rendered: no FFmpeg "
+                f"filter chain reproduces it; path: pre-rendered segment")
+        if kind not in TRANSITION_XFADE and \
+                kind not in MOTION_TRANSITION_KINDS:
             raise ValueError(
                 f"Unknown transition kind: {kind!r} "
                 f"(choose one of {', '.join(TRANSITION_KINDS)})")
@@ -1016,6 +1246,36 @@ class Project:
         track = self.track(track_id)
         dur = out_frame - in_frame
         end = at + dur
+        # Phase B2: a touched clip's linked audio must follow the
+        # same cut (trimmed, split, or deleted with its video), so
+        # the link never silently desyncs. Overwriting a linked
+        # audio clip itself is refused (its Main video would need
+        # a ripple the overwrite does not perform), and a linked
+        # audio that is not exactly aligned with its video is
+        # refused too: mirroring a cut onto a misaligned partner
+        # would invent new timings. Both refusals happen before
+        # any mutation.
+        for item in track["items"]:
+            istart, iend = item["at"], item["at"] + item["dur"]
+            if iend <= at or istart >= end:
+                continue
+            if self._linked_video_id(item) is not None:
+                raise ValueError(
+                    "Cannot overwrite a linked audio clip: unlink "
+                    "it from its video first")
+            for _pt, partner in self._link_partners(item):
+                if int(partner["at"]) != istart \
+                        or int(partner["dur"]) != int(item["dur"]):
+                    raise ValueError(
+                        f"Linked audio {partner['id']} is not "
+                        f"aligned with clip {item['id']}: unlink "
+                        f"or realign it before overwriting")
+        # Partner edits are collected first and applied only after
+        # the new clip is verified to fit the kept list, so a failed
+        # overwrite never half-edits an audio track.
+        partner_trims: list[tuple[dict, int, int, int]] = []
+        partner_deletes: list[tuple[dict, dict]] = []
+        partner_splits: list[tuple[dict, dict, dict, dict]] = []
         kept = []
         for item in track["items"]:
             istart, iend = item["at"], item["at"] + item["dur"]
@@ -1031,9 +1291,32 @@ class Project:
                 right["dur"] = iend - end
                 right["at"] = end
                 kept.extend([left, right])
+                left_ids, right_ids = [], []
+                for p_track, partner in self._link_partners(item):
+                    p_speed = partner.get("speed") or 1.0
+                    left_p = dict(partner)
+                    left_p["dur"] = at - istart
+                    right_p = _copy.deepcopy(partner)
+                    right_p["id"] = _new_id("c")
+                    right_p["in"] = partner.get("in", 0) + int(round(
+                        (end - istart) / p_speed))
+                    right_p["dur"] = iend - end
+                    right_p["at"] = end
+                    right_p["linked_video"] = right["id"]
+                    partner_splits.append(
+                        (p_track, partner, left_p, right_p))
+                    left_ids.append(left_p["id"])
+                    right_ids.append(right_p["id"])
+                if left_ids:
+                    left["linked_audio"] = left_ids
+                    right["linked_audio"] = right_ids
             elif istart < at:
                 item["dur"] = at - istart
                 kept.append(item)
+                for _pt, partner in self._link_partners(item):
+                    partner_trims.append(
+                        (partner, int(partner["at"]), at - istart,
+                         int(partner.get("in", 0))))
             elif iend > end:
                 speed = item.get("speed") or 1.0
                 delta = end - istart
@@ -1041,9 +1324,38 @@ class Project:
                 item["dur"] = iend - end
                 item["at"] = end
                 kept.append(item)
+                for _pt, partner in self._link_partners(item):
+                    p_speed = partner.get("speed") or 1.0
+                    partner_trims.append(
+                        (partner, end, iend - end,
+                         int(partner.get("in", 0)) + int(round(
+                             delta / p_speed))))
             # else: fully inside the range -> dropped
+            else:
+                for p_track, partner in self._link_partners(item):
+                    partner_deletes.append((p_track, partner))
+        new_item = {"id": _new_id("c"), "media": media_id,
+                    "in": int(in_frame), "dur": int(dur), "at": int(at),
+                    "speed": 1.0}
+        # The new clip is placed directly, not via add_clip: an
+        # overwrite preserves the covered span, so magnetic insert
+        # must not shift the clips after it.
+        self._check_overlap({"id": track_id, "items": kept}, new_item)
+        for p_track, partner in partner_deletes:
+            p_track["items"].remove(partner)
+        for p_track, partner, left_p, right_p in partner_splits:
+            p_track["items"].remove(partner)
+            p_track["items"].extend([left_p, right_p])
+            p_track["items"].sort(key=lambda i: i["at"])
+        for partner, p_at, p_dur, p_in in partner_trims:
+            partner["at"] = p_at
+            partner["dur"] = p_dur
+            partner["in"] = p_in
         track["items"] = sorted(kept, key=lambda i: i["at"])
-        return self.add_clip(media_id, track_id, at, in_frame, dur)
+        track["items"].append(new_item)
+        track["items"].sort(key=lambda i: i["at"])
+        self._bump()
+        return new_item
 
     def close_gaps(self, track_id: str | None = None) -> dict:
         """Close gaps on one track: shift each clip left so it starts
@@ -1057,16 +1369,395 @@ class Project:
                              if t.get("role") == "main"),
                             self.data["tracks"][0]["id"])
         track = self.track(track_id)
+        # Phase B2: plan first, then apply, so a moved clip's linked
+        # audio follows it by the same delta and a collision on the
+        # audio track refuses the whole close (data unchanged).
+        changes: dict = {}
         moved = []
         cursor = 0
         for item in sorted(track["items"], key=lambda i: i["at"]):
-            if item["at"] != cursor:
-                item["at"] = cursor
+            if int(item["at"]) != cursor:
+                delta = cursor - int(item["at"])
                 moved.append(item["id"])
-            cursor = item["at"] + item["dur"]
-        track["items"].sort(key=lambda i: i["at"])
+                self._add_shift(changes, item["id"], track["id"],
+                                cursor, int(item["dur"]))
+                for partner_track, partner in self._link_partners(item):
+                    self._add_shift(changes, partner["id"],
+                                    partner_track["id"],
+                                    int(partner["at"]) + delta,
+                                    int(partner["dur"]))
+            cursor += int(item["dur"])
+        planned = self._build_planned(changes)
+        self._check_planned(planned)
+        self._apply_planned(changes)
         self._bump()
         return {"track": track_id, "moved": moved}
+
+    # -- Phase B2: magnetic Main + linked audio ----------------------
+    # Storage: a video item carries "linked_audio": [audio item ids];
+    # each linked audio item carries "linked_video": <video item id>.
+    # This is the Windows form of the original's reciprocal
+    # linkedAudio/linkedVideo pair (original: singular camelCase
+    # strings; Windows: a list, so one video clip may link several
+    # Dialogue clips). Links are created only by link_audio() and
+    # removed only by unlink_audio() or by deleting the audio clip
+    # itself (which keeps its video, unlinked, as in the original);
+    # no edit below silently drops a link: an operation that cannot
+    # keep a link consistent raises and changes nothing.
+    #
+    # Magnetic Main: when magnetic_enabled (project data "magnetic",
+    # default True, toggled by set_magnetic()) a direct edit to a
+    # clip on the Main track ripples its tail: delete shifts
+    # following Main clips left by the deleted duration, insert
+    # shifts clips at/after the insertion point right by the new
+    # duration, an end-trim shifts followers left by the trimmed
+    # amount, and a same-track move shifts followers by the move
+    # delta. Followers' linked audio shifts with them, each item
+    # moving at most once per operation (the original's moved-set
+    # rule). Ripple is driven by direct Main edits only: moving or
+    # trimming a linked audio clip moves/trims its video but does
+    # not ripple Main followers. A magnetic move preserves clip
+    # order: jumping over a predecessor is refused, as is any shift
+    # that would overlap or start before frame 0. Magnetic off
+    # restores the old behaviour exactly (overlap rejected, no tail
+    # shift); linked propagation still applies with magnetic off.
+    # All B2 edits validate the planned positions before mutating
+    # anything, so a refused operation leaves the project data
+    # (including rev) unchanged.
+
+    @property
+    def magnetic_enabled(self) -> bool:
+        """Whether Main-track edits ripple (project data "magnetic",
+        default True for projects that predate the toggle)."""
+        return bool(self.data.get("magnetic", True))
+
+    def set_magnetic(self, enabled: bool) -> dict:
+        """Switch magnetic Main on/off; the state is stored in the
+        project data, so it survives save/load and undo (the server
+        snapshots before the op, like every other edit)."""
+        self.data["magnetic"] = bool(enabled)
+        self._bump()
+        return {"magnetic": self.magnetic_enabled}
+
+    def _is_main_track(self, track: dict | None) -> bool:
+        return bool(track is not None and track.get("role") == "main"
+                    and track["kind"] == "video")
+
+    def _main_track(self) -> dict | None:
+        for track in self.data["tracks"]:
+            if self._is_main_track(track):
+                return track
+        return None
+
+    def _linked_audio_ids(self, item: dict) -> list[str]:
+        raw = item.get("linked_audio")
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            return [raw]
+        return [str(x) for x in raw]
+
+    def _linked_video_id(self, item: dict) -> str | None:
+        raw = item.get("linked_video")
+        return str(raw) if raw is not None else None
+
+    def _link_partners(self, item: dict) -> list[tuple[dict, dict]]:
+        """(track, item) pairs linked to ``item``: its audio clips
+        when it is a video clip, its video clip when it is audio.
+        A dangling or one-way link raises ValueError so the caller
+        refuses instead of half-applying (validate() reports the
+        same problems without raising, for diagnosis)."""
+        partners = []
+        for audio_id in self._linked_audio_ids(item):
+            try:
+                partner_track, partner = self.item(audio_id)
+            except KeyError:
+                raise ValueError(
+                    f"Linked audio clip {audio_id!r} is missing")
+            if self._linked_video_id(partner) != item["id"]:
+                raise ValueError(
+                    f"Link to {audio_id!r} is one-way: its audio "
+                    f"does not link back to {item['id']!r}")
+            partners.append((partner_track, partner))
+        video_id = self._linked_video_id(item)
+        if video_id is not None:
+            try:
+                partner_track, partner = self.item(video_id)
+            except KeyError:
+                raise ValueError(
+                    f"Linked video clip {video_id!r} is missing")
+            if item["id"] not in self._linked_audio_ids(partner):
+                raise ValueError(
+                    f"Link to {video_id!r} is one-way: its video "
+                    f"does not link back to {item['id']!r}")
+            partners.append((partner_track, partner))
+        return partners
+
+    def linked_audio(self, video_clip_id: str) -> list[dict]:
+        """The audio items linked to a video clip (empty when unlinked)."""
+        _, item = self.item(video_clip_id)
+        return [audio for _, audio in self._link_partners(item)]
+
+    def link_audio(self, video_clip_id: str, audio_clip_id: str) -> dict:
+        """Link a Dialogue audio clip to a video clip. The audio
+        must live on an audio track and must not already be linked
+        to another video clip; a video clip may link several audio
+        clips. Linking the same pair twice is refused."""
+        _, video = self.item(video_clip_id)
+        audio_track, audio = self.item(audio_clip_id)
+        if "media" not in video or "media" not in audio:
+            raise ValueError("Only media clips can be linked")
+        if audio_track["kind"] != "audio":
+            raise ValueError("Linked audio must live on an audio track")
+        if video_clip_id == audio_clip_id:
+            raise ValueError("A clip cannot link to itself")
+        existing = self._linked_video_id(audio)
+        if existing is not None:
+            if existing == video_clip_id:
+                raise ValueError("These clips are already linked")
+            raise ValueError(
+                f"Audio clip is already linked to {existing!r}")
+        ids = self._linked_audio_ids(video)
+        if audio_clip_id in ids:
+            raise ValueError("These clips are already linked")
+        ids.append(audio_clip_id)
+        video["linked_audio"] = ids
+        audio["linked_video"] = video_clip_id
+        self._bump()
+        return {"video": video_clip_id, "audio": audio_clip_id}
+
+    def unlink_audio(self, video_clip_id: str,
+                     audio_clip_id: str | None = None) -> dict:
+        """Remove a link: one audio clip when ``audio_clip_id`` is
+        given, else all of the video clip's linked audio. The audio
+        clips themselves are kept; only the link fields are cleared.
+        Unlinking a pair that is not linked is refused."""
+        _, video = self.item(video_clip_id)
+        ids = self._linked_audio_ids(video)
+        if audio_clip_id is None:
+            targets = list(ids)
+            if not targets:
+                raise ValueError("Video clip has no linked audio")
+        else:
+            if audio_clip_id not in ids:
+                raise ValueError(
+                    "Audio clip is not linked to this video clip")
+            targets = [audio_clip_id]
+        for target_id in targets:
+            try:
+                _, audio = self.item(target_id)
+            except KeyError:
+                continue  # dangling id: dropping it is the fix
+            if self._linked_video_id(audio) == video_clip_id:
+                audio.pop("linked_video", None)
+        remaining = [aid for aid in ids if aid not in targets]
+        if remaining:
+            video["linked_audio"] = remaining
+        else:
+            video.pop("linked_audio", None)
+        self._bump()
+        return {"video": video_clip_id, "unlinked": targets}
+
+    def _build_planned(self, changes: dict, removed=frozenset()):
+        """Planned (id, at, dur) lists for every track touched by
+        ``changes`` ({item_id: (track_id, at, dur)}) or ``removed``
+        (item ids). Items moving tracks leave their old track's
+        list and join the new track's list."""
+        orig = {}
+        for track in self.data["tracks"]:
+            for item in track["items"]:
+                if item["id"] in changes or item["id"] in removed:
+                    orig[item["id"]] = track["id"]
+        affected: set[str] = set()
+        for item_id, (track_id, _at, _dur) in changes.items():
+            affected.add(track_id)
+            if item_id in orig:
+                affected.add(orig[item_id])
+        for item_id in removed:
+            if item_id in orig:
+                affected.add(orig[item_id])
+        planned: dict[str, list] = {}
+        for track in self.data["tracks"]:
+            if track["id"] not in affected:
+                continue
+            entries = []
+            for item in track["items"]:
+                if item["id"] in removed:
+                    continue
+                change = changes.get(item["id"])
+                if change is not None and change[0] != track["id"]:
+                    continue  # moved to another track
+                if change is not None:
+                    entries.append((item["id"], change[1], change[2]))
+                else:
+                    entries.append((item["id"], int(item["at"]),
+                                    int(item["dur"])))
+            planned[track["id"]] = entries
+        for item_id, (track_id, at, dur) in changes.items():
+            entries = planned.setdefault(track_id, [])
+            if not any(entry[0] == item_id for entry in entries):
+                entries.append((item_id, at, dur))
+        return planned
+
+    def _check_planned(self, planned: dict) -> None:
+        """Validate planned positions: no negative start, positive
+        duration, no overlap on any planned track. Raises ValueError
+        on the first problem found."""
+        for track_id, entries in planned.items():
+            ordered = sorted(entries, key=lambda e: (e[1], e[0]))
+            for item_id, at, dur in ordered:
+                if at < 0:
+                    raise ValueError(
+                        f"Item {item_id} would start before frame 0 "
+                        f"on track {track_id}")
+                if dur <= 0:
+                    raise ValueError(
+                        f"Item {item_id} would have no duration "
+                        f"on track {track_id}")
+            for (id1, at1, dur1), (id2, at2, _dur2) in zip(
+                    ordered, ordered[1:]):
+                if at1 + dur1 > at2:
+                    raise ValueError(
+                        f"Item {id1} would overlap {id2} "
+                        f"on track {track_id}")
+
+    def _apply_planned(self, changes: dict, removed=frozenset()) -> None:
+        """Apply position/duration changes and removals validated by
+        _check_planned/_build_planned, re-sorting touched tracks.
+        ``changes`` and ``removed`` must be disjoint."""
+        by_id = {}
+        for track in self.data["tracks"]:
+            for item in track["items"]:
+                by_id[item["id"]] = (track, item)
+        touched: set[str] = set()
+        for item_id in removed:
+            track, item = by_id[item_id]
+            track["items"].remove(item)
+            touched.add(track["id"])
+        for item_id, (track_id, at, dur) in changes.items():
+            track, item = by_id[item_id]
+            if track["id"] != track_id:
+                track["items"].remove(item)
+                touched.add(track["id"])
+                track = self.track(track_id)
+                track["items"].append(item)
+                touched.add(track_id)
+            item["at"] = at
+            item["dur"] = dur
+        for track in self.data["tracks"]:
+            if track["id"] in touched:
+                track["items"].sort(key=lambda i: i["at"])
+
+    def _add_shift(self, changes: dict, item_id: str, track_id: str,
+                   at: int, dur: int) -> None:
+        """Record a planned position, refusing a second, different
+        position for the same item (the move-once rule: a linked
+        partner moved with its clip is never moved again by the
+        same operation's ripple)."""
+        planned = (track_id, at, dur)
+        if item_id in changes and changes[item_id] != planned:
+            raise ValueError(
+                f"Conflicting planned positions for item {item_id}")
+        changes[item_id] = planned
+
+    def _shift_with_partners(self, changes: dict, track: dict,
+                             item: dict, delta: int) -> None:
+        """Shift ``item`` on ``track`` by ``delta`` and shift each of
+        its linked partners by the same delta on their own tracks.
+        Partners of partners are the item itself, already shifted,
+        so the shift never chains."""
+        self._add_shift(changes, item["id"], track["id"],
+                        int(item["at"]) + delta, int(item["dur"]))
+        for partner_track, partner in self._link_partners(item):
+            self._add_shift(changes, partner["id"], partner_track["id"],
+                            int(partner["at"]) + delta,
+                            int(partner["dur"]))
+
+    def _main_followers(self, track: dict, item: dict) -> list[dict]:
+        """Main-track items after ``item`` in timeline order."""
+        ordered = sorted(track["items"], key=lambda i: i["at"])
+        followers = []
+        seen = False
+        for other in ordered:
+            if other["id"] == item["id"]:
+                seen = True
+            elif seen:
+                followers.append(other)
+        return followers
+
+    def _shift_markers_at(self, point: int, delta: int) -> None:
+        """Shift markers at or after ``point`` by ``delta`` frames
+        (clamped at 0). Used by magnetic Main edits so markers track
+        the timeline content they annotate."""
+        for marker in self.data.get("markers", []):
+            if int(marker["at"]) >= point:
+                marker["at"] = max(0, int(marker["at"]) + delta)
+        self.data.get("markers", []).sort(key=lambda m: m["at"])
+
+    def _collapse_markers(self, start: int, end: int, to: int) -> None:
+        """Move markers inside [start, end) to ``to`` (they annotated
+        content that no longer spans those frames after a magnetic
+        delete/trim). Markers at/after ``end`` are shifted by the
+        caller via _shift_markers_at."""
+        for marker in self.data.get("markers", []):
+            if start <= int(marker["at"]) < end:
+                marker["at"] = to
+
+    def reorder_main(self, item_id: str, before_id: str | None = None) -> dict:
+        """Magnetic reorder on Main: move a Main clip to just before
+        another Main clip (or to the end when ``before_id`` is None).
+        Items between the old and new positions shift by the moved
+        clip's duration (with their linked audio); all other clips
+        keep their positions, and durations never change. Reordering
+        is an explicit operation, so it runs even when the magnetic
+        toggle is off. Moving a clip before itself is an error, and
+        moving it to its current position is a no-op."""
+        track, item = self.item(item_id)
+        if not self._is_main_track(track):
+            raise ValueError("Reorder applies to Main-track clips only")
+        ordered = sorted(track["items"], key=lambda i: i["at"])
+        ids = [i["id"] for i in ordered]
+        if before_id is not None:
+            if before_id == item_id:
+                raise ValueError("Cannot reorder a clip before itself")
+            if before_id not in ids:
+                raise ValueError(f"Unknown clip: {before_id!r}")
+            before = next(i for i in ordered if i["id"] == before_id)
+            target = int(before["at"])
+            if ids.index(before_id) == ids.index(item_id) + 1:
+                return item  # already directly before it: no-op
+        else:
+            last = ordered[-1]
+            if last["id"] == item_id:
+                return item  # already last: no-op
+            target = int(last["at"]) + int(last["dur"])
+        old_at, dur = int(item["at"]), int(item["dur"])
+        changes: dict = {}
+        if target < old_at:
+            # Moving earlier: items in [target, old_at) shift right.
+            for other in ordered:
+                if target <= int(other["at"]) < old_at:
+                    self._shift_with_partners(changes, track, other, dur)
+            self._shift_with_partners(changes, track, item,
+                                      target - old_at)
+        else:
+            # Moving later: items strictly between the moved clip
+            # and the target shift left by dur (the before-clip
+            # itself shifts left too, so the moved clip lands at
+            # target - dur; for "to end", target is the old track
+            # end, so the clip lands at old_end - dur).
+            for other in ordered:
+                if old_at < int(other["at"]) < target or \
+                        (before_id is None and
+                         int(other["at"]) > old_at):
+                    self._shift_with_partners(changes, track, other, -dur)
+            self._shift_with_partners(changes, track, item,
+                                      target - old_at - dur)
+        planned = self._build_planned(changes)
+        self._check_planned(planned)
+        self._apply_planned(changes)
+        self._bump()
+        return item
 
     # -- Code-gap batch 2: speed curves, reverse, freeze --------------
     # Speed-curve presets copied verbatim from the original's
@@ -1147,6 +1838,20 @@ class Project:
         if "media" not in item:
             raise ValueError("Reverse applies to media clips only")
         item["reverse"] = bool(reverse)
+        self._bump()
+        return item
+
+    def set_reframe(self, item_id: str, window) -> dict:
+        """Set (or, with window None, clear) a clip's reframe window.
+        Rendered by render.reframe_crop_filter: the window crops the
+        source frame before scaling, never stretching it."""
+        _, item = self.item(item_id)
+        if "media" not in item:
+            raise ValueError("Reframe applies to media clips only")
+        if window is None:
+            item.pop("reframe", None)
+        else:
+            item["reframe"] = validate_reframe(window)
         self._bump()
         return item
 
@@ -1720,8 +2425,48 @@ class Project:
                             f"Item {item['id']} overlaps {other['id']} "
                             f"on track {track['id']}")
                 seen.append(item)
+        # Phase B2: link integrity (reported, not raised, like the
+        # other validation errors): every linked id must exist and
+        # the link must be reciprocal.
+        for track in data["tracks"]:
+            for item in track["items"]:
+                linked = item.get("linked_audio")
+                if linked is not None:
+                    ids = [linked] if isinstance(linked, str) \
+                        else list(linked)
+                    for audio_id in ids:
+                        partner = items_by_id.get(audio_id)
+                        if partner is None:
+                            errors.append(
+                                f"Item {item['id']} links to unknown "
+                                f"audio {audio_id!r}")
+                        elif partner.get("linked_video") != item["id"]:
+                            errors.append(
+                                f"Item {item['id']} has a one-way "
+                                f"link to {audio_id}")
+                video_id = item.get("linked_video")
+                if video_id is not None:
+                    partner = items_by_id.get(video_id)
+                    if partner is None:
+                        errors.append(
+                            f"Item {item['id']} links to unknown "
+                            f"video {video_id!r}")
+                    else:
+                        partner_links = partner.get("linked_audio")
+                        partner_ids = [partner_links] \
+                            if isinstance(partner_links, str) \
+                            else list(partner_links or [])
+                        if item["id"] not in partner_ids:
+                            errors.append(
+                                f"Item {item['id']} has a one-way "
+                                f"link to {video_id}")
         for trans in data.get("transitions", []):
-            if trans.get("kind") not in TRANSITION_XFADE:
+            if trans.get("kind") in UNRENDERABLE_TRANSITION_KINDS:
+                errors.append(
+                    f"Transition {trans.get('id')} kind "
+                    f"{trans.get('kind')!r} cannot be rendered")
+            elif trans.get("kind") not in TRANSITION_XFADE and \
+                    trans.get("kind") not in MOTION_TRANSITION_KINDS:
                 errors.append(
                     f"Transition {trans.get('id')} has unknown kind "
                     f"{trans.get('kind')!r}")

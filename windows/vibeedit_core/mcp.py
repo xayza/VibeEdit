@@ -332,6 +332,338 @@ TOOLS = [
      "description": "Disable a plugin by name (listed, never run)."},
 ]
 
+# Phase B1 tools (real wrappers + honest check-and-error tools).
+TOOLS.extend([
+    {"name": "vibeedit_timeline_split", "description": "Split a clip at a frame (the playhead when no item/frame is given)."},
+    {"name": "vibeedit_timeline_move", "description": "Move a clip to another track and/or start frame."},
+    {"name": "vibeedit_timeline_delete", "description": "Delete a timeline item by id."},
+    {"name": "vibeedit_timeline_cut_range", "description": "Cut a frame range: split at its edges and delete the middle segments."},
+    {"name": "vibeedit_timeline_close_gap", "description": "Singular alias of close_gaps: close gaps on a track."},
+    {"name": "vibeedit_timeline_select_all", "description": "Select every timeline item in this server session."},
+    {"name": "vibeedit_timeline_deselect", "description": "Clear the server session selection."},
+    {"name": "vibeedit_timeline_snap", "description": "Snap a frame to the nearest detected beat."},
+    {"name": "vibeedit_timeline_zoom_in", "description": "Increase the server session timeline zoom (px/s)."},
+    {"name": "vibeedit_timeline_zoom_out", "description": "Decrease the server session timeline zoom (px/s)."},
+    {"name": "vibeedit_timeline_zoom_fit", "description": "Fit the whole timeline into the session zoom (1200px viewport assumed, stated in the result)."},
+    {"name": "vibeedit_timeline_move_items", "description": "Move several items with the existing per-item move op, rolling back on failure."},
+    {"name": "vibeedit_timeline_changes", "description": "Undo/redo history state: backup and redo files, revision."},
+    {"name": "vibeedit_timeline_refresh_waveforms", "description": "Recompute waveform peaks for project media with real files, cached in this session."},
+    {"name": "vibeedit_timeline_sheet", "description": "Timeline as text (same readout as timeline_get)."},
+    {"name": "vibeedit_timeline_lift", "description": "Lift an item: copy it to the server clipboard, then delete it."},
+    {"name": "vibeedit_clip_cut", "description": "Cut a clip at a frame (alias of split)."},
+    {"name": "vibeedit_clip_mute", "description": "Mute a clip by setting its volume to -60 dB and recording muted=true."},
+    {"name": "vibeedit_clip_speed_up", "description": "Double a clip's current speed."},
+    {"name": "vibeedit_clip_speed_down", "description": "Halve a clip's current speed."},
+    {"name": "vibeedit_clip_speed_reset", "description": "Reset a clip's speed to 1.0."},
+    {"name": "vibeedit_clip_slow_down", "description": "Alias of speed_down: halve a clip's current speed."},
+    {"name": "vibeedit_clip_paste", "description": "Paste a copied item onto a track at a frame (duplicate_item)."},
+    {"name": "vibeedit_clip_transition", "description": "Set a transition between two clips."},
+    {"name": "vibeedit_clip_keyframe", "description": "Add one keyframe to a clip."},
+    {"name": "vibeedit_source_mark_in", "description": "Mark the source In frame in this server session."},
+    {"name": "vibeedit_source_mark_out", "description": "Mark the source Out frame in this server session."},
+    {"name": "vibeedit_source_next_frame", "description": "Step the server session source frame forward by one."},
+    {"name": "vibeedit_source_previous_frame", "description": "Step the server session source frame back by one."},
+    {"name": "vibeedit_source_close", "description": "Clear the server session source marks/frame."},
+    {"name": "vibeedit_source_show", "description": "Read the server session source marks and frame."},
+    {"name": "vibeedit_playhead_next_frame", "description": "Step the server session playhead forward by one frame."},
+    {"name": "vibeedit_playhead_previous_frame", "description": "Step the server session playhead back by one frame."},
+    {"name": "vibeedit_playhead_forward_second", "description": "Step the server session playhead forward by one second."},
+    {"name": "vibeedit_playhead_back_second", "description": "Step the server session playhead back by one second."},
+    {"name": "vibeedit_layer_add_video", "description": "Add an empty video track."},
+    {"name": "vibeedit_layer_add_audio", "description": "Add an empty audio track."},
+    {"name": "vibeedit_layer_add_text", "description": "Add an empty text track."},
+    {"name": "vibeedit_layer_add_adjustment", "description": "Add an adjustment layer for a time range."},
+    {"name": "vibeedit_layer_delete", "description": "Delete an empty, non-Main track."},
+    {"name": "vibeedit_layer_up", "description": "Move a track one position up in track order."},
+    {"name": "vibeedit_layer_down", "description": "Move a track one position down in track order."},
+    {"name": "vibeedit_layers_add", "description": "Add a new empty track of a kind (alias of track_add)."},
+    {"name": "vibeedit_layers_set", "description": "Rename a track (alias of track_rename)."},
+    {"name": "vibeedit_captions_export", "description": "Export a text track as SRT text (alias of srt_export)."},
+    {"name": "vibeedit_captions_import", "description": "Import SRT text onto a text track (alias of srt_import)."},
+    {"name": "vibeedit_captions_find", "description": "Find text items containing a query string."},
+    {"name": "vibeedit_captions_replace", "description": "Replace text in matching text items and report the count changed."},
+    {"name": "vibeedit_captions_style", "description": "Apply a text preset/size/position to a text item."},
+    {"name": "vibeedit_captions_words", "description": "Split text items into words with evenly distributed frame ranges (computed, not stored)."},
+    {"name": "vibeedit_captions_group", "description": "Group text items by track and report their combined span (computed grouping, not persisted)."},
+    {"name": "vibeedit_text_line_style", "description": "Store a line style on a text item's textStyle."},
+    {"name": "vibeedit_project_new", "description": "Create a project folder and open it (alias of project_create)."},
+    {"name": "vibeedit_project_close", "description": "Close the open project in this server session."},
+    {"name": "vibeedit_project_recents", "description": "Read the sibling .recent.json recents file when one exists."},
+    {"name": "vibeedit_project_folder", "description": "Return the open project's folder and file path."},
+    {"name": "vibeedit_project_history", "description": "Backup history: .bak file, backups/ folder and revision."},
+    {"name": "vibeedit_project_data", "description": "Read the whole open project document (alias of project_get)."},
+    {"name": "vibeedit_project_set_data", "description": "Set one allowlisted project field (name or contentLanguage)."},
+    {"name": "vibeedit_project_credits", "description": "Project credits from real project data: name, schema, revision, format, counts (no author is stored)."},
+    {"name": "vibeedit_project_derive", "description": "Copy the open project folder under a new name (alias of project_duplicate)."},
+    {"name": "vibeedit_project_import_media", "description": "Import a media file: copy it into the project media folder when outside, then add the entry."},
+    {"name": "vibeedit_project_clear_recents", "description": "Delete the sibling .recent.json recents file (app-owned state only, never project media)."},
+    {"name": "vibeedit_project_show_recents", "description": "Read the sibling .recent.json recents file (errors when none exists)."},
+    {"name": "vibeedit_export_otio", "description": "Export the timeline as OpenTimelineIO JSON (alias of otio_export)."},
+    {"name": "vibeedit_export_chapters", "description": "Chapters computed from timeline markers (start seconds, marker text)."},
+    {"name": "vibeedit_export_cover", "description": "Cover frame: first-frame thumbnail path for the first main-track clip."},
+    {"name": "vibeedit_export_history", "description": "Export history: last export report plus batch results."},
+    {"name": "vibeedit_export_link", "description": "Path of the last export output (errors when no export exists; never invented)."},
+    {"name": "vibeedit_export_open_output", "description": "Path of the last export output (headless: returned, not opened; errors when none exists)."},
+    {"name": "vibeedit_export_reveal_output", "description": "Path of the last export output (headless: returned, not revealed; errors when none exists)."},
+    {"name": "vibeedit_export_cancel", "description": "Cancel the queued batch; a synchronous export already running cannot be interrupted."},
+    {"name": "vibeedit_export_dismiss_notice", "description": "Dismiss the last-export notice held by this server."},
+    {"name": "vibeedit_plugins_list", "description": "List discovered plugins with enable state (alias of plugin_list)."},
+    {"name": "vibeedit_plugins_reload", "description": "Re-scan the plugins folder and list discovered plugins."},
+    {"name": "vibeedit_plugins_validate", "description": "Validate discovered plugins: list them plus any load errors."},
+    {"name": "vibeedit_plugins_hooks", "description": "Hooks exposed by each discovered plugin."},
+    {"name": "vibeedit_plugins_bundles", "description": "Plugin bundles: plugins folder path and discovered plugin names."},
+    {"name": "vibeedit_jobs_status", "description": "Batch/export job status held by this server."},
+    {"name": "vibeedit_jobs_cancel", "description": "Cancel the queued batch jobs."},
+    {"name": "vibeedit_jobs_wait", "description": "Wait result for batch jobs: the synchronous batch status (no background job exists)."},
+    {"name": "vibeedit_capabilities_get", "description": "Provider capabilities map copied verbatim from the original CommandCatalog.capabilities, labelled as capability names."},
+    {"name": "vibeedit_schema_get", "description": "Project schema name and legacy schema name from project.py, plus the open project's format."},
+    {"name": "vibeedit_app_version", "description": "MCP server version (0.1.0, the serverInfo version in this file), Python version and project schema; no Windows app version constant exists in this build."},
+    {"name": "vibeedit_storage_get", "description": "App-owned cache/state inventory: thumbs cache, backup, redo file, batch queue (never project media)."},
+    {"name": "vibeedit_storage_clear", "description": "Clear app-owned cache only: render/thumbs PNGs and the in-session waveform cache (never project media)."},
+    {"name": "vibeedit_fonts_list", "description": "Fonts the renderer can actually find on this machine, with the search candidates."},
+    {"name": "vibeedit_luts_import", "description": "Validate a .cube file and copy it into the project's luts/ store."},
+    {"name": "vibeedit_review_compare", "description": "Compare the last review run against a fresh validation/stats run (requires a prior review run)."},
+    {"name": "vibeedit_review_coverage", "description": "Coverage from the last review run plus real project counts: media used vs stored, items, markers."},
+    {"name": "vibeedit_review_layout", "description": "Layout from the last review run: format, tracks and item positions."},
+    {"name": "vibeedit_review_measure", "description": "Measurements from the last review run: duration, counts, issue count."},
+    {"name": "vibeedit_review_packet", "description": "Full review packet: the stored review run plus the last export summary."},
+    {"name": "vibeedit_review_picture", "description": "Picture data for the last review run: main-track clips with media kinds."},
+    {"name": "vibeedit_review_shots", "description": "Shots for the last review run: main-track clips as at/duration/media shots."},
+    {"name": "vibeedit_review_sync", "description": "Sync data for the last review run: ducking config, beat grid and audio tracks."},
+    {"name": "vibeedit_review_window", "description": "Review window: reviewed revision and the timeline start/end frames."},
+    {"name": "vibeedit_media_frame", "description": "First-frame info for a media entry via the existing thumbnail code path."},
+    {"name": "vibeedit_media_frames", "description": "First-frame info plus stored/probed media metadata for a media entry."},
+    {"name": "vibeedit_media_import", "description": "Import a media file into the project (alias of project_import_media)."},
+    {"name": "vibeedit_media_transcript", "description": "Transcript from the project's text items, or a clean error when the project has none."},
+    {"name": "vibeedit_media_inventory", "description": "Media inventory: every entry with the number of clips using it."},
+    {"name": "vibeedit_media_resolve_range", "description": "Resolve an in/out frame range for a media entry or clip into frames and seconds, validated against stored duration."},
+    {"name": "vibeedit_beats_grid", "description": "Read the project's detected beat grid (alias of beat_grid_get)."},
+    {"name": "vibeedit_audio_beats", "description": "Detected beat times in seconds (alias of beats_list)."},
+    {"name": "vibeedit_audio_energy", "description": "Real audio energy for a media file: RMS and peak from FFmpeg-decoded mono samples."},
+    {"name": "vibeedit_audio_loudness", "description": "Real FFmpeg loudnorm measurement for a media file (errors when FFmpeg or audio is missing)."},
+    {"name": "vibeedit_audio_measure", "description": "Real audio measurement: probe duration plus RMS/peak energy for a media file."},
+    {"name": "vibeedit_audio_mix_measure", "description": "Mix measurement: ducking config, audio-track items and their volumes."},
+    {"name": "vibeedit_color_measure", "description": "Colour measurement: a clip's stored eq/preset filter state (FFmpeg signalstats extraction is attempted only when no eq state exists, and errors cleanly when it cannot be parsed)."},
+    {"name": "vibeedit_doctor_run", "description": "Real environment check: Python, FFmpeg, FFprobe presence and versions, font, plugins folder, project path."},
+    {"name": "vibeedit_edl_import", "description": "Parse a CMX3600-style EDL file into events (and optionally apply them when a reel-to-media map is given)."},
+    {"name": "vibeedit_selects_list", "description": "List project selects stored in project data."},
+    {"name": "vibeedit_selects_set", "description": "Store a select (media, in/out frames, name) in project data."},
+    {"name": "vibeedit_selects_place", "description": "Place a stored select as a clip on a track."},
+    {"name": "vibeedit_variants_list", "description": "List project variants stored as snapshots in project data."},
+    {"name": "vibeedit_variants_create", "description": "Store a snapshot of the current project as a named variant."},
+    {"name": "vibeedit_variants_diff", "description": "Diff a stored variant snapshot against the current project (revision, counts, item ids)."},
+    {"name": "vibeedit_script_check", "description": "Check a script text against the project: which text items appear in it, and coverage."},
+    {"name": "vibeedit_plan_check", "description": "Validate an edit plan (timeline ops) against project data without applying it."},
+    {"name": "vibeedit_plan_apply", "description": "Apply an edit plan via the existing timeline_apply operation."},
+    {"name": "vibeedit_workflow_gates", "description": "Read the real review gates stored in project data (errors when none have been set)."},
+    {"name": "vibeedit_workflow_set_gates", "description": "Store review gates in project data."},
+    {"name": "vibeedit_checkpoint_request", "description": "Request a checkpoint: write a project backup and report its path."},
+    {"name": "vibeedit_checkpoint_status", "description": "Checkpoint status: backup file, its mtime, and the backups/ folder contents."},
+    {"name": "vibeedit_run_status", "description": "Run status: batch queue/results plus the last export report."},
+    {"name": "vibeedit_run_log", "description": "Run log: batch results and the last export report held by this server."},
+    {"name": "vibeedit_run_show", "description": "Show the current run state: batch queue/results plus the last export."},
+    {"name": "vibeedit_run_stop", "description": "Stop the run queue: clear the queued batch (synchronous exports cannot be interrupted mid-render)."},
+    {"name": "vibeedit_batch_cancel", "description": "Cancel the queued batch (clears the server batch queue)."},
+    {"name": "vibeedit_batch_presets", "description": "Batch export presets: the full/draft preset definitions."},
+    {"name": "vibeedit_batch_retry", "description": "Retry the queued batch exports (errors when the queue is empty)."},
+    {"name": "vibeedit_library_get", "description": "Read one library item by id."},
+    {"name": "vibeedit_library_stats", "description": "Library statistics: item count and items per kind."},
+    {"name": "vibeedit_library_preview", "description": "Preview data for one library item (its stored item copy)."},
+    {"name": "vibeedit_library_favorite", "description": "Mark a library item as a favourite in project data."},
+    {"name": "vibeedit_library_update", "description": "Rename a library item in project data."},
+    {"name": "vibeedit_library_apply", "description": "Apply a library item: place it on the timeline (alias of library_place)."},
+    {"name": "vibeedit_library_move", "description": "Move a library item to a new position in the library list."},
+    {"name": "vibeedit_agent_open", "description": "Not available in this Windows build: no agent terminal is managed by this headless MCP server; use an external terminal running `python windows/vibeedit.py mcp <project-folder>`."},
+    {"name": "vibeedit_agent_open_chat", "description": "Not available in this Windows build: no in-app chat UI exists in this headless server; the original also removed its model-API panel, so external agent via MCP is the parity path."},
+    {"name": "vibeedit_agent_open_claude", "description": "Not available in this Windows build: no Claude terminal is managed here; run Claude in an external terminal against this MCP server."},
+    {"name": "vibeedit_agent_open_codex", "description": "Not available in this Windows build: no Codex terminal is managed here; run Codex in an external terminal against this MCP server."},
+    {"name": "vibeedit_agent_open_shell", "description": "Not available in this Windows build: no shell terminal is managed by this headless server; use an external terminal."},
+    {"name": "vibeedit_agent_terminals", "description": "Not available in this Windows build: no terminal list exists in this headless server; terminals live outside it."},
+    {"name": "vibeedit_agent_toggle_dock", "description": "Not available in this Windows build: no dock UI exists in this headless server; the web UI Agent dock is a separate browser view."},
+    {"name": "vibeedit_agent_ask", "description": "Not available in this Windows build: in-app LLM chat is not present (parity-by-design: the original removed its model-API panel); use an external agent via MCP."},
+    {"name": "vibeedit_agent_kit_check", "description": "Not available in this Windows build: no agent-kit/skills store module exists in vibeedit_core to check against."},
+    {"name": "vibeedit_agent_kit_install", "description": "Not available in this Windows build: agent-kit install is tied to the skills store, which does not exist in vibeedit_core."},
+    {"name": "vibeedit_agent_kit_update", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
+    {"name": "vibeedit_agent_kit_later", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
+    {"name": "vibeedit_agent_status", "description": "Not available in this Windows build: no agent terminal session is managed by this headless server."},
+    {"name": "vibeedit_agent_setup", "description": "Not available in this Windows build: no agent terminal setup exists in this headless server."},
+    {"name": "vibeedit_agent_setup_show", "description": "Not available in this Windows build: no agent setup view exists in this headless server."},
+    {"name": "vibeedit_agent_restart_tab", "description": "Not available in this Windows build: no agent tab exists in this headless server."},
+    {"name": "vibeedit_agent_quick_edit", "description": "Not available in this Windows build: no quick-edit UI exists in this headless server; edits go through timeline_apply."},
+    {"name": "vibeedit_agent_show_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server; use timeline/project reads and the backup file."},
+    {"name": "vibeedit_agent_dismiss_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server."},
+    {"name": "vibeedit_agent_undo_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server; use timeline_undo."},
+    {"name": "vibeedit_agent_detach", "description": "Not available in this Windows build: no agent session is attached to this headless server."},
+    {"name": "vibeedit_agent_tools_install", "description": "Not available in this Windows build: no agent tool installer exists in this build; MCP tools are served by this file."},
+    {"name": "vibeedit_chat_send", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_command", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_commands", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_attach", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_detach", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_reset", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_status", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_transcript", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_show_about", "description": "Not available in this Windows build: no About dialog exists in this headless server; use app_version for version data."},
+    {"name": "vibeedit_show_commands", "description": "Not available in this Windows build: no commands dialog exists in this headless server; use mcp_tools_list."},
+    {"name": "vibeedit_show_shortcuts", "description": "Not available in this Windows build: no shortcuts dialog exists in this headless server."},
+    {"name": "vibeedit_show_settings", "description": "Not available in this Windows build: no settings dialog exists in this headless server."},
+    {"name": "vibeedit_show_plugins", "description": "Not available in this Windows build: no plugins dialog exists in this headless server; use plugins_list."},
+    {"name": "vibeedit_show_review", "description": "Not available in this Windows build: no review dialog exists in this headless server; use review_run/review_get for the data."},
+    {"name": "vibeedit_show_history", "description": "Not available in this Windows build: no history dialog exists in this headless server; use project_history."},
+    {"name": "vibeedit_show_sections", "description": "Not available in this Windows build: no sections dialog exists in this headless server."},
+    {"name": "vibeedit_show_batch", "description": "Not available in this Windows build: no batch dialog exists in this headless server; use batch_status."},
+    {"name": "vibeedit_show_export", "description": "Not available in this Windows build: no export dialog exists in this headless server; use export_status."},
+    {"name": "vibeedit_show_export_progress", "description": "Not available in this Windows build: no export progress view exists in this headless server; exports here are synchronous."},
+    {"name": "vibeedit_show_updates", "description": "Not available in this Windows build: no updates dialog exists in this headless server; no updater is configured in this build."},
+    {"name": "vibeedit_show_assets", "description": "Not available in this Windows build: no assets dialog exists in this headless server; use media_list."},
+    {"name": "vibeedit_show_agent_kit", "description": "Not available in this Windows build: no agent-kit view exists in this headless server; the skills store is another agent's job."},
+    {"name": "vibeedit_show_doctor", "description": "Not available in this Windows build: no doctor dialog exists in this headless server; use doctor_run for the check data."},
+    {"name": "vibeedit_ui_action", "description": "Not available in this Windows build: no live UI session exists for this headless server to act on."},
+    {"name": "vibeedit_ui_dialog", "description": "Not available in this Windows build: no live UI session exists for this headless server to show a dialog in."},
+    {"name": "vibeedit_ui_view", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
+    {"name": "vibeedit_ui_select", "description": "Not available in this Windows build: no live UI selection exists in this headless server; use timeline_select_all for the server selection."},
+    {"name": "vibeedit_ui_seek", "description": "Not available in this Windows build: no live player exists in this headless server; use playhead_* tools for the session playhead."},
+    {"name": "vibeedit_ui_frame", "description": "Not available in this Windows build: no live player frame exists in this headless server; use media_frame for a media first frame."},
+    {"name": "vibeedit_ui_frames", "description": "Not available in this Windows build: no live player frames exist in this headless server."},
+    {"name": "vibeedit_ui_respond", "description": "Not available in this Windows build: no live UI session exists for this headless server to respond in."},
+    {"name": "vibeedit_ui_actions", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
+    {"name": "vibeedit_playback_toggle", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
+    {"name": "vibeedit_playback_stop", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
+    {"name": "vibeedit_playback_shuttle_forward", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
+    {"name": "vibeedit_playback_shuttle_back", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
+    {"name": "vibeedit_view_fullscreen", "description": "Not available in this Windows build: no window exists in this headless server."},
+    {"name": "vibeedit_view_inspector_pane", "description": "Not available in this Windows build: no inspector pane exists in this headless server; the web UI inspector is a separate browser view."},
+    {"name": "vibeedit_view_library_pane", "description": "Not available in this Windows build: no library pane exists in this headless server; use library_list for the data."},
+    {"name": "vibeedit_app_update", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
+    {"name": "vibeedit_app_update_check", "description": "Report update status: current version and the fact that no updater channel is configured in this build."},
+    {"name": "vibeedit_app_update_later", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
+    {"name": "vibeedit_app_update_skip", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
+    {"name": "vibeedit_voice_clone_add", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
+    {"name": "vibeedit_voice_clone_list", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
+    {"name": "vibeedit_voice_clone_remove", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
+    {"name": "vibeedit_voice_synthesize", "description": "Not available in this Windows build: no voice provider is wired in this build; nothing is synthesized."},
+    {"name": "vibeedit_voice_speak", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_lines", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_check", "description": "Check which voice backends are available on this machine (piper binary, edge-tts module) and count voiceover takes in the open project."},
+    {"name": "vibeedit_voice_use", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_fit", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_place", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_image_generate", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
+    {"name": "vibeedit_image_generate_list", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
+    {"name": "vibeedit_image_style", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
+    {"name": "vibeedit_image_disclose", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
+    {"name": "vibeedit_image_cutout", "description": "Cut out the foreground of an image with OpenCV grabCut (raises a clear error naming the missing backend when OpenCV is absent)."},
+    {"name": "vibeedit_library_search", "description": "Not available in this Windows build: no library search provider is wired in this build."},
+    {"name": "vibeedit_library_generate", "description": "Not available in this Windows build: no library generation provider is wired in this build."},
+    {"name": "vibeedit_library_brand_pose", "description": "Not available in this Windows build: no brand-pose engine is wired in this build."},
+    {"name": "vibeedit_library_export_pack", "description": "Not available in this Windows build: no library pack exporter is wired in this build."},
+    {"name": "vibeedit_library_import_pack", "description": "Not available in this Windows build: no library pack importer is wired in this build."},
+    {"name": "vibeedit_library_analyze", "description": "Not available in this Windows build: no library analyzer is wired in this build."},
+    {"name": "vibeedit_media_ocr", "description": "Not available in this Windows build: no OCR/vision provider is wired in this build; vision is another agent's job."},
+    {"name": "vibeedit_media_subjects", "description": "Not available in this Windows build: no vision provider is wired in this build; vision is another agent's job."},
+    {"name": "vibeedit_media_describe", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
+    {"name": "vibeedit_media_description", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
+    {"name": "vibeedit_media_digest", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
+    {"name": "vibeedit_media_cuts", "description": "Not available in this Windows build: no cut-detection provider is wired in this build."},
+    {"name": "vibeedit_media_sync", "description": "Not available in this Windows build: no audio-sync provider is wired in this build."},
+    {"name": "vibeedit_media_speech_map", "description": "Not available in this Windows build: no speech-mapping provider is wired in this build."},
+    {"name": "vibeedit_media_strip", "description": "Not available in this Windows build: no media-strip provider is wired in this build."},
+    {"name": "vibeedit_media_proxy", "description": "Not available in this Windows build: no proxy-generation workflow is wired in this build."},
+    {"name": "vibeedit_media_analysis", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
+    {"name": "vibeedit_media_analyze", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
+    {"name": "vibeedit_knowledge_add_lesson", "description": "Add a caller-supplied lesson to the project knowledge store (starts proposed)."},
+    {"name": "vibeedit_knowledge_approve", "description": "Approve a lesson or proposal (args: lesson= or proposal=)."},
+    {"name": "vibeedit_knowledge_claims", "description": "List claims in the project knowledge store."},
+    {"name": "vibeedit_knowledge_facts", "description": "List facts in the project knowledge store."},
+    {"name": "vibeedit_knowledge_get", "description": "Get one lesson from the project knowledge store."},
+    {"name": "vibeedit_knowledge_history", "description": "List knowledge mutation history (no snapshots exposed)."},
+    {"name": "vibeedit_knowledge_lessons", "description": "List lessons in the project knowledge store."},
+    {"name": "vibeedit_knowledge_memo", "description": "Get the knowledge memo, or set it when text= is given."},
+    {"name": "vibeedit_knowledge_migrate", "description": "Migrate legacy knowledge_notes into the memo (no-op reported honestly otherwise)."},
+    {"name": "vibeedit_knowledge_prefs", "description": "List prefs in the project knowledge store."},
+    {"name": "vibeedit_knowledge_proposals", "description": "List knowledge proposals."},
+    {"name": "vibeedit_knowledge_reject", "description": "Reject a lesson or proposal (args: lesson= or proposal=)."},
+    {"name": "vibeedit_knowledge_remove_lesson", "description": "Remove a lesson from the project knowledge store."},
+    {"name": "vibeedit_knowledge_revert", "description": "Revert the knowledge store by N recorded mutations."},
+    {"name": "vibeedit_knowledge_set_claim", "description": "Set a claim in the project knowledge store."},
+    {"name": "vibeedit_knowledge_set_fact", "description": "Set a fact in the project knowledge store."},
+    {"name": "vibeedit_knowledge_set_pref", "description": "Set a pref in the project knowledge store."},
+    {"name": "vibeedit_knowledge_skill", "description": "Get a skill from the local skills store (knowledge.skill maps to the skills store)."},
+    {"name": "vibeedit_knowledge_split_memo", "description": "Split the knowledge memo at blank lines into proposed lessons."},
+    {"name": "vibeedit_knowledge_update_lesson", "description": "Update a lesson's text in the project knowledge store."},
+    {"name": "vibeedit_knowledge_verdicts", "description": "List proposal outcomes (approved/rejected)."},
+    {"name": "vibeedit_skills_disable", "description": "Disable a skill by id (state in skills.json next to the skills folder)."},
+    {"name": "vibeedit_skills_enable", "description": "Enable a skill by id (state in skills.json next to the skills folder)."},
+    {"name": "vibeedit_skills_export", "description": "Export a skill verbatim (content, or copy to dest=)."},
+    {"name": "vibeedit_skills_get", "description": "Get one skill's full markdown from the local skills store."},
+    {"name": "vibeedit_skills_list", "description": "List skills in the local skills store (windows/skills/)."},
+    {"name": "vibeedit_skills_propose", "description": "Store a caller-supplied skill draft as a pending proposal (not an active skill)."},
+    {"name": "vibeedit_skills_remove", "description": "Delete a skill file (requires confirm=true)."},
+    {"name": "vibeedit_skills_save", "description": "Write a caller-supplied skill file (user-written provenance header; refuses overwrite unless overwrite=true)."},
+    {"name": "vibeedit_plugins_install", "description": "Install a plugin from a local folder or .zip bundle (manifest validated before copying; URL sources must be downloaded first with plugins_download)."},
+    {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (no network; unknown unless the installed manifest carries update metadata)."},
+    {"name": "vibeedit_plugins_search", "description": "Not available in this Windows build: plugin search is not supported in this build; only the local plugins folder is scanned."},
+    {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: plugin setup is not supported in this build."},
+    {"name": "vibeedit_plugins_set", "description": "Not available in this Windows build: plugin setting is not supported in this build; use plugin_enable/plugin_disable for enable state."},
+    {"name": "vibeedit_plugins_set_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
+    {"name": "vibeedit_plugins_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
+    {"name": "vibeedit_plugins_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
+    {"name": "vibeedit_plugins_view_event", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
+    {"name": "vibeedit_plugins_proposal", "description": "Not available in this Windows build: no plugin proposal workflow exists in this build."},
+    {"name": "vibeedit_plugins_replace", "description": "Not available in this Windows build: plugin replacement is not supported in this build."},
+    {"name": "vibeedit_plugins_remove", "description": "Remove an installed plugin folder (refuses while the plugin is enabled; disable first)."},
+    {"name": "vibeedit_plugins_run", "description": "Not available in this Windows build: running arbitrary plugin code is not supported through this tool; use the documented plugin hooks via the web server."},
+    {"name": "vibeedit_plugins_invoke", "description": "Not available in this Windows build: invoking arbitrary plugin code is not supported through this tool."},
+    {"name": "vibeedit_plugins_actions", "description": "Not available in this Windows build: no plugin action host exists in this headless server."},
+    {"name": "vibeedit_plugins_option", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
+    {"name": "vibeedit_plugins_options", "description": "Not available in this Windows build: no plugin option host exists in this headless server."},
+    {"name": "vibeedit_plugins_show_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
+    {"name": "vibeedit_clip_motion", "description": "Not available in this Windows build: motion editing is another agent's job; no motion state exists on clips in this build."},
+    {"name": "vibeedit_clip_backdrop", "description": "Not available in this Windows build: backdrop editing is another agent's job; no backdrop state exists on clips in this build."},
+    {"name": "vibeedit_clip_change_framing", "description": "Not available in this Windows build: reframing is another agent's job; no framing state exists on clips in this build."},
+    {"name": "vibeedit_clip_reframe", "description": "Set (or clear with null) a media clip's reframe window; rendered as a crop before scaling, never stretched."},
+    {"name": "vibeedit_clip_send_to_agent", "description": "Not available in this Windows build: no agent session exists in this headless server to send a clip to."},
+    {"name": "vibeedit_clip_unlink_audio", "description": "Unlink a clip's linked audio: clear linked_audio on the video item and linked_video on each audio partner (errors when the item has no linked audio)."},
+    {"name": "vibeedit_music_replace", "description": "Not available in this Windows build: no music-replacement workflow exists in this build; replace music clips with timeline move/delete/add ops."},
+    {"name": "vibeedit_narration_windows", "description": "Not available in this Windows build: no narration-window workflow exists in this build."},
+    {"name": "vibeedit_outcomes_import", "description": "Not available in this Windows build: no outcomes store exists in this build."},
+    {"name": "vibeedit_outcomes_map", "description": "Not available in this Windows build: no outcomes store exists in this build."},
+    {"name": "vibeedit_run_append", "description": "Not available in this Windows build: no workflow runner exists in this build to append a run to."},
+    {"name": "vibeedit_run_checklist", "description": "Not available in this Windows build: no workflow runner exists in this build; use review_run for the review checklist data."},
+    {"name": "vibeedit_run_dismiss", "description": "Not available in this Windows build: no workflow runner exists in this build."},
+    {"name": "vibeedit_run_fix_issues", "description": "Not available in this Windows build: no workflow runner exists in this build; fix issues with timeline ops, then review_verify."},
+    {"name": "vibeedit_run_follow", "description": "Not available in this Windows build: no workflow runner exists in this build."},
+    {"name": "vibeedit_run_toggle", "description": "Not available in this Windows build: no workflow runner exists in this build."},
+    {"name": "vibeedit_run_another_recipe", "description": "Not available in this Windows build: no workflow runner exists in this build."},
+    {"name": "vibeedit_acme_voice_fast", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_speech_rate", "description": "Not available in this Windows build: no voice provider is wired in this build, so no speech rate can be set."},
+    {"name": "vibeedit_app_vibeedit", "description": "Not available in this Windows build: no app-level automation client exists in this headless server."},
+    {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Not available in this Windows build: no app-level automation clients exist in this headless server."},
+    {"name": "vibeedit_app_vibeedit_debug_log", "description": "Not available in this Windows build: no app debug log is kept by this headless server."},
+    {"name": "vibeedit_platforms_get", "description": "Not available in this Windows build: no platform-client registry exists in this headless server."},
+    {"name": "vibeedit_context_get", "description": "Not available in this Windows build: no live editor context exists in this headless server; use project_get, timeline_get and the playhead_* tools."},
+    {"name": "vibeedit_source_toggle_playback", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
+    {"name": "vibeedit_timeline_header_compact", "description": "Not available in this Windows build: no timeline header UI exists in this headless server."},
+    {"name": "vibeedit_vision_cutout", "description": "Not available in this Windows build: no vision cutout provider/model is wired in this build; vision is another agent's job."},
+    {"name": "vibeedit_vision_faces", "description": "Detect faces in an image with OpenCV Haar cascades (raises a clear error naming the missing backend when OpenCV is absent)."},
+    {"name": "vibeedit_vision_text", "description": "Recognise text in an image with Tesseract (raises a clear error naming the missing backend when Tesseract is absent)."},
+    {"name": "vibeedit_clip_link_audio", "description": "Link a Dialogue audio clip to a video clip so linked edits move together."},
+    {"name": "vibeedit_project_magnetic_get", "description": "Report whether magnetic Main editing is on for this project."},
+    {"name": "vibeedit_project_magnetic_set", "description": "Turn magnetic Main editing on or off (stored in project data)."},
+    {"name": "vibeedit_transitions_renderability", "description": "List every known transition kind with an honest renders true/false flag."},
+    {"name": "vibeedit_skills_search", "description": "Search the local skills store by substring over titles and bodies."},
+    {"name": "vibeedit_plugins_download", "description": "Download a plugin .zip bundle to a temp file (gated step before plugins_install; never installs or executes anything)."},
+    {"name": "vibeedit_captions_transcribe", "description": "Transcribe a project media item with faster-whisper into a text track (clear error when faster-whisper is absent)."},
+    {"name": "vibeedit_captions_generate", "description": "Transcribe a media item and return the generated SRT text."},
+    {"name": "vibeedit_captions_align", "description": "Re-time a text track's items to faster-whisper speech segments (clear error when faster-whisper is absent)."},
+    {"name": "vibeedit_media_transcribe", "description": "Transcribe a project media item with faster-whisper into a text track (alias of captions_transcribe)."},
+    {"name": "vibeedit_fonts_import", "description": "Import a .ttf/.otf font file into the app fonts folder (unique stored name, never overwrites)."},
+    {"name": "vibeedit_timeline_reorder", "description": "Magnetic reorder: move a Main clip before another Main clip (or to the end), shifting intervening clips with their linked audio."},
+    {"name": "vibeedit_chat_stop", "description": "Not available in this Windows build: no in-app chat session exists to stop (the original also removed its model-API panel; agents run in an external terminal via MCP)."},
+    {"name": "vibeedit_view_compare", "description": "Not available as an MCP tool: Compare is a web-UI view (the UI Compare split view already exists); the headless MCP server has no viewer to toggle."},
+    {"name": "vibeedit_view_safe_area", "description": "Not available as an MCP tool: Safe-area is a web-UI overlay toggle (the UI toggle already exists); the headless MCP server has no viewer to toggle."},
+])
+
 
 class MCPServer:
     def __init__(self, folder: str | None = None):
@@ -341,6 +673,17 @@ class MCPServer:
         self.last_export: dict | None = None
         self.batch_queue: list[str] = []
         self.batch_results: list[dict] = []
+        # Phase B1 session state: the headless server has no live
+        # player/UI, so playhead, selection, source marks and zoom
+        # are held here (reset on open) instead of being invented
+        # as project fields.
+        self.playhead_frame = 0
+        self.selection: list[str] = []
+        self.source_marks: dict = {}
+        self.source_frame = 0
+        self.zoom_px_per_s = 50.0
+        self.clipboard: dict | None = None
+        self.waveform_cache: dict = {}
         if folder:
             self.open(folder)
 
@@ -355,6 +698,10 @@ class MCPServer:
         self.project = Project(data, os.path.dirname(os.path.abspath(found)))
         self.path = found
         self._needs_first_backup = True
+        self.playhead_frame = 0
+        self.selection = []
+        self.source_marks = {}
+        self.source_frame = 0
         return {"path": found, "name": data.get("name"), "rev": data.get("rev")}
 
     def _require(self) -> Project:
@@ -374,6 +721,138 @@ class MCPServer:
             self._needs_first_backup = False
         save_project(self.project.data, self.path)
 
+    # -- Phase B1 helpers -------------------------------------------
+    def _na(self, tool: str, blocker: str) -> ValueError:
+        return ValueError(
+            f"NOT_AVAILABLE: {tool} is not available in this Windows "
+            f"build: {blocker}")
+
+    def _review(self) -> dict:
+        proj = self._require()
+        review = proj.data.get("review")
+        if not review:
+            raise ValueError(
+                "No review run yet; call vibeedit_review_run first "
+                "and never invent a verdict")
+        return review
+
+    def _export_output(self) -> str:
+        if not self.last_export or not self.last_export.get("output"):
+            raise ValueError(
+                "No export exists yet; run an export tool first "
+                "(no output path is invented)")
+        return self.last_export["output"]
+
+    def _backup_path(self) -> str | None:
+        """Real backup location from project.py: <folder>/project.json.bak."""
+        import os
+        from .project import BACKUP_BASENAME
+        proj = self._require()
+        return os.path.join(proj.folder, BACKUP_BASENAME)
+
+    def _media_abs(self, proj, medium: dict) -> str:
+        import os
+        path = medium["path"]
+        return path if os.path.isabs(path) else os.path.join(
+            proj.folder, path)
+        import os
+        path = medium["path"]
+        return path if os.path.isabs(path) else os.path.join(
+            proj.folder, path)
+
+    def _fps_value(self, proj) -> float:
+        from .project import fps_value
+        return fps_value(proj.fps)
+
+    def _main_clip_media(self, proj):
+        for track in proj.data["tracks"]:
+            if track.get("role") == "main" and track["kind"] == "video":
+                for item in sorted(track["items"],
+                                   key=lambda i: i["at"]):
+                    if item.get("media"):
+                        return proj.media(item["media"]), item
+        return None, None
+
+    def _recents_path(self) -> str:
+        import os
+        proj = self._require()
+        return os.path.join(os.path.dirname(
+            os.path.abspath(proj.folder)), ".recent.json")
+
+    def _import_media(self, proj, path: str, kind: str | None = None):
+        """Copy an outside file into media/ (unique name, never
+        overwriting) and add the entry; an inside file is added
+        as-is. Returns the entry."""
+        import os
+        import shutil
+        from .project import unique_media_name
+        from .render import probe_media
+        abs_path = path if os.path.isabs(path) else os.path.join(
+            proj.folder, path)
+        if not os.path.isfile(abs_path):
+            raise FileNotFoundError(f"Media file not found: {abs_path}")
+        media_dir = os.path.join(proj.folder, "media")
+        os.makedirs(media_dir, exist_ok=True)
+        if os.path.abspath(abs_path).startswith(
+                os.path.abspath(proj.folder) + os.sep):
+            stored = os.path.relpath(abs_path, proj.folder)
+        else:
+            stored_name = unique_media_name(
+                media_dir, os.path.basename(abs_path))
+            shutil.copyfile(abs_path, os.path.join(media_dir,
+                                                   stored_name))
+            stored = os.path.join("media", stored_name)
+        meta = probe_media(abs_path)
+        return proj.add_media(
+            stored, kind=kind or
+            ("video" if meta.get("width") else "audio"),
+            **{k: v for k, v in meta.items() if k in
+               ("width", "height", "fps", "frames", "duration",
+                "hasAudio")})
+
+    def _raise_honest(self, name: str) -> None:
+        """Honest check-and-error tools: perform the real check the
+        tool can perform, then raise a structured NOT_AVAILABLE
+        error. Never returns a fake success."""
+        import importlib.util
+        if name.startswith("vibeedit_knowledge_"):
+            found = importlib.util.find_spec("vibeedit_core.knowledge")
+            raise self._na(name, "knowledge store module missing "
+                           f"(vibeedit_core.knowledge found: {found is not None}); "
+                           "the knowledge store is another agent's job; "
+                           "no lesson/fact content is invented")
+        if name.startswith("vibeedit_skills_"):
+            found = importlib.util.find_spec("vibeedit_core.skills")
+            raise self._na(name, "skills store module missing "
+                           f"(vibeedit_core.skills found: {found is not None}); "
+                           "the skills store is another agent's job")
+        if name.startswith("vibeedit_plugins_"):
+            from .plugins import list_plugins
+            available = [p["name"] for p in list_plugins()
+                         if p["name"] != "_errors"]
+            raise self._na(name, "plugin install/update/search/view "
+                           "is not supported in this build; the local "
+                           f"plugin system holds: {available or 'none'}. "
+                           "Plugin install/update is another agent's job; "
+                           "no untrusted code is copied or executed")
+        if name.startswith("vibeedit_voice_") or name in (
+                "vibeedit_acme_voice_fast", "vibeedit_speech_rate"):
+            found = importlib.util.find_spec("vibeedit_core.voice")
+            raise self._na(name, "no voice provider is wired in this "
+                           f"build (vibeedit_core.voice found: "
+                           f"{found is not None}); voice providers are "
+                           "another agent's job; nothing is synthesized")
+        if name.startswith("vibeedit_agent_kit"):
+            found = importlib.util.find_spec("vibeedit_core.skills")
+            raise self._na(name, "agent-kit install/update is tied to "
+                           f"the skills store, which is absent "
+                           f"(found: {found is not None})")
+        # Every other honest tool: its description (in TOOLS) already
+        # states the exact blocker; the raised error repeats it.
+        desc = next((t["description"] for t in TOOLS
+                     if t["name"] == name), name)
+        raise ValueError(f"NOT_AVAILABLE: {desc}")
+
     # MCP tools that delete items/tracks/media or rewrite positions
     # or format: back up the saved file before the tool runs.
     DESTRUCTIVE_TOOLS = frozenset({
@@ -382,7 +861,10 @@ class MCPServer:
         "vibeedit_track_remove", "vibeedit_media_remove",
         "vibeedit_clip_keyframe_remove", "vibeedit_karaoke_remove",
         "vibeedit_library_remove", "vibeedit_source_overwrite",
-        "vibeedit_close_gaps", "vibeedit_project_format_set"})
+        "vibeedit_close_gaps", "vibeedit_project_format_set",
+        "vibeedit_timeline_delete", "vibeedit_timeline_cut_range",
+        "vibeedit_timeline_lift", "vibeedit_timeline_move_items",
+        "vibeedit_layer_delete", "vibeedit_captions_replace"})
 
     def call(self, name: str, args: dict) -> dict:
         if name in self.DESTRUCTIVE_TOOLS and self.path:
@@ -1416,6 +1898,1418 @@ class MCPServer:
                 int(args.get("at", 0)), args.get("track"))
             self._save()
             return result
+        # Phase B1 real wrappers: timeline / clip / source / playhead.
+        if name == "vibeedit_timeline_split":
+            proj = self._require()
+            item_id = args.get("item")
+            if item_id is None:
+                clip = proj.clip_at_time(self.playhead_frame)
+                if clip is None:
+                    raise ValueError("No clip at the playhead to split")
+                item_id = clip["id"]
+            frame = int(args["atFrame"]) if args.get("atFrame") is not None else self.playhead_frame
+            result = proj.split(item_id, frame)
+            self._save()
+            return result
+        if name == "vibeedit_timeline_move":
+            proj = self._require()
+            result = proj.move(args["item"], args["track"], int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_timeline_delete":
+            proj = self._require()
+            proj.delete(args["item"])
+            self._save()
+            return {"deleted": args["item"]}
+        if name == "vibeedit_timeline_cut_range":
+            proj = self._require()
+            start, end = int(args["start"]), int(args["end"])
+            if end <= start:
+                raise ValueError("cut_range end must be after start")
+            snap = proj.snapshot()
+            try:
+                deleted = []
+                for track in list(proj.data["tracks"]):
+                    for item in sorted(list(track["items"]),
+                                       key=lambda i: i["at"]):
+                        istart, iend = int(item["at"]), int(item["at"]) + int(item["dur"])
+                        if iend <= start or istart >= end:
+                            continue
+                        if istart < start:
+                            proj.split(item["id"], start)
+                        # Re-find the segment now covering the range.
+                        for cand in list(track["items"]):
+                            cstart, cend = int(cand["at"]), int(cand["at"]) + int(cand["dur"])
+                            if cstart < end and cend > start and cstart >= start:
+                                if cend > end:
+                                    proj.split(cand["id"], end)
+                                proj.delete(cand["id"])
+                                deleted.append(cand["id"])
+                                break
+                self._save()
+                return {"deleted": deleted, "start": start, "end": end}
+            except Exception:
+                proj.restore(snap)
+                raise
+        if name == "vibeedit_timeline_close_gap":
+            proj = self._require()
+            result = proj.close_gaps(args.get("track"))
+            self._save()
+            return result
+        if name == "vibeedit_timeline_select_all":
+            proj = self._require()
+            self.selection = [i["id"] for t in proj.data["tracks"]
+                              for i in t["items"]]
+            return {"selection": self.selection}
+        if name == "vibeedit_timeline_deselect":
+            self.selection = []
+            return {"selection": []}
+        if name == "vibeedit_timeline_snap":
+            proj = self._require()
+            return {"frame": int(args["frame"]),
+                    "snapped": proj.snap_frame(int(args["frame"]))}
+        if name == "vibeedit_timeline_zoom_in":
+            self.zoom_px_per_s = min(1000.0, self.zoom_px_per_s * 1.25)
+            return {"zoom_px_per_s": self.zoom_px_per_s}
+        if name == "vibeedit_timeline_zoom_out":
+            self.zoom_px_per_s = max(1.0, self.zoom_px_per_s / 1.25)
+            return {"zoom_px_per_s": self.zoom_px_per_s}
+        if name == "vibeedit_timeline_zoom_fit":
+            proj = self._require()
+            dur = proj.duration_seconds()
+            if dur <= 0:
+                raise ValueError("Timeline is empty; nothing to fit")
+            self.zoom_px_per_s = 1200.0 / dur
+            return {"zoom_px_per_s": self.zoom_px_per_s,
+                    "viewport_px_assumed": 1200,
+                    "duration_seconds": round(dur, 3),
+                    "note": "Fit is viewport-dependent in the UI; this "
+                            "headless value assumes a 1200px strip"}
+        if name == "vibeedit_timeline_move_items":
+            proj = self._require()
+            snap = proj.snapshot()
+            try:
+                moved = []
+                for mv in args["items"]:
+                    moved.append(proj.move(mv["item"], mv["track"],
+                                           int(mv["at"])))
+                self._save()
+                return {"moved": moved}
+            except Exception:
+                proj.restore(snap)
+                raise
+        if name == "vibeedit_timeline_changes":
+            import os
+            bak = self._backup_path()
+            undo_file = self.path + ".bak" if self.path else None
+            redo = self.path + ".redo" if self.path else None
+            return {"rev": self._require().rev,
+                    "can_undo": bool(undo_file and os.path.isfile(undo_file)),
+                    "undo_file": undo_file if undo_file and os.path.isfile(undo_file) else None,
+                    "can_redo": bool(redo and os.path.isfile(redo)),
+                    "backup": bak if bak and os.path.isfile(bak) else None,
+                    "redo_file": redo if redo and os.path.isfile(redo) else None}
+        if name == "vibeedit_timeline_refresh_waveforms":
+            from .waveform import waveform_peaks
+            proj = self._require()
+            out, errors = {}, {}
+            for medium in proj.data["media"]:
+                path = self._media_abs(proj, medium)
+                try:
+                    peaks = waveform_peaks(path, int(args.get("buckets", 64)))
+                    self.waveform_cache[medium["id"]] = peaks
+                    out[medium["id"]] = len(peaks)
+                except Exception as exc:  # noqa: BLE001 - per-media report
+                    errors[medium["id"]] = str(exc)
+            return {"waveforms": out, "errors": errors}
+        if name == "vibeedit_timeline_sheet":
+            return {"timeline": self._require().timeline_text()}
+        if name == "vibeedit_timeline_lift":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            import copy as _copy
+            self.clipboard = _copy.deepcopy(item)
+            proj.delete(args["item"])
+            self._save()
+            return {"lifted": args["item"], "clipboard": True}
+        if name == "vibeedit_clip_cut":
+            proj = self._require()
+            result = proj.split(args["item"], int(args["atFrame"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_mute":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            result = proj.set_volume(args["item"], -60.0)
+            item["muted"] = True
+            self._save()
+            return result
+        if name == "vibeedit_clip_speed_up":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            result = proj.set_speed(args["item"],
+                                    float(item.get("speed", 1.0)) * 2.0)
+            self._save()
+            return result
+        if name == "vibeedit_clip_speed_down" or name == "vibeedit_clip_slow_down":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            result = proj.set_speed(args["item"],
+                                    float(item.get("speed", 1.0)) * 0.5)
+            self._save()
+            return result
+        if name == "vibeedit_clip_speed_reset":
+            proj = self._require()
+            result = proj.set_speed(args["item"], 1.0)
+            self._save()
+            return result
+        if name == "vibeedit_clip_paste":
+            proj = self._require()
+            src_id = args.get("item")
+            if src_id is None:
+                if self.clipboard is None:
+                    raise ValueError("Nothing on the clipboard to paste; "
+                                     "pass an item id or lift/copy first")
+                result = proj.copy_item_data(self.clipboard, args["track"],
+                                             int(args["at"]))
+            else:
+                result = proj.duplicate_item(src_id, args["track"],
+                                             int(args["at"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_transition":
+            proj = self._require()
+            result = proj.add_transition(args["from"], args["to"],
+                                         args["kind"],
+                                         float(args["duration"]))
+            self._save()
+            return result
+        if name == "vibeedit_clip_keyframe":
+            proj = self._require()
+            result = proj.add_keyframe(args["item"], float(args["at"]),
+                                       args["property"],
+                                       float(args["value"]))
+            self._save()
+            return result
+        if name == "vibeedit_source_mark_in":
+            self.source_marks["in"] = int(args["frame"])
+            if args.get("media"):
+                self.source_marks["media"] = args["media"]
+            return {"source_marks": self.source_marks}
+        if name == "vibeedit_source_mark_out":
+            self.source_marks["out"] = int(args["frame"])
+            if args.get("media"):
+                self.source_marks["media"] = args["media"]
+            return {"source_marks": self.source_marks}
+        if name == "vibeedit_source_next_frame":
+            self.source_frame += 1
+            return {"source_frame": self.source_frame}
+        if name == "vibeedit_source_previous_frame":
+            self.source_frame = max(0, self.source_frame - 1)
+            return {"source_frame": self.source_frame}
+        if name == "vibeedit_source_close":
+            self.source_marks, self.source_frame = {}, 0
+            return {"source_marks": {}, "source_frame": 0}
+        if name == "vibeedit_source_show":
+            return {"source_marks": self.source_marks,
+                    "source_frame": self.source_frame}
+        if name == "vibeedit_playhead_next_frame":
+            self.playhead_frame += 1
+            return {"frame": self.playhead_frame}
+        if name == "vibeedit_playhead_previous_frame":
+            self.playhead_frame = max(0, self.playhead_frame - 1)
+            return {"frame": self.playhead_frame}
+        if name == "vibeedit_playhead_forward_second":
+            proj = self._require()
+            self.playhead_frame += int(round(self._fps_value(proj)))
+            return {"frame": self.playhead_frame}
+        if name == "vibeedit_playhead_back_second":
+            proj = self._require()
+            self.playhead_frame = max(
+                0, self.playhead_frame - int(round(self._fps_value(proj))))
+            return {"frame": self.playhead_frame}
+        if name == "vibeedit_layer_add_video":
+            proj = self._require()
+            track = proj.add_track("video", args.get("role", ""),
+                                   args.get("name", "video"))
+            self._save()
+            return {"track": track}
+        if name == "vibeedit_layer_add_audio":
+            proj = self._require()
+            track = proj.add_track("audio", args.get("role", ""),
+                                   args.get("name", "audio"))
+            self._save()
+            return {"track": track}
+        if name == "vibeedit_layer_add_text":
+            proj = self._require()
+            track = proj.add_track("text", args.get("role", ""),
+                                   args.get("name", "text"))
+            self._save()
+            return {"track": track}
+        if name == "vibeedit_layer_add_adjustment":
+            proj = self._require()
+            result = proj.add_adjustment(int(args.get("at", 0)),
+                                         int(args.get("dur", 0)) or max(
+                                             proj.duration_frames(), 1),
+                                         args.get("preset"), args.get("lut"),
+                                         args.get("strength"))
+            self._save()
+            return result
+        if name == "vibeedit_layer_delete":
+            proj = self._require()
+            result = proj.remove_track(args["track"])
+            self._save()
+            return result
+        if name in ("vibeedit_layer_up", "vibeedit_layer_down"):
+            proj = self._require()
+            tracks = proj.data["tracks"]
+            idx = next(i for i, t in enumerate(tracks)
+                       if t["id"] == args["track"])
+            j = idx - 1 if name.endswith("_up") else idx + 1
+            if j < 0 or j >= len(tracks):
+                raise ValueError("Track is already at the edge")
+            tracks[idx], tracks[j] = tracks[j], tracks[idx]
+            proj._bump()
+            self._save()
+            return {"track": args["track"], "order": [t["id"] for t in tracks]}
+        if name == "vibeedit_layers_add":
+            proj = self._require()
+            kind = args.get("kind", "video")
+            if kind not in ("video", "text", "audio"):
+                raise ValueError(f"Unknown track kind: {kind!r}")
+            used = {t["id"] for t in proj.data["tracks"]}
+            n = 1
+            while f"t{n}" in used:
+                n += 1
+            track = {"id": f"t{n}", "kind": kind,
+                     "role": args.get("role", ""),
+                     "name": args.get("name", kind), "items": []}
+            proj.data["tracks"].append(track)
+            proj._bump()
+            self._save()
+            return {"track": track}
+        if name == "vibeedit_layers_set":
+            proj = self._require()
+            result = proj.rename_track(args["track"], args["name"])
+            self._save()
+            return result
+        if name == "vibeedit_captions_export":
+            proj = self._require()
+            return {"srt": proj.export_srt(args.get("track", "t1"))}
+        if name == "vibeedit_captions_import":
+            proj = self._require()
+            result = proj.import_srt(args.get("track", "t1"), args["srt"])
+            self._save()
+            return {"imported": len(result)}
+        if name == "vibeedit_captions_find":
+            query = (args.get("query") or "").lower()
+            found = []
+            for track in self._require().data["tracks"]:
+                for item in track["items"]:
+                    if query and query in (item.get("text") or "").lower():
+                        found.append({"track": track["id"],
+                                      "id": item["id"],
+                                      "text": item["text"]})
+            return {"items": found}
+        if name == "vibeedit_captions_replace":
+            proj = self._require()
+            query, repl = args["query"], args["replacement"]
+            changed = []
+            for track in proj.data["tracks"]:
+                for item in track["items"]:
+                    if "text" in item and query in item["text"]:
+                        item["text"] = item["text"].replace(query, repl)
+                        changed.append(item["id"])
+            if changed:
+                proj._bump()
+                self._save()
+            return {"changed": changed}
+        if name == "vibeedit_captions_style":
+            proj = self._require()
+            result = proj.set_text_style(
+                args["item"], preset=args.get("preset"),
+                size=args.get("size"), position_x=args.get("position_x"),
+                position_y=args.get("position_y"))
+            self._save()
+            return result
+        if name == "vibeedit_captions_words":
+            proj = self._require()
+            words = []
+            for track in proj.data["tracks"]:
+                for item in track["items"]:
+                    if "text" not in item:
+                        continue
+                    parts = item["text"].split()
+                    if not parts:
+                        continue
+                    per = item["dur"] / len(parts)
+                    for i, word in enumerate(parts):
+                        words.append({"item": item["id"],
+                                      "word": word,
+                                      "at": int(item["at"] + i * per),
+                                      "dur": per})
+            return {"words": words}
+        if name == "vibeedit_captions_group":
+            proj = self._require()
+            groups = {}
+            for track in proj.data["tracks"]:
+                texts = [i for i in track["items"] if "text" in i]
+                if texts:
+                    groups[track["id"]] = {
+                        "ids": [i["id"] for i in texts],
+                        "text": " ".join(i["text"] for i in texts),
+                        "start": min(i["at"] for i in texts),
+                        "end": max(i["at"] + i["dur"] for i in texts)}
+            return {"groups": groups,
+                    "note": "Computed grouping; not persisted to the project"}
+        if name == "vibeedit_text_line_style":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            if "text" not in item:
+                raise ValueError("Item has no text field")
+            style = item.setdefault("textStyle", {})
+            style["lineStyle"] = args["line_style"]
+            proj._bump()
+            self._save()
+            return {"item": args["item"], "textStyle": style}
+        # Phase B1 real wrappers: project / export / plugins / jobs.
+        if name == "vibeedit_project_new":
+            from .project import new_project
+            import os
+            folder = os.path.join(args.get("directory", "projects"),
+                                  args["name"])
+            os.makedirs(os.path.join(folder, "media"), exist_ok=True)
+            os.makedirs(os.path.join(folder, "render"), exist_ok=True)
+            data = new_project(args["name"])
+            path = os.path.join(folder, PROJECT_FILENAME)
+            save_project(data, path)
+            return self.open(folder)
+        if name == "vibeedit_project_close":
+            closed = self.path
+            self.project, self.path = None, None
+            self.playhead_frame, self.selection = 0, []
+            return {"closed": closed}
+        if name in ("vibeedit_project_recents", "vibeedit_project_show_recents"):
+            import json as _json
+            import os
+            recents_path = self._recents_path()
+            if not os.path.isfile(recents_path):
+                if name == "vibeedit_project_show_recents":
+                    raise ValueError(
+                        f"No recents file exists: {recents_path}")
+                return {"recent": [], "path": recents_path}
+            with open(recents_path, encoding="utf-8") as fh:
+                return {"recent": _json.load(fh), "path": recents_path}
+        if name == "vibeedit_project_clear_recents":
+            import os
+            recents_path = self._recents_path()
+            if not os.path.isfile(recents_path):
+                raise ValueError(
+                    f"No recents file to clear: {recents_path}")
+            os.remove(recents_path)
+            return {"cleared": recents_path}
+        if name == "vibeedit_project_folder":
+            proj = self._require()
+            return {"folder": proj.folder, "path": self.path}
+        if name == "vibeedit_project_history":
+            import os
+            proj = self._require()
+            bak = self._backup_path()
+            backups_dir = os.path.join(proj.folder, "backups")
+            backups = sorted(os.listdir(backups_dir)) if os.path.isdir(
+                backups_dir) else []
+            return {"rev": proj.rev,
+                    "backup": bak if bak and os.path.isfile(bak) else None,
+                    "backups": backups}
+        if name == "vibeedit_project_data":
+            return {"project": self._require().data}
+        if name == "vibeedit_project_set_data":
+            proj = self._require()
+            key, value = args["key"], args["value"]
+            if key not in ("name", "contentLanguage"):
+                raise ValueError(
+                    "set_data only allows 'name' and 'contentLanguage'; "
+                    "use the typed tools for everything else")
+            proj.data[key] = value
+            proj._bump()
+            self._save()
+            return {"key": key, "value": value, "rev": proj.rev}
+        if name == "vibeedit_project_credits":
+            proj = self._require()
+            return {"name": proj.data.get("name"),
+                    "schema": proj.data.get("schema"),
+                    "rev": proj.rev, "format": proj.data.get("format"),
+                    "media": len(proj.data["media"]),
+                    "tracks": len(proj.data["tracks"]),
+                    "note": "No author credits are stored in this "
+                            "project format; nothing is invented here"}
+        if name == "vibeedit_project_derive":
+            from .export_ops import duplicate_project
+            import os
+            proj = self._require()
+            dest = os.path.join(
+                os.path.dirname(os.path.abspath(proj.folder)),
+                args["name"])
+            return {"path": duplicate_project(proj.folder, dest,
+                                              args["name"])}
+        if name in ("vibeedit_project_import_media", "vibeedit_media_import"):
+            proj = self._require()
+            result = self._import_media(proj, args["path"],
+                                        args.get("kind"))
+            self._save()
+            return result
+        if name == "vibeedit_export_otio":
+            from .export_ops import export_otio
+            import os
+            proj = self._require()
+            out = args.get("out") or os.path.join(
+                proj.folder, "render", "timeline.otio")
+            return export_otio(proj.data, proj.folder, out)
+        if name == "vibeedit_export_chapters":
+            proj = self._require()
+            fps = self._fps_value(proj)
+            chapters = [{"start_seconds": round(m["at"] / fps, 3),
+                         "text": m.get("text", "")}
+                        for m in proj.data.get("markers", [])]
+            return {"chapters": chapters}
+        if name == "vibeedit_export_cover":
+            from .thumbnail import generate_thumbnail, thumbnail_path
+            proj = self._require()
+            medium, _item = self._main_clip_media(proj)
+            if medium is None:
+                raise ValueError("No main-track clip to take a cover from")
+            src = self._media_abs(proj, medium)
+            cover = generate_thumbnail(
+                src, thumbnail_path(proj.folder, medium["id"]),
+                medium.get("kind", "video"))
+            return {"cover": cover, "media": medium["id"]}
+        if name == "vibeedit_export_history":
+            return {"last_export": self.last_export,
+                    "batch_results": self.batch_results}
+        if name in ("vibeedit_export_link", "vibeedit_export_open_output",
+                    "vibeedit_export_reveal_output"):
+            out = self._export_output()
+            return {"output": out, "exists": __import__("os").path.isfile(out),
+                    "note": "Headless server: path returned, not opened"}
+        if name == "vibeedit_export_cancel":
+            self.batch_queue = []
+            return {"cancelled": True,
+                    "note": "Queued batch cleared; a synchronous export "
+                            "already running cannot be interrupted"}
+        if name == "vibeedit_export_dismiss_notice":
+            self.last_export = None
+            return {"dismissed": True}
+        if name in ("vibeedit_plugins_list", "vibeedit_plugins_reload"):
+            from .plugins import list_plugins
+            return {"plugins": list_plugins()}
+        if name == "vibeedit_plugins_validate":
+            from .plugins import load_plugins, load_plugin_state
+            plugins = load_plugins()
+            errors = plugins.pop("_errors", {})
+            disabled = set(load_plugin_state().get("disabled", []))
+            return {"plugins": sorted(k for k in plugins),
+                    "disabled": sorted(disabled), "errors": errors,
+                    "valid": not errors}
+        if name == "vibeedit_plugins_hooks":
+            from .plugins import list_plugins
+            return {"plugins": [
+                {"name": p["name"], "hooks": p["hooks"]}
+                for p in list_plugins() if p["name"] != "_errors"]}
+        if name == "vibeedit_plugins_bundles":
+            from .plugins import PLUGINS_DIR, list_plugins
+            return {"plugins_dir": PLUGINS_DIR,
+                    "plugins": [p["name"] for p in list_plugins()
+                                if p["name"] != "_errors"]}
+        if name in ("vibeedit_jobs_status", "vibeedit_run_status"):
+            return {"queued": self.batch_queue,
+                    "results": self.batch_results,
+                    "last_export": self.last_export}
+        if name in ("vibeedit_jobs_cancel", "vibeedit_run_stop"):
+            self.batch_queue = []
+            return {"cancelled": True}
+        if name == "vibeedit_jobs_wait":
+            return {"queued": self.batch_queue,
+                    "results": self.batch_results,
+                    "note": "Exports in this build are synchronous, so "
+                            "there is no background job to wait on"}
+        if name == "vibeedit_capabilities_get":
+            # Verbatim from the original CommandCatalog.capabilities
+            # (CommandCatalog.swift): command -> capability name.
+            return {"capabilities": {
+                "captions.generate": "captions.transcribe",
+                "media.transcribe": "captions.transcribe",
+                "voice.check": "captions.transcribe",
+                "captions.align": "captions.transcribe",
+                "beats.detect": "audio.beats",
+                "voice.speak": "voice.synthesize",
+                "voice.lines": "voice.synthesize",
+                "image.generate": "image.generate",
+                "audio.measure": "audio.loudness",
+                "audio.mix-measure": "audio.loudness",
+                "media.sync": "audio.sync",
+                "audio.energy": "audio.energy",
+                "library.search": "library.search",
+                "library.generate": "library.generate",
+                "media.subjects": "vision.faces",
+                "media.ocr": "vision.text",
+                "image.cutout": "vision.cutout"},
+                    "source": "original CommandCatalog.capabilities",
+                    "note": "Values are capability names, not providers; "
+                            "a capability with no provider in this build "
+                            "still reports its name, not a fake provider"}
+        if name == "vibeedit_schema_get":
+            from .project import SCHEMA, LEGACY_SCHEMA
+            proj = self._require()
+            return {"schema": SCHEMA, "legacy_schema": LEGACY_SCHEMA,
+                    "project_schema": proj.data.get("schema"),
+                    "format": proj.data.get("format")}
+        if name == "vibeedit_app_version":
+            import sys
+            from .project import SCHEMA
+            return {"name": "vibeedit-mcp", "version": "0.1.0",
+                    "python": sys.version.split()[0],
+                    "schema": SCHEMA,
+                    "note": "This is the MCP server version from "
+                            "handle(); no Windows app version constant "
+                            "exists in this build"}
+        if name == "vibeedit_storage_get":
+            import os
+            proj = self._require()
+            thumbs_dir = os.path.join(proj.folder, "render", "thumbs")
+            thumbs = os.listdir(thumbs_dir) if os.path.isdir(
+                thumbs_dir) else []
+            bak = self._backup_path()
+            return {"thumbs_dir": thumbs_dir, "thumbs": thumbs,
+                    "backup": bak if bak and os.path.isfile(bak) else None,
+                    "batch_queued": len(self.batch_queue),
+                    "waveform_cached": list(self.waveform_cache)}
+        if name == "vibeedit_storage_clear":
+            import glob
+            import os
+            proj = self._require()
+            thumbs_dir = os.path.join(proj.folder, "render", "thumbs")
+            removed = 0
+            if os.path.isdir(thumbs_dir):
+                for path in glob.glob(os.path.join(thumbs_dir, "*.png")):
+                    os.remove(path)
+                    removed += 1
+            self.waveform_cache.clear()
+            return {"thumbs_removed": removed,
+                    "note": "Only render/thumbs cache and the in-session "
+                            "waveform cache were cleared; project media "
+                            "and project files were not touched"}
+        if name == "vibeedit_fonts_list":
+            from .render import font_candidates, find_font
+            import os
+            found = [p for p in font_candidates() if os.path.isfile(p)]
+            return {"fonts": found, "default": find_font(),
+                    "candidates": font_candidates()}
+        if name == "vibeedit_luts_import":
+            import os
+            import shutil
+            from .project import validate_cube
+            proj = self._require()
+            src = args["path"]
+            size = validate_cube(src)
+            store = os.path.join(proj.folder, "luts")
+            os.makedirs(store, exist_ok=True)
+            dest = os.path.join(store, os.path.basename(src))
+            if os.path.abspath(src) != os.path.abspath(dest):
+                shutil.copyfile(src, dest)
+            return {"lut": dest, "size": size, "store": store}
+        # Phase B1 real wrappers: review / media / audio / colour /
+        # doctor / selects / variants / plans / checkpoints / runs.
+        if name == "vibeedit_review_compare":
+            proj = self._require()
+            old = self._review()
+            fresh_validation = proj.validate()
+            fresh_issues = list(fresh_validation.get("errors", []))
+            return {"previous_issue_count": old.get("issue_count"),
+                    "current_issue_count": len(fresh_issues),
+                    "changed": len(fresh_issues) != old.get("issue_count"),
+                    "current_issues": fresh_issues,
+                    "previous_stats": old.get("stats"),
+                    "current_stats": proj.project_stats()}
+        if name == "vibeedit_review_coverage":
+            proj = self._require()
+            review = self._review()
+            used = {i.get("media") for t in proj.data["tracks"]
+                    for i in t["items"] if i.get("media")}
+            return {"review": review,
+                    "media_total": len(proj.data["media"]),
+                    "media_used": len(used),
+                    "items": review.get("stats", {}).get("items"),
+                    "markers": review.get("stats", {}).get("markers")}
+        if name == "vibeedit_review_layout":
+            proj = self._require()
+            self._review()
+            return {"format": proj.data.get("format"),
+                    "tracks": [{"id": t["id"], "kind": t["kind"],
+                                "role": t.get("role"),
+                                "items": [{"id": i["id"], "at": i["at"],
+                                         "dur": i["dur"]}
+                                        for i in t["items"]]}
+                               for t in proj.data["tracks"]]}
+        if name == "vibeedit_review_measure":
+            proj = self._require()
+            review = self._review()
+            return {"review": review,
+                    "duration_frames": proj.duration_frames(),
+                    "duration_seconds": round(proj.duration_seconds(), 3),
+                    "stats": proj.project_stats()}
+        if name == "vibeedit_review_packet":
+            review = self._review()
+            return {"review": review, "last_export": self.last_export}
+        if name == "vibeedit_review_picture":
+            proj = self._require()
+            self._review()
+            media = {m["id"]: m for m in proj.data["media"]}
+            clips = []
+            for track in proj.data["tracks"]:
+                if track.get("role") != "main":
+                    continue
+                for item in track["items"]:
+                    medium = media.get(item.get("media"))
+                    clips.append({"id": item["id"], "at": item["at"],
+                                  "dur": item["dur"],
+                                  "media_kind": medium["kind"]
+                                  if medium else None})
+            return {"main_clips": clips}
+        if name == "vibeedit_review_shots":
+            proj = self._require()
+            self._review()
+            shots = []
+            for track in proj.data["tracks"]:
+                if track.get("role") != "main":
+                    continue
+                for item in sorted(track["items"], key=lambda i: i["at"]):
+                    shots.append({"id": item["id"], "at": item["at"],
+                                  "dur": item["dur"],
+                                  "media": item.get("media")})
+            return {"shots": shots}
+        if name == "vibeedit_review_sync":
+            proj = self._require()
+            self._review()
+            return {"ducking": proj.ducking_get(),
+                    "beatGrid": proj.data.get("beatGrid"),
+                    "audio_tracks": [{"id": t["id"], "items": len(t["items"])}
+                                     for t in proj.data["tracks"]
+                                     if t["kind"] == "audio"]}
+        if name == "vibeedit_review_window":
+            proj = self._require()
+            review = self._review()
+            return {"reviewed_rev": review.get("rev"),
+                    "current_rev": proj.rev,
+                    "start_frame": 0,
+                    "end_frame": proj.duration_frames()}
+        if name in ("vibeedit_media_frame", "vibeedit_media_frames"):
+            from .thumbnail import generate_thumbnail, thumbnail_path
+            proj = self._require()
+            medium = proj.media(args["media"])
+            src = self._media_abs(proj, medium)
+            thumb = generate_thumbnail(
+                src, thumbnail_path(proj.folder, medium["id"]),
+                medium.get("kind", "video"))
+            out = {"media": medium["id"], "thumbnail": thumb,
+                   "kind": medium.get("kind")}
+            if name == "vibeedit_media_frames":
+                from .export_ops import media_metadata
+                out["metadata"] = media_metadata(proj.data, proj.folder,
+                                                 args["media"])
+                out["note"] = "Only the first frame is available via "
+                "the thumbnail path; no frame sequence extractor "
+                "exists in this build"
+            return out
+        if name == "vibeedit_media_transcript":
+            proj = self._require()
+            texts = []
+            for track in proj.data["tracks"]:
+                for item in sorted(track["items"], key=lambda i: i["at"]):
+                    if "text" in item:
+                        texts.append({"track": track["id"],
+                                      "id": item["id"], "at": item["at"],
+                                      "dur": item["dur"],
+                                      "text": item["text"]})
+            if not texts:
+                raise ValueError(
+                    "Project has no text items, so it has no stored "
+                    "transcript; transcribe first (transcribe op) or "
+                    "import captions")
+            return {"transcript": texts,
+                    "text": " ".join(t["text"] for t in texts)}
+        if name == "vibeedit_media_inventory":
+            proj = self._require()
+            inv = []
+            for medium in proj.data["media"]:
+                used = sum(1 for t in proj.data["tracks"]
+                           for i in t["items"]
+                           if i.get("media") == medium["id"])
+                inv.append({**medium, "clips_using": used})
+            return {"inventory": inv}
+        if name == "vibeedit_media_resolve_range":
+            proj = self._require()
+            fps = self._fps_value(proj)
+            if args.get("item"):
+                _, item = proj.item(args["item"])
+                in_f, dur = int(item.get("in", 0)), int(item["dur"])
+            else:
+                medium = proj.media(args["media"])
+                in_f = int(args.get("in", 0))
+                dur = int(args["dur"]) if args.get("dur") is not None else 0
+                if not dur and medium.get("duration"):
+                    dur = int(round(float(medium["duration"]) * fps))
+                if not dur and medium.get("frames"):
+                    dur = int(medium["frames"])
+            if dur <= 0:
+                raise ValueError("Range duration must be positive and "
+                                 "resolvable from the media or item")
+            return {"in_frame": in_f, "duration_frames": dur,
+                    "start_seconds": round(in_f / fps, 3),
+                    "duration_seconds": round(dur / fps, 3)}
+        if name == "vibeedit_beats_grid":
+            return {"beatGrid": self._require().data.get("beatGrid"),
+                    "beats": self._require().beat_list()}
+        if name == "vibeedit_audio_beats":
+            return {"beats": self._require().beat_list()}
+        if name in ("vibeedit_audio_energy", "vibeedit_audio_measure"):
+            import math
+            from .beats import decode_mono
+            proj = self._require()
+            medium = proj.media(args["media"])
+            samples = decode_mono(self._media_abs(proj, medium))
+            if not samples:
+                raise ValueError("Media has no decodable audio samples")
+            rms = math.sqrt(sum(v * v for v in samples) / len(samples))
+            out = {"media": medium["id"], "rms": round(rms, 4),
+                   "peak": round(max(abs(v) for v in samples), 4),
+                   "samples": len(samples)}
+            if name == "vibeedit_audio_measure":
+                from .export_ops import media_metadata
+                out["metadata"] = media_metadata(proj.data, proj.folder,
+                                                 args["media"])
+            return out
+        if name == "vibeedit_audio_loudness":
+            import json as _json
+            import subprocess
+            from .render import find_tool
+            proj = self._require()
+            medium = proj.media(args["media"])
+            if not medium.get("hasAudio"):
+                # Stored flag may be absent for older entries; probe
+                # instead of trusting it, and let FFmpeg decide.
+                pass
+            ffmpeg = find_tool("ffmpeg")
+            cmd = [ffmpeg, "-v", "info", "-i",
+                   self._media_abs(proj, medium), "-af",
+                   "loudnorm=print_format=json", "-f", "null", "-"]
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  timeout=120)
+            text = proc.stderr
+            start = text.rfind("{")
+            end = text.rfind("}")
+            if start < 0 or end < 0:
+                raise RuntimeError(
+                    "FFmpeg loudnorm measurement produced no JSON; "
+                    "the file may have no audio stream")
+            return {"media": medium["id"],
+                    "loudnorm": _json.loads(text[start:end + 1])}
+        if name == "vibeedit_audio_mix_measure":
+            proj = self._require()
+            audio = []
+            for track in proj.data["tracks"]:
+                if track["kind"] != "audio":
+                    continue
+                audio.append({"track": track["id"],
+                              "items": [{"id": i["id"],
+                                        "volume": i.get("volume")}
+                                       for i in track["items"]]})
+            return {"ducking": proj.ducking_get(), "audio": audio}
+        if name == "vibeedit_color_measure":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            color = item.get("color") or {}
+            if color.get("eq") or color.get("preset"):
+                from .project import eq_preset_filter
+                filt = None
+                if color.get("preset"):
+                    filt = eq_preset_filter(
+                        color["preset"],
+                        float(color.get("preset_strength", 1.0)))
+                return {"item": args["item"], "eq": color.get("eq") or {},
+                        "preset": color.get("preset"),
+                        "eq_filter": filt}
+            raise ValueError(
+                "Clip has no stored eq/preset colour state and "
+                "FFmpeg signalstats extraction is not wired in this "
+                "build; set eq colour first (clip_color_eq)")
+        if name == "vibeedit_doctor_run":
+            from .render import find_font, find_tool
+            import os
+            import sys
+            checks: dict = {"python": sys.version.split()[0]}
+            for tool in ("ffmpeg", "ffprobe"):
+                try:
+                    checks[tool] = find_tool(tool)
+                    import subprocess
+                    ver = subprocess.run(
+                        [checks[tool], "-version"], capture_output=True,
+                        text=True, encoding="utf-8", errors="replace",
+                        timeout=30).stdout.splitlines()
+                    checks[tool + "_version"] = ver[0] if ver else None
+                except Exception as exc:  # noqa: BLE001 - doctor report
+                    checks[tool] = None
+                    checks[tool + "_error"] = str(exc)
+            try:
+                checks["font"] = find_font()
+            except Exception as exc:  # noqa: BLE001 - doctor report
+                checks["font"] = None
+                checks["font_error"] = str(exc)
+            from .plugins import PLUGINS_DIR
+            checks["plugins_dir"] = PLUGINS_DIR
+            checks["plugins_dir_exists"] = os.path.isdir(PLUGINS_DIR)
+            checks["project_path"] = self.path
+            checks["ok"] = bool(checks.get("ffmpeg")
+                                and checks.get("ffprobe"))
+            return checks
+        if name == "vibeedit_edl_import":
+            import re as _re
+            proj = self._require()
+            with open(args["path"], encoding="utf-8",
+                      errors="replace") as fh:
+                text = fh.read()
+            events = []
+            for line in text.splitlines():
+                m = _re.match(
+                    r"\s*(\d+)\s+(\S+)\s+([VA]+)\s+\S+\s+"
+                    r"(\d\d:\d\d:\d\d:\d\d)\s+(\d\d:\d\d:\d\d:\d\d)\s+"
+                    r"(\d\d:\d\d:\d\d:\d\d)\s+(\d\d:\d\d:\d\d:\d\d)",
+                    line)
+                if not m:
+                    continue
+                def _tc(s):
+                    h, mi, s2, f = (int(x) for x in s.split(":"))
+                    return ((h * 3600 + mi * 60 + s2)
+                            * int(round(self._fps_value(proj))) + f)
+                events.append({"event": int(m.group(1)),
+                               "reel": m.group(2),
+                               "tracks": m.group(3),
+                               "source_in": _tc(m.group(4)),
+                               "source_out": _tc(m.group(5)),
+                               "record_in": _tc(m.group(6)),
+                               "record_out": _tc(m.group(7))})
+            if not events:
+                raise ValueError("No CMX3600-style events found in the EDL")
+            placed = []
+            mapping = args.get("media_map") or {}
+            if mapping:
+                for ev in events:
+                    media_id = mapping.get(ev["reel"])
+                    if not media_id:
+                        continue
+                    placed.append(proj.add_clip(
+                        media_id, args.get("track", "v1"),
+                        ev["record_in"], ev["source_in"],
+                        ev["record_out"] - ev["record_in"]))
+                self._save()
+            return {"events": events, "placed": placed}
+        if name == "vibeedit_selects_list":
+            return {"selects": self._require().data.get("selects", [])}
+        if name == "vibeedit_selects_set":
+            proj = self._require()
+            select = {"id": args.get("id") or args["name"],
+                      "name": args["name"], "media": args["media"],
+                      "in": int(args.get("in", 0)),
+                      "out": int(args["out"]) if args.get("out") is not None else None}
+            selects = proj.data.setdefault("selects", [])
+            selects[:] = [s for s in selects if s["id"] != select["id"]]
+            selects.append(select)
+            proj._bump()
+            self._save()
+            return {"select": select}
+        if name == "vibeedit_selects_place":
+            proj = self._require()
+            select = next((s for s in proj.data.get("selects", [])
+                           if s["id"] == args["select"]), None)
+            if select is None:
+                raise KeyError(f"Unknown select: {args['select']}")
+            if select.get("out") is None:
+                raise ValueError("Select has no Out frame; set one first")
+            result = proj.add_clip(select["media"], args.get("track", "v1"),
+                                   int(args.get("at", 0)), select["in"],
+                                   select["out"] - select["in"])
+            self._save()
+            return result
+        if name == "vibeedit_variants_list":
+            proj = self._require()
+            variants = proj.data.get("variants", {})
+            return {"variants": [{"name": k, "rev": v.get("rev"),
+                                  "items": sum(len(t["items"]) for t in
+                                               v.get("tracks", []))}
+                                 for k, v in variants.items()]}
+        if name == "vibeedit_variants_create":
+            import copy as _copy
+            proj = self._require()
+            variants = proj.data.setdefault("variants", {})
+            variants[args["name"]] = _copy.deepcopy(proj.data)
+            # The snapshot must not nest variants inside itself.
+            variants[args["name"]].pop("variants", None)
+            proj._bump()
+            self._save()
+            return {"variant": args["name"], "rev": proj.rev}
+        if name == "vibeedit_variants_diff":
+            proj = self._require()
+            variant = (proj.data.get("variants") or {}).get(args["name"])
+            if variant is None:
+                raise KeyError(f"Unknown variant: {args['name']}")
+            cur_ids = {i["id"] for t in proj.data["tracks"]
+                       for i in t["items"]}
+            var_ids = {i["id"] for t in variant.get("tracks", [])
+                       for i in t["items"]}
+            return {"variant": args["name"], "variant_rev": variant.get("rev"),
+                    "current_rev": proj.rev,
+                    "only_in_current": sorted(cur_ids - var_ids),
+                    "only_in_variant": sorted(var_ids - cur_ids)}
+        if name == "vibeedit_script_check":
+            proj = self._require()
+            script = args["text"]
+            found, missing = [], []
+            for track in proj.data["tracks"]:
+                for item in track["items"]:
+                    if "text" not in item:
+                        continue
+                    (found if item["text"] in script else missing).append(
+                        {"id": item["id"], "text": item["text"]})
+            total = len(found) + len(missing)
+            return {"found": found, "missing": missing,
+                    "coverage": round(len(found) / total, 3) if total else 0.0}
+        if name == "vibeedit_plan_check":
+            proj = self._require()
+            problems = []
+            for op in args.get("ops", []):
+                kind = op.get("op")
+                if kind not in ("add_clip", "add_text", "trim", "split",
+                                "move", "delete", "set_speed", "set_fade",
+                                "set_volume", "set_text", "set_keyframes",
+                                "set_color", "add_marker", "remove_marker",
+                                "add_transition", "remove_transition"):
+                    problems.append(f"Unknown operation: {kind}")
+                    continue
+                for key in ("item", "media", "track"):
+                    if key in op:
+                        try:
+                            if key == "item":
+                                proj.item(op[key])
+                            elif key == "media":
+                                proj.media(op[key])
+                            else:
+                                proj.track(op[key])
+                        except (KeyError, ValueError):
+                            problems.append(
+                                f"Unknown {key}: {op[key]!r}")
+            return {"ok": not problems, "problems": problems}
+        if name == "vibeedit_plan_apply":
+            return self.call("vibeedit_timeline_apply",
+                             {"ops": args.get("ops", [])})
+        if name == "vibeedit_workflow_gates":
+            proj = self._require()
+            gates = proj.data.get("workflowGates")
+            if gates is None:
+                raise ValueError(
+                    "No review gates have been set; call "
+                    "vibeedit_workflow_set_gates first")
+            return {"gates": gates}
+        if name == "vibeedit_workflow_set_gates":
+            proj = self._require()
+            gates = args["gates"]
+            if not isinstance(gates, dict):
+                raise ValueError("gates must be an object")
+            proj.data["workflowGates"] = gates
+            proj._bump()
+            self._save()
+            return {"gates": gates}
+        if name == "vibeedit_checkpoint_request":
+            if self.path is None:
+                raise RuntimeError("No project open")
+            info = write_backup(self.path)
+            return {"checkpoint": info}
+        if name == "vibeedit_checkpoint_status":
+            import os
+            proj = self._require()
+            bak = self._backup_path()
+            backups_dir = os.path.join(proj.folder, "backups")
+            return {"backup": bak if bak and os.path.isfile(bak) else None,
+                    "backup_mtime": os.path.getmtime(bak)
+                    if bak and os.path.isfile(bak) else None,
+                    "backups": sorted(os.listdir(backups_dir))
+                    if os.path.isdir(backups_dir) else []}
+        if name == "vibeedit_run_log":
+            return {"batch_results": self.batch_results,
+                    "last_export": self.last_export}
+        if name == "vibeedit_run_show":
+            return {"queued": self.batch_queue,
+                    "results": self.batch_results,
+                    "last_export": self.last_export}
+        if name == "vibeedit_batch_cancel":
+            self.batch_queue = []
+            return {"cancelled": True}
+        if name == "vibeedit_batch_presets":
+            proj = self._require()
+            return {"presets": {
+                "full": {"width": proj.width, "height": proj.height,
+                         "ffmpeg_preset": "fast", "crf": "20"},
+                "draft": {"width": proj.width // 2,
+                          "height": proj.height // 2,
+                          "ffmpeg_preset": "veryfast", "crf": "28"}}}
+        if name == "vibeedit_batch_retry":
+            from .export_ops import batch_export
+            if not self.batch_queue:
+                raise ValueError("Batch queue is empty; nothing to retry")
+            self.batch_results = batch_export(
+                self.batch_queue, preset=args.get("preset", "full"),
+                normalize_audio=bool(args.get("normalize", False)))
+            return {"results": self.batch_results}
+        if name == "vibeedit_library_get":
+            for entry in self._require().library_list():
+                if entry["id"] == args["entry"]:
+                    return {"entry": entry}
+            raise KeyError(f"Unknown library item: {args['entry']}")
+        if name == "vibeedit_library_stats":
+            items = self._require().library_list()
+            kinds = {}
+            for entry in items:
+                kind = "text" if "text" in (entry.get("item") or {}) else "clip"
+                kinds[kind] = kinds.get(kind, 0) + 1
+            return {"count": len(items), "kinds": kinds}
+        if name == "vibeedit_library_preview":
+            for entry in self._require().library_list():
+                if entry["id"] == args["entry"]:
+                    return {"entry": entry}
+            raise KeyError(f"Unknown library item: {args['entry']}")
+        if name == "vibeedit_library_favorite":
+            proj = self._require()
+            for entry in proj.data.get("library", []):
+                if entry["id"] == args["entry"]:
+                    entry["favorite"] = True
+                    proj._bump()
+                    self._save()
+                    return {"entry": entry}
+            raise KeyError(f"Unknown library item: {args['entry']}")
+        if name == "vibeedit_library_update":
+            proj = self._require()
+            for entry in proj.data.get("library", []):
+                if entry["id"] == args["entry"]:
+                    entry["name"] = args["name"]
+                    proj._bump()
+                    self._save()
+                    return {"entry": entry}
+            raise KeyError(f"Unknown library item: {args['entry']}")
+        if name == "vibeedit_library_apply":
+            proj = self._require()
+            result = proj.library_place(
+                args["entry"], args.get("track"),
+                int(args["at"]) if args.get("at") is not None else None)
+            self._save()
+            return result
+        if name == "vibeedit_library_move":
+            proj = self._require()
+            library = proj.data.get("library", [])
+            idx = next((i for i, e in enumerate(library)
+                        if e["id"] == args["entry"]), None)
+            if idx is None:
+                raise KeyError(f"Unknown library item: {args['entry']}")
+            entry = library.pop(idx)
+            pos = max(0, min(int(args["to"]), len(library)))
+            library.insert(pos, entry)
+            proj._bump()
+            self._save()
+            return {"entry": entry["id"],
+                    "order": [e["id"] for e in library]}
+        if name == "vibeedit_clip_unlink_audio":
+            proj = self._require()
+            _, item = proj.item(args["item"])
+            audio_ids = list(item.get("linked_audio") or [])
+            video_id = item.get("linked_video")
+            if not audio_ids and not video_id:
+                raise ValueError(
+                    f"Item {args['item']!r} has no linked audio to unlink")
+            unlinked = []
+            for audio_id in audio_ids:
+                try:
+                    _, partner = proj.item(audio_id)
+                except KeyError:
+                    continue
+                if partner.get("linked_video") == item["id"]:
+                    partner.pop("linked_video", None)
+                unlinked.append(audio_id)
+            if audio_ids:
+                item.pop("linked_audio", None)
+            if video_id:
+                try:
+                    _, video = proj.item(video_id)
+                    remaining = [a for a in (video.get("linked_audio") or [])
+                                 if a != item["id"]]
+                    if remaining:
+                        video["linked_audio"] = remaining
+                    else:
+                        video.pop("linked_audio", None)
+                except KeyError:
+                    pass
+                item.pop("linked_video", None)
+            proj._bump()
+            self._save()
+            return {"unlinked": unlinked, "item": args["item"]}
+        # Phase B integration: skills (read side), vision, plugin
+        # install/remove/update, linked audio, magnetic toggle,
+        # reframe, transition renderability. These convert B1 honest
+        # tools into real ones now that skills.py, vision.py and the
+        # B3 install functions exist.
+        if name == "vibeedit_skills_list":
+            from .skills import list_skills
+            return {"skills": list_skills(args.get("skills_dir"))}
+        if name == "vibeedit_skills_get":
+            from .skills import get_skill
+            return {"skill": get_skill(args.get("skills_dir"),
+                                       args["skill"])}
+        if name == "vibeedit_skills_search":
+            from .skills import search_skills
+            return {"skills": search_skills(args.get("skills_dir"),
+                                            args.get("query", ""))}
+        if name in ("vibeedit_vision_text", "vibeedit_vision_faces",
+                    "vibeedit_vision_cutout", "vibeedit_image_cutout"):
+            from .vision import VisionUnavailable, cutout as _cut, \
+                detect_faces as _faces, ocr_image as _ocr
+            if args.get("media"):
+                proj = self._require()
+                path = self._media_abs(proj, proj.media(args["media"]))
+            elif args.get("path"):
+                path = args["path"]
+            else:
+                raise ValueError("vision tool needs 'media' or 'path'")
+            try:
+                if name == "vibeedit_vision_text":
+                    return _ocr(path)
+                if name == "vibeedit_vision_faces":
+                    return _faces(path)
+                out = args.get("output")
+                if out is None and self.project is not None:
+                    import os as _os
+                    out = _os.path.join(
+                        self.project.folder, "render",
+                        _os.path.splitext(_os.path.basename(path))[0]
+                        + "_cutout.png")
+                return _cut(path, out)
+            except VisionUnavailable as exc:
+                raise ValueError(f"NOT_AVAILABLE: vision backend missing: {exc}")
+        if name == "vibeedit_plugins_install":
+            from .plugins import install_plugin
+            return install_plugin(args["source"],
+                                  plugins_dir=args.get("plugins_dir"),
+                                  overwrite=bool(args.get("overwrite", False)),
+                                  source_label=args.get("source_label"))
+        if name == "vibeedit_plugins_download":
+            import os as _os
+            import tempfile as _tf
+            from .plugins import download_plugin_bundle
+            dest = args.get("dest") or _os.path.join(
+                _tf.gettempdir(), "vibeedit-plugin-bundle.zip")
+            return download_plugin_bundle(args["url"], dest)
+        if name == "vibeedit_plugins_remove":
+            from .plugins import remove_plugin
+            return remove_plugin(args["plugin"],
+                                 plugins_dir=args.get("plugins_dir"))
+        if name == "vibeedit_plugins_updates":
+            from .plugins import check_plugin_update
+            return check_plugin_update(args["plugin"],
+                                       plugins_dir=args.get("plugins_dir"))
+        if name == "vibeedit_clip_link_audio":
+            proj = self._require()
+            result = proj.link_audio(args["video"], args["audio"])
+            self._save()
+            return result
+        if name == "vibeedit_project_magnetic_get":
+            return {"magnetic": self._require().magnetic_enabled}
+        if name == "vibeedit_project_magnetic_set":
+            proj = self._require()
+            proj.set_magnetic(bool(args["enabled"]))
+            self._save()
+            return {"magnetic": proj.magnetic_enabled}
+        if name == "vibeedit_clip_reframe":
+            proj = self._require()
+            result = proj.set_reframe(args["item"], args.get("window"))
+            self._save()
+            return result
+        if name == "vibeedit_transitions_renderability":
+            from .render import list_transition_renderability
+            return {"transitions": list_transition_renderability()}
+        # Round 2: knowledge store, skills write-side, voice/update
+        # checks, caption transcription/generation/alignment, font
+        # import, magnetic reorder.
+        if name.startswith("vibeedit_knowledge_"):
+            from . import knowledge as _k
+            proj = self._require()
+            data = proj.data
+            sub = name[len("vibeedit_knowledge_"):]
+            if sub == "add_lesson":
+                res = _k.add_lesson(data, args["text"], args.get("title"))
+            elif sub == "lessons":
+                res = {"lessons": _k.lessons(data)}
+            elif sub == "get":
+                res = _k.get_lesson(data, args["lesson"])
+            elif sub == "update_lesson":
+                res = _k.update_lesson(data, args["lesson"], args["text"])
+            elif sub == "remove_lesson":
+                res = _k.remove_lesson(data, args["lesson"])
+            elif sub == "approve":
+                if args.get("proposal"):
+                    res = _k.approve_proposal(data, args["proposal"])
+                else:
+                    res = _k.approve_lesson(data, args["lesson"])
+            elif sub == "reject":
+                if args.get("proposal"):
+                    res = _k.reject_proposal(data, args["proposal"])
+                else:
+                    res = _k.reject_lesson(data, args["lesson"])
+            elif sub == "facts":
+                res = {"facts": _k.facts(data)}
+            elif sub == "set_fact":
+                res = _k.set_fact(data, args["key"], args["value"])
+            elif sub == "prefs":
+                res = {"prefs": _k.prefs(data)}
+            elif sub == "set_pref":
+                res = _k.set_pref(data, args["key"], args["value"])
+            elif sub == "claims":
+                res = {"claims": _k.claims(data)}
+            elif sub == "set_claim":
+                res = _k.set_claim(data, args["key"], args["statement"])
+            elif sub == "memo":
+                if "text" in args:
+                    res = _k.set_memo(data, args["text"])
+                else:
+                    res = {"memo": _k.get_memo(data)}
+            elif sub == "split_memo":
+                res = _k.split_memo(data)
+            elif sub == "proposals":
+                res = {"proposals": _k.proposals(data)}
+            elif sub == "verdicts":
+                res = {"verdicts": _k.verdicts(data)}
+            elif sub == "history":
+                res = {"history": _k.history(data)}
+            elif sub == "revert":
+                res = _k.revert(data, int(args.get("steps", 1)))
+            elif sub == "migrate":
+                res = _k.migrate(data)
+            elif sub == "skill":
+                from .skills import get_skill as _gs
+                res = {"skill": _gs(args.get("skills_dir"),
+                                    args["skill"])}
+            else:
+                raise ValueError(f"Unknown knowledge tool: {name}")
+            self._save()
+            return res
+        if name == "vibeedit_skills_save":
+            from .skills import save_skill
+            return save_skill(args.get("skills_dir"), args["skill"],
+                              args.get("title", ""), args["body"],
+                              overwrite=bool(args.get("overwrite", False)))
+        if name == "vibeedit_skills_enable":
+            from .skills import set_skill_enabled
+            return set_skill_enabled(args.get("skills_dir"),
+                                     args["skill"], True)
+        if name == "vibeedit_skills_disable":
+            from .skills import set_skill_enabled
+            return set_skill_enabled(args.get("skills_dir"),
+                                     args["skill"], False)
+        if name == "vibeedit_skills_export":
+            from .skills import export_skill
+            return export_skill(args.get("skills_dir"), args["skill"],
+                                args.get("dest"))
+        if name == "vibeedit_skills_remove":
+            from .skills import remove_skill
+            return remove_skill(args.get("skills_dir"), args["skill"],
+                                confirm=bool(args.get("confirm", False)))
+        if name == "vibeedit_skills_propose":
+            from .skills import propose_skill
+            return propose_skill(args.get("skills_dir"), args["skill"],
+                                 args.get("title", ""), args["body"])
+        if name == "vibeedit_voice_check":
+            import importlib.util as _ilu
+            import shutil as _sh
+            backends = {"piper": _sh.which("piper") is not None,
+                        "edge_tts": _ilu.find_spec("edge_tts") is not None}
+            takes = None
+            if self.project is not None:
+                proj = self._require()
+                takes = 0
+                for track in proj.data["tracks"]:
+                    if track.get("role") == "voiceover":
+                        takes += len(track.get("items", []))
+            return {"backends": backends, "voiceover_takes": takes,
+                    "note": "No voice provider is wired: generation/cloning "
+                            "need a provider plugin; this tool only checks "
+                            "what is installed."}
+        if name == "vibeedit_app_update_check":
+            return {"current_version": "0.1.0", "update_channel": None,
+                    "status": "no updater configured in this build; "
+                              "releases come from the GitHub workflow "
+                              "(build-windows.yml, pushed by the user)"}
+        if name in ("vibeedit_captions_transcribe",
+                    "vibeedit_media_transcribe"):
+            from .transcribe import transcribe_media
+            proj = self._require()
+            medium = proj.media(args["media"])
+            mpath = medium["path"]
+            import os as _os
+            if not _os.path.isabs(mpath):
+                mpath = _os.path.join(proj.folder, mpath)
+            added = transcribe_media(proj, mpath,
+                                     args.get("track", "t1"),
+                                     model=args.get("model", "tiny"))
+            self._save()
+            return {"added": [it["id"] for it in added]}
+        if name == "vibeedit_captions_generate":
+            from .transcribe import transcribe_media
+            proj = self._require()
+            medium = proj.media(args["media"])
+            mpath = medium["path"]
+            import os as _os
+            if not _os.path.isabs(mpath):
+                mpath = _os.path.join(proj.folder, mpath)
+            track = args.get("track", "t1")
+            added = transcribe_media(proj, mpath, track,
+                                     model=args.get("model", "tiny"))
+            self._save()
+            return {"added": [it["id"] for it in added],
+                    "srt": proj.export_srt(track)}
+        if name == "vibeedit_captions_align":
+            from .transcribe import align_captions
+            proj = self._require()
+            medium = proj.media(args["media"])
+            mpath = medium["path"]
+            import os as _os
+            if not _os.path.isabs(mpath):
+                mpath = _os.path.join(proj.folder, mpath)
+            res = align_captions(proj, args.get("track", "t1"), mpath,
+                                 model=args.get("model", "tiny"))
+            self._save()
+            return res
+        if name == "vibeedit_fonts_import":
+            from .render import import_font
+            return import_font(args["path"],
+                               fonts_dir=args.get("fonts_dir"))
+        if name == "vibeedit_timeline_reorder":
+            proj = self._require()
+            res = proj.reorder_main(args["item"], args.get("before"))
+            self._save()
+            return res
+        # Phase B1 honest tools: every remaining Phase B1 name is a
+        # check-and-error tool; _raise_honest performs the real check
+        # (store-module / plugin-system / voice-module lookup where
+        # applicable) and raises, never returning fake success.
+        if name.startswith("vibeedit_") and any(
+                t["name"] == name and t["description"].startswith(
+                    "Not available") for t in TOOLS):
+            self._raise_honest(name)
         raise ValueError(f"Unknown tool: {name}")
 
 

@@ -446,6 +446,214 @@ class State:
             elif kind == "plugin_reload":
                 from .plugins import list_plugins
                 result = {"plugins": list_plugins()}
+            elif kind == "knowledge":
+                from . import knowledge as _k
+                action = op.get("action", "")
+                data = proj.data
+                if action == "add_lesson":
+                    result = _k.add_lesson(data, op["text"],
+                                           op.get("title"))
+                elif action == "lessons":
+                    result = {"lessons": _k.lessons(data)}
+                elif action == "get":
+                    result = _k.get_lesson(data, op["lesson"])
+                elif action == "update_lesson":
+                    result = _k.update_lesson(data, op["lesson"],
+                                              op["text"])
+                elif action == "remove_lesson":
+                    result = _k.remove_lesson(data, op["lesson"])
+                elif action == "approve":
+                    if op.get("proposal"):
+                        result = _k.approve_proposal(data,
+                                                     op["proposal"])
+                    else:
+                        result = _k.approve_lesson(data, op["lesson"])
+                elif action == "reject":
+                    if op.get("proposal"):
+                        result = _k.reject_proposal(data,
+                                                    op["proposal"])
+                    else:
+                        result = _k.reject_lesson(data, op["lesson"])
+                elif action == "facts":
+                    result = {"facts": _k.facts(data)}
+                elif action == "set_fact":
+                    result = _k.set_fact(data, op["key"], op["value"])
+                elif action == "prefs":
+                    result = {"prefs": _k.prefs(data)}
+                elif action == "set_pref":
+                    result = _k.set_pref(data, op["key"], op["value"])
+                elif action == "claims":
+                    result = {"claims": _k.claims(data)}
+                elif action == "set_claim":
+                    result = _k.set_claim(data, op["key"],
+                                          op["statement"])
+                elif action == "memo":
+                    if "text" in op:
+                        result = _k.set_memo(data, op["text"])
+                    else:
+                        result = {"memo": _k.get_memo(data)}
+                elif action == "split_memo":
+                    result = _k.split_memo(data)
+                elif action == "proposals":
+                    result = {"proposals": _k.proposals(data)}
+                elif action == "verdicts":
+                    result = {"verdicts": _k.verdicts(data)}
+                elif action == "history":
+                    result = {"history": _k.history(data)}
+                elif action == "revert":
+                    result = _k.revert(data, int(op.get("steps", 1)))
+                elif action == "migrate":
+                    result = _k.migrate(data)
+                else:
+                    raise ValueError(f"Unknown knowledge action: {action}")
+            elif kind == "skills_save":
+                from .skills import save_skill
+                result = save_skill(None, op["skill"], op.get("title", ""),
+                                    op["body"],
+                                    overwrite=bool(op.get("overwrite",
+                                                          False)))
+            elif kind == "skills_enable":
+                from .skills import set_skill_enabled
+                result = set_skill_enabled(None, op["skill"], True)
+            elif kind == "skills_disable":
+                from .skills import set_skill_enabled
+                result = set_skill_enabled(None, op["skill"], False)
+            elif kind == "skills_export":
+                from .skills import export_skill
+                result = export_skill(None, op["skill"], op.get("dest"))
+            elif kind == "skills_remove":
+                from .skills import remove_skill
+                result = remove_skill(None, op["skill"],
+                                      confirm=bool(op.get("confirm",
+                                                          False)))
+            elif kind == "skills_propose":
+                from .skills import propose_skill
+                result = propose_skill(None, op["skill"],
+                                       op.get("title", ""), op["body"])
+            elif kind == "captions_transcribe":
+                from .transcribe import transcribe_media
+                medium = proj.media(op["media"])
+                mpath = medium["path"]
+                if not os.path.isabs(mpath):
+                    mpath = os.path.join(proj.folder, mpath)
+                added = transcribe_media(proj, mpath,
+                                         op.get("track", "t1"),
+                                         model=op.get("model", "tiny"))
+                result = {"added": [it["id"] for it in added]}
+            elif kind == "captions_generate":
+                from .transcribe import transcribe_media
+                medium = proj.media(op["media"])
+                mpath = medium["path"]
+                if not os.path.isabs(mpath):
+                    mpath = os.path.join(proj.folder, mpath)
+                track = op.get("track", "t1")
+                added = transcribe_media(proj, mpath, track,
+                                         model=op.get("model", "tiny"))
+                result = {"added": [it["id"] for it in added],
+                          "srt": proj.export_srt(track)}
+            elif kind == "captions_align":
+                from .transcribe import align_captions
+                medium = proj.media(op["media"])
+                mpath = medium["path"]
+                if not os.path.isabs(mpath):
+                    mpath = os.path.join(proj.folder, mpath)
+                result = align_captions(proj, op.get("track", "t1"),
+                                        mpath, model=op.get("model",
+                                                            "tiny"))
+            elif kind == "fonts_import":
+                from .render import import_font
+                result = import_font(op["path"])
+            elif kind == "timeline_reorder":
+                result = proj.reorder_main(op["item"], op.get("before"))
+            elif kind == "voice_check":
+                import importlib.util as _ilu
+                import shutil as _sh
+                takes = 0
+                for track in proj.data["tracks"]:
+                    if track.get("role") == "voiceover":
+                        takes += len(track.get("items", []))
+                result = {"backends": {
+                    "piper": _sh.which("piper") is not None,
+                    "edge_tts": _ilu.find_spec("edge_tts") is not None},
+                    "voiceover_takes": takes}
+            elif kind == "app_update_check":
+                result = {"current_version": "0.1.0",
+                          "update_channel": None,
+                          "status": "no updater configured in this build"}
+            elif kind == "plugin_install":
+                from .plugins import install_plugin
+                result = install_plugin(
+                    op["source"],
+                    overwrite=bool(op.get("overwrite", False)),
+                    source_label=op.get("source_label"))
+            elif kind == "plugin_download":
+                # Gated step: a URL download only runs with an explicit
+                # user confirmation in the op; it never installs or
+                # executes anything.
+                if not op.get("confirm"):
+                    raise ValueError(
+                        "plugin_download needs confirm: true (untrusted "
+                        "source); download first, then plugin_install "
+                        "the downloaded bundle")
+                import os as _os
+                import tempfile as _tf
+                from .plugins import download_plugin_bundle
+                dest = op.get("dest") or _os.path.join(
+                    _tf.gettempdir(), "vibeedit-plugin-bundle.zip")
+                result = download_plugin_bundle(op["url"], dest)
+            elif kind == "plugin_remove":
+                from .plugins import remove_plugin
+                result = remove_plugin(op["plugin"])
+            elif kind == "plugin_update_check":
+                from .plugins import check_plugin_update
+                result = check_plugin_update(op["plugin"])
+            elif kind == "link_audio":
+                result = proj.link_audio(op["video"], op["audio"])
+            elif kind == "unlink_audio":
+                result = proj.unlink_audio(op["video"], op.get("audio"))
+            elif kind == "magnetic_get":
+                result = {"magnetic": proj.magnetic_enabled}
+            elif kind == "magnetic_set":
+                proj.set_magnetic(bool(op["enabled"]))
+                result = {"magnetic": proj.magnetic_enabled}
+            elif kind == "clip_reframe":
+                result = proj.set_reframe(op["item"], op.get("window"))
+            elif kind == "transitions_renderability":
+                from .render import list_transition_renderability
+                result = {"transitions": list_transition_renderability()}
+            elif kind == "skills_list":
+                from .skills import list_skills
+                result = {"skills": list_skills()}
+            elif kind == "skills_get":
+                from .skills import get_skill
+                result = {"skill": get_skill(None, op["skill"])}
+            elif kind == "skills_search":
+                from .skills import search_skills
+                result = {"skills": search_skills(None, op.get("query", ""))}
+            elif kind in ("vision_ocr", "vision_faces", "vision_cutout"):
+                from .vision import VisionUnavailable
+                from .vision import cutout as _cut
+                from .vision import detect_faces as _faces
+                from .vision import ocr_image as _ocr
+                import os as _os
+                medium = proj.media(op["media"])
+                path = medium["path"]
+                if not _os.path.isabs(path):
+                    path = _os.path.join(proj.folder, path)
+                try:
+                    if kind == "vision_ocr":
+                        result = _ocr(path)
+                    elif kind == "vision_faces":
+                        result = _faces(path)
+                    else:
+                        out = op.get("output") or _os.path.join(
+                            proj.folder, "render",
+                            _os.path.splitext(
+                                _os.path.basename(path))[0] + "_cutout.png")
+                        result = _cut(path, out)
+                except VisionUnavailable as exc:
+                    raise ValueError(
+                        f"Vision backend missing: {exc}")
             else:
                 raise ValueError(f"Unknown operation: {kind}")
         except Exception:

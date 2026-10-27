@@ -43,6 +43,23 @@ expression), and music ducking (sidechaincompress with the main
 audio as sidechain). Beat grids are detected and stored, not baked
 into the picture (they drive markers and snap, and are drawn on the
 web UI ruler).
+
+Phase B6 additions: motion-only transitions (spin, swing, arc,
+arc-right, diamond, crash-out, infinite-out, screen-in, screen-out,
+dip-black, color-shift, flicker, kaleidoscope) render with real
+FFmpeg filter chains, not xfade substitutions — see
+MOTION_TRANSITIONS, _motion_segment and list_transition_renderability().
+The one original kind that still cannot render is halftone (see
+UNRENDERABLE_TRANSITIONS); it raises a clear error, never a silent
+dissolve/fade. Reframe (a per-clip crop window in source fractions)
+is honoured in the main-track video/still/freeze paths via
+reframe_crop_filter(). Wiring note: this file is the renderer only.
+Project.add_transition() in project.py and the transitions list in
+mcp.py were NOT edited in this batch (other agents own those files),
+so motion kinds render through render() with a project dict that
+lists them, but the Project/MCP API does not yet accept them — that
+registry update is a separate, small follow-up once this batch is
+verified.
 """
 
 from __future__ import annotations
@@ -137,10 +154,42 @@ def find_tool(name: str) -> str:
         f"the VibeEdit script/executable.")
 
 
+def app_fonts_dir() -> str:
+    """App fonts folder (``windows/fonts/`` in a source checkout):
+    where fonts_import stores imported fonts. It is searched by
+    font_candidates() after the system fonts folder, so an imported
+    font becomes usable by the renderer without touching system
+    fonts."""
+    return os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "fonts"))
+
+
+def import_font(source_path: str, fonts_dir: str | None = None) -> dict:
+    """Import a font file into the app fonts folder. Only .ttf and
+    .otf files are accepted; the stored name is unique (never
+    overwrites an existing font) and the source file is copied, not
+    moved. Returns the stored entry (``fonts_list`` will include it
+    because font_candidates() searches the app fonts folder)."""
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(f"Font file not found: {source_path}")
+    ext = os.path.splitext(source_path)[1].lower()
+    if ext not in (".ttf", ".otf"):
+        raise ValueError(
+            f"Only .ttf and .otf fonts can be imported, got {ext!r}")
+    folder = fonts_dir or app_fonts_dir()
+    os.makedirs(folder, exist_ok=True)
+    from .project import unique_media_name
+    stored = unique_media_name(folder, os.path.basename(source_path))
+    import shutil
+    shutil.copyfile(source_path, os.path.join(folder, stored))
+    return {"name": stored, "path": os.path.join(folder, stored)}
+
+
 def font_candidates() -> list[str]:
     """Font search order: VIBEEDIT_FONT is handled in find_font();
     otherwise the Windows fonts folder derived from SystemRoot (or
-    SystemDrive) first, then the Linux fallbacks. No drive letter
+    SystemDrive) first, then the app fonts folder (imported fonts),
+    then the Linux fallbacks. No drive letter
     is hardcoded here, so Windows on any drive is covered."""
     candidates: list[str] = []
     system_root = os.environ.get("SystemRoot")
@@ -153,6 +202,16 @@ def font_candidates() -> list[str]:
             base = drive.rstrip("\\/")
             candidates.append(base + "\\Fonts\\arial.ttf")
             candidates.append(base + "\\Fonts\\segoeui.ttf")
+    # Imported fonts (fonts_import): every font file in the app
+    # fonts folder becomes a candidate, after system fonts.
+    try:
+        app_dir = app_fonts_dir()
+        if os.path.isdir(app_dir):
+            for name in sorted(os.listdir(app_dir)):
+                if name.lower().endswith((".ttf", ".otf")):
+                    candidates.append(os.path.join(app_dir, name))
+    except Exception:
+        pass
     candidates.extend(LINUX_FONT_CANDIDATES)
     return candidates
 
@@ -373,6 +432,44 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
     return filters
 
 
+def reframe_crop_filter(item: dict) -> str | None:
+    """Crop filter for a per-clip ``reframe`` window, or None.
+
+    ``reframe`` is a dict of source-frame fractions with top-left
+    origin: {"x": left, "y": top, "w": width, "h": height}, each
+    0..1, x+w <= 1 and y+h <= 1. The window is cropped from the
+    source (never stretched) and the existing fill scale/crop then
+    sizes it to the project frame, so a 16:9 source reframed with
+    {"x": 0.342, "y": 0, "w": 0.316, "h": 1} becomes a 9:16 window.
+    A full-frame window returns None (no-op). A malformed window
+    raises ValueError, never silently renders the full frame.
+    Main-track clips only (video, still and freeze paths); overlay
+    clips do not read ``reframe``.
+    """
+    ref = item.get("reframe")
+    if ref is None:
+        return None
+    if not isinstance(ref, dict):
+        raise ValueError(
+            f"reframe must be a dict of x/y/w/h fractions, got {ref!r}")
+    try:
+        x, y, w, h = (float(ref["x"]), float(ref["y"]),
+                      float(ref["w"]), float(ref["h"]))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(
+            "reframe needs numeric x/y/w/h fractions, "
+            f"got {ref!r}")
+    if not (0 <= x and 0 <= y and 0 < w <= 1 and 0 < h <= 1
+            and x + w <= 1 + 1e-9 and y + h <= 1 + 1e-9):
+        raise ValueError(
+            f"Invalid reframe window {ref!r}: need 0<=x, 0<=y, "
+            "0<w<=1, 0<h<=1, x+w<=1, y+h<=1")
+    if x == 0 and y == 0 and w == 1 and h == 1:
+        return None
+    return (f"crop=w='iw*{w:g}':h='ih*{h:g}':"
+            f"x='iw*{x:g}':y='ih*{y:g}'")
+
+
 # Code-gap batch 2: export presets from the original's
 # ExportPreset.swift (sizes/bitrates verbatim; ProRes uses FFmpeg
 # prores_ks in a .mov container). ``size`` None = project size
@@ -402,6 +499,104 @@ EXPORT_PRESETS = {
     "prores422hq": {"width": None, "height": None, "bitrate": None,
                     "codec": "prores_ks", "ext": "mov"},
 }
+
+# Phase B6: motion-only transitions from the original's
+# TransitionMotion.builtIns that have no xfade name and were
+# previously rejected. Each renders with a real filter chain in
+# _motion_segment(); the "dissolve blend" in several entries is
+# only the blend between two motion-transformed pictures, never a
+# plain dissolve substitution — the motion (rotation, zoom, pan,
+# mask, hue, strobe) is what makes the transition. Known honest
+# approximations are called out in the method text and in
+# _motion_segment: swing rotates about the centre (FFmpeg's rotate
+# filter has no left-edge perspective pivot), zoom uses
+# scale(eval=frame) centred on a black canvas (zoompan was tried:
+# it renders, but its sub-1 zoom handling and per-frame zoom
+# expression are less direct than the scale+overlay chain), and
+# kaleidoscope is a 2x2 mirrored tile, not a hexagonal mirror.
+MOTION_TRANSITIONS = {
+    "spin": "rotate (outgoing 0 to -90 deg, incoming 90 to 0 deg) "
+            "+ dissolve blend",
+    "swing": "incoming damped sinusoidal rotate (70 deg settling, "
+             "centre pivot — not a left-edge perspective swing) + "
+             "outgoing slight zoom-out + dissolve blend",
+    "arc": "pan + zoom (1 to 1.5) + small sinusoidal rotate "
+           "(4 deg bump) + dissolve blend",
+    "arc-right": "mirror of arc: pan + zoom + sinusoidal rotate "
+                 "+ dissolve blend",
+    "diamond": "geq-generated growing diamond mask + maskedmerge "
+               "(no dissolve)",
+    "crash-out": "zoom-out overlay (outgoing 1 to 0.45, incoming "
+                 "2 to 1) + dissolve blend",
+    "infinite-out": "zoom-out overlay (outgoing 1 to 0.3, incoming "
+                    "3.3 to 1) + dissolve blend",
+    "screen-in": "zoom overlay (outgoing 1 to 2.5, incoming card "
+                "0.45 to 1) + dissolve blend",
+    "screen-out": "zoom overlay (outgoing 1 to 0.45 card, incoming "
+                 "1.15 to 1) + dissolve blend",
+    "dip-black": "fade through black (outgoing fades out over the "
+                 "first half, incoming fades in over the second "
+                 "half; no dissolve)",
+    "color-shift": "hue rotation (outgoing 0 to 180 deg, incoming "
+                   "-180 to 0 deg) + saturation change + dissolve "
+                   "blend",
+    "flicker": "dissolve blend + incoming-picture strobe overlay "
+               "(10 Hz, phased so the transition midpoint is a "
+               "blend frame, not a plain clip frame)",
+    "kaleidoscope": "2x2 mirrored-tile (hflip/vflip quadrants) + "
+                    "full rotation + dissolve blend; APPROXIMATION, "
+                    "not a true six-way hexagonal kaleidoscope "
+                    "(no FFmpeg filter does that)",
+}
+
+# Phase B6: original kinds that still cannot render after a genuine
+# attempt. They raise a clear error naming the kind and the reason
+# (see _render_inner validation), never a silent dissolve/fade.
+# The suggested path is a pre-rendered segment: render the
+# transition externally and splice it in as a clip.
+UNRENDERABLE_TRANSITIONS = {
+    "halftone": "no FFmpeg filter reproduces an animated halftone "
+                "dot pattern (dot spacing growing, then the next "
+                "picture resolving out of dots); pixelize is the "
+                "glitch effect, not halftone, so it is not "
+                "substituted; path: pre-rendered segment",
+}
+
+
+def transition_renderability(kind: str) -> dict:
+    """Honest renderability record for one transition kind.
+
+    Returns {"kind", "renders", "method", "reason"}: "method" is
+    the xfade name or the motion filter chain for kinds that
+    render, None otherwise; "reason" is set only for kinds that
+    do not render (unrenderable or unknown).
+    """
+    if kind in UNRENDERABLE_TRANSITIONS:
+        return {"kind": kind, "renders": False, "method": None,
+                "reason": UNRENDERABLE_TRANSITIONS[kind]}
+    if kind in MOTION_TRANSITIONS:
+        return {"kind": kind, "renders": True,
+                "method": MOTION_TRANSITIONS[kind], "reason": None}
+    if kind in TRANSITION_XFADE:
+        return {"kind": kind, "renders": True,
+                "method": f"xfade:{TRANSITION_XFADE[kind]}",
+                "reason": None}
+    return {"kind": kind, "renders": False, "method": None,
+            "reason": f"Unknown transition kind: {kind!r}"}
+
+
+def list_transition_renderability() -> list[dict]:
+    """All known transition kinds with an honest renders flag.
+
+    Covers every xfade kind in project.TRANSITION_XFADE plus the
+    Phase B6 motion kinds and the still-unrenderable kinds, sorted
+    by kind name with no duplicates. The MCP transitions_list
+    (mcp.py, owned by another agent in this batch) should merge
+    this list so the new kinds appear there with the same flag.
+    """
+    kinds = sorted(set(TRANSITION_XFADE) | set(MOTION_TRANSITIONS)
+                   | set(UNRENDERABLE_TRANSITIONS))
+    return [transition_renderability(kind) for kind in kinds]
 
 
 def export_preset_info(name: str, project_width: int,
@@ -514,7 +709,12 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
     trans_by_pair: dict[tuple[str, str], dict] = {}
     for trans in project.get("transitions", []):
         kind = trans.get("kind")
-        if kind not in TRANSITION_XFADE:
+        if kind in UNRENDERABLE_TRANSITIONS:
+            raise ValueError(
+                f"Transition kind {kind!r} cannot be rendered: "
+                f"{UNRENDERABLE_TRANSITIONS[kind]}")
+        if kind not in TRANSITION_XFADE \
+                and kind not in MOTION_TRANSITIONS:
             raise ValueError(f"Unknown transition kind: {kind!r}")
         trans_by_pair[(trans["from"], trans["to"])] = trans
     boundaries: list[tuple[float, float]] = []  # (incoming start s, dur s)
@@ -586,6 +786,13 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             vchain, vchain_dur = label, dur_s
             return
         if trans is not None:
+            if trans["kind"] in MOTION_TRANSITIONS:
+                chain_motion_video(label, dur_s, trans)
+                return
+            if trans["kind"] in UNRENDERABLE_TRANSITIONS:
+                raise ValueError(
+                    f"Transition kind {trans['kind']!r} cannot be "
+                    f"rendered: {UNRENDERABLE_TRANSITIONS[trans['kind']]}")
             trans_s = frames_to_seconds(trans["duration"], fmt["fps"])
             out_label = next_label("vxf")
             filter_parts.append(
@@ -615,6 +822,284 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             filter_parts.append(
                 f"[{achain}][{label}]concat=n=2:v=0:a=1[{out_label}]")
             achain, achain_dur = out_label, achain_dur + dur_s
+
+    def _motion_segment(vtail: str, vhead: str, kind: str,
+                        trans_s: float) -> str:
+        """Build one motion-transition segment (Phase B6).
+
+        ``vtail`` is the last ``trans_s`` of the outgoing picture
+        and ``vhead`` the first ``trans_s`` of the incoming picture,
+        both with timestamps from 0. Returns a label exactly
+        ``trans_s`` long at project size/fps in yuv420p. Each input
+        label is consumed exactly once at this level (branches that
+        need an input twice split it themselves, e.g. flicker).
+        Time ``t`` inside every expression is transition-local
+        (0..trans_s) because both inputs were reset with
+        setpts=PTS-STARTPTS before arriving here. ``p`` below is
+        transition progress (0..1) as an expression.
+        """
+        d = f"{trans_s:.3f}"
+        w, h = out_w, out_h
+
+        def _apply(src: str, filters: list[str], prefix: str) -> str:
+            out = next_label(prefix)
+            filter_parts.append(f"[{src}]{','.join(filters)}[{out}]")
+            return out
+
+        def _finish(src: str, prefix: str = "mfin") -> str:
+            out = next_label(prefix)
+            filter_parts.append(
+                f"[{src}]fps={fps_str},setpts=PTS-STARTPTS,"
+                f"format=yuv420p[{out}]")
+            return out
+
+        def _dissolve(a: str, b: str) -> str:
+            """Blend two motion-transformed pictures (xfade offset 0
+            over the whole segment). The dissolve is the blend, not
+            the transition: both pictures already carry the motion.
+            """
+            out = next_label("mxf")
+            filter_parts.append(
+                f"[{a}][{b}]xfade=transition=dissolve:duration={d}:"
+                f"offset=0[{out}]")
+            return _finish(out, "mfin")
+
+        def _rotated(src: str, angle: str) -> str:
+            return _apply(src, [
+                f"rotate=a='{angle}':ow='iw':oh='ih':c=black",
+                "format=yuv420p"], "mrot")
+
+        def _zoomed(src: str, zoom: str, x: str | None = None,
+                    y: str | None = None) -> str:
+            """Scale by a per-frame zoom expression, centred (or
+            panned) on a black canvas. scale(eval=frame) evaluates
+            its w/h per frame (verified, unlike eq brightness,
+            whose expression is evaluated once and so is never used
+            for animation here); overlay x/y are per-frame too. A
+            zoom below 1 shows black around the shrunken picture;
+            above 1 crops the enlarged picture — both are honest
+            zoom behaviour and keep the size at project size.
+            """
+            scaled = _apply(src, [
+                f"scale=w='{w}*({zoom})':h='{h}*({zoom})':eval=frame"],
+                "mzsc")
+            canvas = next_label("mzcv")
+            filter_parts.append(
+                f"color=c=black:s={w}x{h}:r={fps_str}:d={d}[{canvas}]")
+            out = next_label("mzov")
+            x_arg = x or "(main_w-overlay_w)/2"
+            y_arg = y or "(main_h-overlay_h)/2"
+            filter_parts.append(
+                f"[{canvas}][{scaled}]overlay='{x_arg}':'{y_arg}',"
+                f"format=yuv420p[{out}]")
+            return out
+
+        def _tiled_rotated(src: str, angle: str) -> str:
+            """2x2 mirrored tile + rotation (kaleidoscope
+            approximation, see MOTION_TRANSITIONS). Quadrants are
+            scaled to integer halves, then the stack is scaled back
+            to project size so odd project sizes still concat
+            cleanly."""
+            hw, hh = w // 2, h // 2
+            s1, s2, s3, s4 = (next_label("msp") for _ in range(4))
+            filter_parts.append(
+                f"[{src}]split=4[{s1}][{s2}][{s3}][{s4}]")
+            q1 = _apply(s1, [f"scale={hw}:{hh}"], "mtil")
+            q2 = _apply(s2, [f"scale={hw}:{hh}", "hflip"], "mtil")
+            q3 = _apply(s3, [f"scale={hw}:{hh}", "vflip"], "mtil")
+            q4 = _apply(s4, [f"scale={hw}:{hh}", "hflip,vflip"], "mtil")
+            top = next_label("mtil")
+            filter_parts.append(f"[{q1}][{q2}]hstack[{top}]")
+            bot = next_label("mtil")
+            filter_parts.append(f"[{q3}][{q4}]hstack[{bot}]")
+            stacked = next_label("mtil")
+            filter_parts.append(f"[{top}][{bot}]vstack[{stacked}]")
+            sized = _apply(stacked, [f"scale={w}:{h}"], "mtil")
+            return _rotated(sized, angle)
+
+        p = f"t/{d}"
+        if kind == "spin":
+            a = _rotated(vtail, f"-1.570796*{p}")
+            b = _rotated(vhead, f"1.570796*(1-{p})")
+            return _dissolve(a, b)
+        if kind == "swing":
+            # Damped sinusoidal settle: 70 deg at t=0, oscillating
+            # with shrinking amplitude, exactly 0 at t=D. Centre
+            # pivot only — FFmpeg rotate has no left-edge
+            # perspective pivot, so this is not a true left-edge
+            # swing; the method text in MOTION_TRANSITIONS says so.
+            a = _zoomed(vtail, f"1-0.08*{p}")
+            b = _rotated(vhead,
+                         f"1.221730*(1-{p})*cos(6.283185*{p})")
+            return _dissolve(a, b)
+        if kind in ("arc", "arc-right"):
+            s = 1.0 if kind == "arc" else -1.0
+            a_rot = _rotated(vtail,
+                             f"{0.069813 * s:.6f}*sin(3.141593*{p})")
+            a = _zoomed(a_rot, f"1+0.5*{p}",
+                        x=f"(main_w-overlay_w)/2{-0.25 * s:+g}"
+                          f"*main_w*{p}")
+            b_rot = _rotated(vhead,
+                             f"{-0.069813 * s:.6f}*sin(3.141593*{p})")
+            b = _zoomed(b_rot, f"1.5-0.5*{p}",
+                        x=f"(main_w-overlay_w)/2{0.25 * s:+g}"
+                          f"*main_w*(1-{p})")
+            return _dissolve(a, b)
+        if kind == "diamond":
+            # Diamond mask: Manhattan distance from the centre,
+            # normalised so 0 = centre point and 1 = the corners;
+            # the mask opens as t/D grows. geq is per-pixel and
+            # therefore slow at large frame sizes — noted in the
+            # report, not hidden: long/high-resolution diamond
+            # transitions render noticeably slower than xfade.
+            cx, cy = w / 2, h / 2
+            mask = next_label("mmask")
+            # geq's time variable is uppercase T (lowercase t is
+            # undefined there and fails filter init — verified).
+            p_geq = f"T/{d}"
+            filter_parts.append(
+                f"nullsrc=s={w}x{h}:r={fps_str}:d={d},"
+                f"geq=lum='255*lte((abs(X-{cx:g})/{cx:g}"
+                f"+abs(Y-{cy:g})/{cy:g})/2,{p_geq})':"
+                f"cb=128:cr=128,format=gray[{mask}]")
+            out = next_label("mdia")
+            filter_parts.append(
+                f"[{vtail}][{vhead}][{mask}]maskedmerge[{out}]")
+            return _finish(out, "mfin")
+        if kind == "crash-out":
+            a = _zoomed(vtail, f"1-0.55*{p}")
+            b = _zoomed(vhead, f"2-{p}")
+            return _dissolve(a, b)
+        if kind == "infinite-out":
+            a = _zoomed(vtail, f"1-0.7*{p}")
+            b = _zoomed(vhead, f"3.3-2.3*{p}")
+            return _dissolve(a, b)
+        if kind == "screen-in":
+            a = _zoomed(vtail, f"1+1.5*{p}")
+            b = _zoomed(vhead, f"0.45+0.55*{p}")
+            return _dissolve(a, b)
+        if kind == "screen-out":
+            a = _zoomed(vtail, f"1-0.55*{p}")
+            b = _zoomed(vhead, f"1.15-0.15*{p}")
+            return _dissolve(a, b)
+        if kind == "dip-black":
+            half = trans_s / 2
+            a = _apply(vtail, [
+                f"trim=start=0:end={half:.3f}",
+                "setpts=PTS-STARTPTS",
+                f"fade=t=out:st=0:d={half:.3f}",
+                "format=yuv420p"], "mdip")
+            b = _apply(vhead, [
+                f"trim=start={half:.3f}:end={trans_s:.3f}",
+                "setpts=PTS-STARTPTS",
+                f"fade=t=in:st=0:d={half:.3f}",
+                "format=yuv420p"], "mdip")
+            out = next_label("mdip")
+            filter_parts.append(
+                f"[{a}][{b}]concat=n=2:v=1:a=0[{out}]")
+            return _finish(out, "mfin")
+        if kind == "color-shift":
+            # hue's h/s expressions ARE evaluated per frame
+            # (verified: hue output diverges from the input
+            # increasingly over time, unlike eq brightness).
+            a = _apply(vtail, [
+                f"hue=h='180*{p}':s='1+1.2*{p}'",
+                "format=yuv420p"], "mhue")
+            b = _apply(vhead, [
+                f"hue=h='-180*(1-{p})':s='2.2-1.2*{p}'",
+                "format=yuv420p"], "mhue")
+            return _dissolve(a, b)
+        if kind == "flicker":
+            # The head is used twice (dissolve + strobe overlay),
+            # so it is split first. The strobe overlays the
+            # incoming picture at 10 Hz, phased so the transition
+            # midpoint is a blend frame; it settles on the incoming
+            # picture at the end (dissolve is ~100% incoming there).
+            hs1, hs2 = next_label("msp"), next_label("msp")
+            filter_parts.append(
+                f"[{vhead}]split=2[{hs1}][{hs2}]")
+            dis = _dissolve(vtail, hs1)
+            out = next_label("mflk")
+            filter_parts.append(
+                f"[{dis}][{hs2}]overlay=0:0:"
+                f"enable='lt(mod(t*10+0.5,1),0.5)',"
+                f"format=yuv420p[{out}]")
+            return _finish(out, "mfin")
+        if kind == "kaleidoscope":
+            a = _tiled_rotated(vtail, f"-6.283185*{p}")
+            b = _tiled_rotated(vhead, f"6.283185*(1-{p})")
+            return _dissolve(a, b)
+        raise ValueError(
+            f"Motion transition {kind!r} has no filter builder in "
+            "render.py (registry/render mismatch)")
+
+    def chain_motion_video(label: str, dur_s: float, trans: dict):
+        """Chain a motion transition (Phase B6).
+
+        The accumulated chain is split into its pre-transition part
+        and its last ``trans_s`` (the outgoing tail); the incoming
+        clip is split into its first ``trans_s`` (the incoming
+        head) and the remainder. The motion segment replaces the
+        overlap, then pre + segment + remainder are concatenated,
+        so the output duration is vchain_dur + dur_s - trans_s,
+        exactly as with xfade. Empty pre/post parts (transition as
+        long as a clip) are skipped, never concatenated as empty
+        segments. Audio still uses acrossfade (chain_audio).
+        """
+        nonlocal vchain, vchain_dur
+        trans_s = frames_to_seconds(trans["duration"], fmt["fps"])
+        if trans_s > vchain_dur + 1e-6:
+            raise ValueError(
+                "Transition duration exceeds the rendered output "
+                "so far for motion transition "
+                f"{trans['kind']!r}")
+        pre_dur = vchain_dur - trans_s
+        post_dur = dur_s - trans_s
+        pieces: list[str] = []
+        if pre_dur > 1e-6:
+            vs_a, vs_b = next_label("msp"), next_label("msp")
+            filter_parts.append(
+                f"[{vchain}]split=2[{vs_a}][{vs_b}]")
+            vpre = next_label("mpre")
+            filter_parts.append(
+                f"[{vs_a}]trim=start=0:end={pre_dur:.3f},"
+                f"setpts=PTS-STARTPTS,format=yuv420p[{vpre}]")
+            pieces.append(vpre)
+            vtail = next_label("mtail")
+            filter_parts.append(
+                f"[{vs_b}]trim=start={pre_dur:.3f}:"
+                f"end={vchain_dur:.3f},setpts=PTS-STARTPTS,"
+                f"format=yuv420p[{vtail}]")
+        else:
+            vtail = vchain
+        if post_dur > 1e-6:
+            is_a, is_b = next_label("msp"), next_label("msp")
+            filter_parts.append(
+                f"[{label}]split=2[{is_a}][{is_b}]")
+            vhead = next_label("mhead")
+            filter_parts.append(
+                f"[{is_a}]trim=start=0:end={trans_s:.3f},"
+                f"setpts=PTS-STARTPTS,format=yuv420p[{vhead}]")
+            vpost = next_label("mpost")
+            filter_parts.append(
+                f"[{is_b}]trim=start={trans_s:.3f}:end={dur_s:.3f},"
+                f"setpts=PTS-STARTPTS,format=yuv420p[{vpost}]")
+        else:
+            vhead = label
+            vpost = None
+        vtrans = _motion_segment(vtail, vhead, trans["kind"], trans_s)
+        pieces.append(vtrans)
+        if vpost is not None:
+            pieces.append(vpost)
+        if len(pieces) == 1:
+            out_label = pieces[0]
+        else:
+            out_label = next_label("mct")
+            joined = "".join(f"[{p}]" for p in pieces)
+            filter_parts.append(
+                f"{joined}concat=n={len(pieces)}:v=1:a=0,"
+                f"format=yuv420p[{out_label}]")
+        vchain, vchain_dur = out_label, vchain_dur + dur_s - trans_s
 
     def _motion_filter(item: dict, frame_offset: float = 0.0) -> str | None:
         """zoompan filter for main-track x/y/scale keyframes.
@@ -694,10 +1179,17 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             # (with its explicit fps filter) is kept.
             img_filters = [
                 "loop=loop=-1:size=1:start=0",
+            ]
+            # Phase B6 reframe: crop the source window before the
+            # fill scale (see reframe_crop_filter).
+            _reframe = reframe_crop_filter(item)
+            if _reframe is not None:
+                img_filters.append(_reframe)
+            img_filters.extend([
                 f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase",
                 f"crop={out_w}:{out_h}",
                 "setsar=1",
-            ]
+            ])
             motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
             if motion is not None:
                 # zoompan carries its own fps= option; a trailing
@@ -739,8 +1231,12 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                         "setpts=PTS-STARTPTS",
                         "loop=loop=-1:size=1:start=0",
                         f"trim=end={dur_s:.3f}",
-                        "setpts=PTS-STARTPTS",
-                        fscale]
+                        "setpts=PTS-STARTPTS"]
+            # Phase B6 reframe (see reframe_crop_filter).
+            _reframe = reframe_crop_filter(item)
+            if _reframe is not None:
+                ffilters.append(_reframe)
+            ffilters.append(fscale)
             ffilters.extend(_color_filters(item, lut_dir))
             ffilters.append(f"fps={fps_str}")
             ffilters.append("format=yuv420p")
@@ -771,6 +1267,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             # Code-gap batch 2: play the trimmed range backwards.
             vfilters.append("reverse")
             vfilters.append("setpts=PTS-STARTPTS")
+        # Phase B6 reframe: crop the source window before the fill
+        # scale (see reframe_crop_filter).
+        _reframe = reframe_crop_filter(item)
+        if _reframe is not None:
+            vfilters.append(_reframe)
         vfilters.append(scale)
         vfilters.extend(_color_filters(item, lut_dir))
         motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
