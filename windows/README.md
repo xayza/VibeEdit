@@ -55,7 +55,7 @@
   buttons. The input runs real safe commands (list clips, export
   draft, review, stats, workspace, undo/redo); anything else gets an
   honest reply that no LLM is connected in-app, with the real MCP
-  command `python windows\vibeedit.py mcp <project-folder>` (106
+  command `python windows\vibeedit.py mcp <project-folder>` (123
   tools). No fake AI replies, no fake timeline edits, no fake
   voices. There is no terminal emulator in the web UI — use your
   own terminal for the MCP agent.
@@ -486,8 +486,8 @@ built and downloaded from a green Actions run (the workflow
 exists but has not run yet — it can only run on GitHub after
 the user pushes the workflow file, which the GitHub App
 connection cannot write), voice providers, additional
-transcription providers, or the remaining ~143 original MCP
-tools (106 of 249 ported). Still open: a visual UI check in a
+transcription providers, or the remaining ~126 original MCP
+tools (123 of 249 ported). Still open: a visual UI check in a
 real browser on Windows. See the Phase 8 list in
 `VibeEdit/docs/windows-port.md` for what is left, all of which
 needs the user's Windows or macOS machine.
@@ -565,9 +565,13 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-106 tools (Phase 8 total) — see the Phase 8 section above for
-the newest 16, Phase 7 for the previous 12, and Phase 6 for the
-12 before those. Every tool calls a real Project or export
+123 tools (106 Phase 8 total + 17 code-gap batch tools: per-clip
+eq colour, source insert/overwrite, close-gaps, project list,
+track rename/remove, beat/marker/overlap/media-usage/search/
+duration/text/colour-reset/clip-count queries) — see the
+code-gap batch tests for the newest 17, Phase 8 for the
+previous 16, Phase 7 for the 12 before those, and Phase 6 for
+the 12 before those. Every tool calls a real Project or export
 operation; none is a stub.
 
 ## Tests
