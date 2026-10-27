@@ -637,6 +637,15 @@ async function loadMcpTools() {
   try {
     const data = await api("/api/mcp-tools");
     $("mcpToolCount").textContent = data.count;
+    // Phase 0: the provider option shows the LIVE registry count,
+    // never a hardcoded number (a stale number here is how an old
+    // count survived several batches). On failure the
+    // option keeps its number-free label from index.html.
+    const provider = $("agentProvider");
+    if (provider) {
+      const opt = provider.querySelector('option[value="mcp"]');
+      if (opt) opt.textContent = `External agent (MCP) — ${data.count} tools`;
+    }
     list.innerHTML = data.tools.map((t) =>
       `<li><code>${t.name}</code> — ${t.description}</li>`).join("");
   } catch (err) {
@@ -881,7 +890,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const lower = msg.toLowerCase();
     try {
       if (lower === "help" || lower.includes("help")) {
-        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (144 MCP tools). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
+        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (the live tool count is shown in the list below). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
       } else if (lower.includes("list clip")) {
         const items = [];
         for (const t of project.tracks) for (const it of t.items) items.push(`${t.name}: ${it.text || it.media || it.id} (${(it.at / fps()).toFixed(2)}s)`);

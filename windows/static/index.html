@@ -282,7 +282,7 @@
     <h3>AGENT</h3>
     <p class="agent-note">AI chat for this project. There is <b>no in-app LLM generation connected yet</b> — messages below run real, safe commands on the open project (list clips, export, review, stats, undo/redo). For full AI editing, connect an external agent via MCP:</p>
     <pre>python windows\vibeedit.py mcp &lt;project-folder&gt;</pre>
-    <label>Provider <select id="agentProvider"><option value="mcp">External agent (MCP) — 144 tools</option><option value="ollama">Ollama (not connected)</option></select></label>
+    <label>Provider <select id="agentProvider"><option value="mcp">External agent (MCP)</option><option value="ollama">Ollama (not connected)</option></select></label>
     <div id="agentChat" class="agent-chat"><div class="msg-agent">Hello — I am the project agent dock, not a connected LLM. Type <b>help</b> to see the commands I can really run, or connect an external agent via MCP for full AI editing.</div></div>
     <div class="agent-chips" id="agentChips"><button type="button" class="secondary" data-agent-chip="list clips">Liệt kê clip</button><button type="button" class="secondary" data-agent-chip="review">Review</button><button type="button" class="secondary" data-agent-chip="export">Xuất bản nháp</button><button type="button" class="secondary" data-agent-chip="stats">Thống kê</button><button type="button" class="secondary" data-agent-chip="undo">Hoàn tác</button></div>
     <form id="agentChatForm">
@@ -310,7 +310,7 @@
     <span id="timelineHint">Click a clip to select it. Drag a clip to move it. Click the ruler to move the playhead.</span>
   </div>
   <details class="timeline-capabilities"><summary>What this timeline can do — and what it cannot yet</summary>
-  <p><b>Works here (real):</b> cut, trim, move, copy/paste, split at playhead, speed, keyframes (position, scale, opacity, volume, tilt), transitions, beat grid + snap to beat, Captions track with word-level karaoke chips, text presets with Vietnamese support, colour presets + LUT + adjustment layers, volume, fades, music ducking under voice, loudness normalisation, voiceover takes on the Voiceover track, H.264 export with burned-in subtitles, OTIO export/import, project saved as JSON next to footage, undo/redo, and an external AI agent via MCP (106 tools) whose edits appear on the timeline and are undoable.</p>
+  <p><b>Works here (real):</b> cut, trim, move, copy/paste, split at playhead, speed, keyframes (position, scale, opacity, volume, tilt), transitions, beat grid + snap to beat, Captions track with word-level karaoke chips, text presets with Vietnamese support, colour presets + LUT + adjustment layers, volume, fades, music ducking under voice, loudness normalisation, voiceover takes on the Voiceover track, H.264 export with burned-in subtitles, OTIO export/import, project saved as JSON next to footage, undo/redo, and an external AI agent via MCP (live tool count shown in the Agent dock) whose edits appear on the timeline and are undoable.</p>
   <p><b>Not yet in this Windows port (honestly labelled, never faked):</b> in-app LLM chat generation, a real terminal for Claude Code / Codex inside the app (use your own terminal with <code>python windows\vibeedit.py mcp &lt;project-folder&gt;</code>), voice cloning, voiceover recording, VieNeu TTS, and silence cutting. Audio tracks show waveform strips decoded from the real file (FFmpeg RMS peaks); if a file cannot be decoded, no strip is drawn rather than a fake shape.</p>
   </details>
   <div class="ruler" id="ruler"></div>
