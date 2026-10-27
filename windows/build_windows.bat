@@ -35,9 +35,13 @@ if not exist .venv (
 )
 call .venv\Scripts\activate.bat
 pip install --upgrade pip >nul
-pip install pyinstaller
+REM Pillow is an optional runtime dependency: only the vision cutout
+REM paths import it (lazily, inside vibeedit_core\vision.py), so the
+REM core editor/export run without it — but the frozen build should
+REM still include it, or learned cutout fails with a clear error.
+pip install pillow pyinstaller
 if errorlevel 1 (
-  echo [VibeEdit] Failed to install PyInstaller.
+  echo [VibeEdit] Failed to install Pillow/PyInstaller.
   if not defined GITHUB_ACTIONS   pause
   exit /b 1
 )

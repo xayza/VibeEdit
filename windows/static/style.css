@@ -556,12 +556,6 @@ form { margin: 0; }
 }
 
 /* ---------- Narrow windows: stack, never break ---------- */
-@media (max-width: 1100px) {
-  .workbench { flex-wrap: wrap; }
-  .tool-col { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); min-height: 0; }
-  .details-col { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
-  .tool-toolbar { position: static; }
-}
 @media (max-width: 720px) {
   .track-label { width: 84px; }
   .top-actions { margin-left: 0; }
@@ -678,3 +672,102 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .welcome-panel { padding: 12px 16px; background: #1a1a1f; border-bottom: 1px solid #23232a; }
 .welcome-panel h3 { margin: 0 0 6px; }
 .library-item, .plugin-item, .welcome-item { padding: 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ---- Round 3: main screen fits the viewport, no page scroll ----
+   Measured from the original, read-only (VibeEdit/VibeEdit/Views/):
+   - EditorView+Layout.swift: rail 54pt; library panel dragged
+     300–520pt, default 372 on a screen >=1680pt else 300; viewer
+     min width 260pt; editor column min width 860pt; Inspector
+     300pt, 340pt at window >=1680pt; timeline min 170pt, ideal
+     330pt; window min height 600pt; window min width 860pt, or
+     1161pt with the agent column beside the editor.
+   - EditorView+Rail.swift: below 900pt window height the rail
+     drops its labels (label becomes the tooltip) and still scrolls.
+   - EditorView+Toolbar.swift: a narrow window folds trailing
+     toolbar items into the More menu (ViewThatFits) instead of
+     wrapping or pushing content off-screen.
+   - EditorView+Viewer.swift: Fit keeps a 24pt margin and fits the
+     picture in its pane; it never scrolls in Fit mode.
+   - Views/Timeline/TimelineLayout.swift: ruler 22pt, rows 29pt,
+     Main row 46pt, row spacing 6pt; the timeline pane keeps its
+     ideal height and its canvas scrolls inside it.
+   Conversion: 1pt == 1 CSS px at 100% scale (AppKit points map 1:1
+   to CSS pixels; Windows 125%/150% scaling shrinks the CSS
+   viewport, so these breakpoints trigger exactly when the
+   effective window shrinks — the same condition the original's
+   window-width-dependent widths use).
+   Windows mapping (same structure, no id renamed/removed, logo
+   data URI untouched):
+   - Right column 300px, 340px at viewport >=1680px (it was a flat
+     380px — wider than the original ever is — and a late rule let
+     it override the old <=1100px breakpoint, so at scaled widths
+     the Inspector slid off the right edge behind a workbench
+     horizontal scrollbar).
+   - The removed stacking @media (max-width:1100px) block
+     conflicted with the later nowrap block and turned the whole
+     workbench into a horizontally scrolling strip at exactly the
+     scaled widths (1024/1093/911px) where the Inspector was seen
+     cut off. It is gone; below 780px only the workbench scrolls
+     horizontally as a last resort — the original refuses such a
+     window outright, the web cannot, so this is the documented
+     fallback, not the normal path.
+   - Rail: text-only tiles (no icons exist to show), so below
+     900px height the tiles compact and the rail scrolls
+     internally, mirroring the original's two mechanisms.
+   - Viewer: the centre column is a flex column and the preview
+     flexes to its pane (original Fit behaviour) instead of sizing
+     by vh, so player controls below it are never pushed into an
+     internal scroll at 720px height.
+   - Timeline: original row/ruler metrics, and the pane is capped
+     near the original ideal 330px (46vh, 300–480px) with internal
+     scroll when its content exceeds it — as the original canvas
+     does — instead of growing to ~500px and squeezing the preview
+     to nothing. */
+/* Right column: original 300 / 340 widths. */
+.details-col { width: 300px; }
+@media (min-width: 1680px) {
+  .details-col { width: 340px; }
+}
+/* Below the original min width with agent (1161): side columns step
+   down so 300 + 300 + 260 = 860, the original editor minimum, fits. */
+@media (max-width: 1160px) {
+  .workbench { overflow: hidden; }
+  .tool-col { width: 300px; }
+  .details-col { width: 300px; }
+}
+/* Below the original editor minimum (860): columns step to 280; the
+   viewer may squeeze under 260 (video scales by max-width). */
+@media (max-width: 859px) {
+  .tool-col { width: 280px; }
+  .details-col { width: 280px; }
+}
+/* Last resort only, below any usable editor width: the workbench
+   alone scrolls horizontally; the page itself never does. */
+@media (max-width: 779px) {
+  .workbench { overflow-x: auto; }
+}
+/* Flex columns must be allowed to shrink below content size. */
+.workbench, .centre-col, .tool-panels, .details-col { min-width: 0; }
+.tool-rail { overflow-y: auto; min-height: 0; }
+@media (max-height: 899px) {
+  /* Original railLabelsMinHeight 900: compact tiles, internal scroll. */
+  .rail-btn { padding: 5px 4px; font-size: 11px; }
+}
+/* Viewer fits its pane (original Fit), controls stay visible. */
+.centre-col { display: flex; flex-direction: column; overflow: hidden; }
+.player-head { flex-shrink: 0; flex-wrap: wrap; min-width: 0; }
+.preview-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.preview-wrap video, .preview-wrap img {
+  flex: 1 1 auto; min-height: 0; height: auto; max-height: 100%;
+  width: auto; max-width: 100%; object-fit: contain; align-self: center;
+}
+.preview-wrap .player-controls, .preview-wrap .source-range,
+.preview-wrap .preview-meta, .preview-wrap .player-note { flex-shrink: 0; }
+#compareWrap { flex: 1; min-height: 0; align-self: stretch; }
+#compareWrap video { height: 100%; object-fit: contain; }
+/* Timeline: original metrics + ideal-height pane, internal scroll. */
+.ruler { height: 22px; }
+.track-row { margin-top: 6px; }
+.track-lane { min-height: 29px; }
+.track-row-main .track-lane { min-height: 46px; }
+.timeline-wrap { max-height: clamp(300px, 46vh, 480px); overflow-y: auto; }

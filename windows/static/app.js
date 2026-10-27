@@ -136,7 +136,7 @@ async function addMediaToTimeline(mediaId) {
     } else setMediaStatus(`Đã thêm ${mediaBaseName(m)} vào timeline.`);
   } catch (err) { setMediaStatus(`Không thêm được ${mediaBaseName(m)}: ${err.message}`, true); }
 }
-function renderMedia() {
+async function renderMedia() {
   const used = new Set();
   for (const t of project.tracks) for (const it of t.items) if (it.media) used.add(it.media);
   $("mediaList").innerHTML = project.media.map((m) => {
@@ -167,6 +167,12 @@ function renderMedia() {
   const vm = $("voiceMedia");
   if (vm) vm.innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
+  const vms = $("visionMedia");
+  if (vms) vms.innerHTML = project.media.map((m) =>
+    `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
+  try { const mg = await api("/api/project", { op: "magnetic_get" });
+    const cb = $("tlMagnetic"); if (cb) cb.checked = !!mg.magnetic;
+  } catch (e) { /* magnetic toggle keeps its default when offline */ }
   $("addTrack").innerHTML = project.tracks.filter((t) => t.kind === "video").map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
   $("inspTrack").innerHTML = project.tracks.map((t) =>
@@ -199,7 +205,9 @@ function renderTracks() {
   });
   for (const track of ordered) {
     const row = document.createElement("div");
-    row.className = "track-row";
+    // Main lane is taller in the original (TimelineLayout.mainRowHeight
+    // 46pt vs 29pt for other rows); the class carries that, ids unchanged.
+    row.className = "track-row" + (track.role === "main" ? " track-row-main" : "");
     row.innerHTML = `<div class="track-label">${track.name}<br><small>${track.role} · ${track.kind}</small></div>`;
     const lane = document.createElement("div");
     lane.className = "track-lane";
@@ -996,8 +1004,18 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     setStatus("Reference audio imported."); await load();
   });
   const genBtn = $("btnVoiceGenerate");
-  if (genBtn) genBtn.addEventListener("click", () => {
-    $("voiceResult").textContent = "Voice generation is not available in this Windows port yet — no voice provider is connected. Import audio and place it on the Voiceover track instead.";
+  if (genBtn) genBtn.addEventListener("click", async () => {
+    const text = ($("voiceGenText") ? $("voiceGenText").value : "").trim();
+    if (!text) { $("voiceResult").textContent = "Nhập câu thoại cần tạo giọng trước."; return; }
+    $("voiceResult").textContent = "Đang tạo giọng…";
+    try {
+      const provider = $("voiceProvider") ? $("voiceProvider").value : "auto";
+      const voice = $("voiceVoice") ? $("voiceVoice").value : "";
+      const model = $("voiceGenModel") ? $("voiceGenModel").value : "";
+      const data = await api("/api/project", { op: "voice_generate", text, provider, voice: voice || undefined, model: model || undefined });
+      $("voiceResult").textContent = `Đã tạo giọng bằng ${data.backend}: ${data.path} (media ${data.media}). Dùng form “Import a voiceover take…” bên dưới để đặt lên track Voiceover, hoặc đặt ngay bằng voice_place qua MCP.`;
+      await load();
+    } catch (err) { $("voiceResult").textContent = "Tạo giọng thất bại: " + err.message; setStatus(err.message, true); }
   });
 
   // Player view controls (real display controls; Compare is honestly unavailable)
@@ -1292,4 +1310,105 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (wr) wr.addEventListener("click", async () => { try { const d = await api("/api/reveal", { folder: $("projectSelect") ? $("projectSelect").value : "" }); $("welcomeStatus").textContent = `Đã mở thư mục: ${d.path}`; } catch (err) { $("welcomeStatus").textContent = `Reveal thất bại: ${err.message}`; } });
   const wcp = $("btnWelcomeCopyPath");
   if (wcp) wcp.addEventListener("click", async () => { try { const res = await fetch("/api/projects"); const d = await res.json(); await navigator.clipboard.writeText(d.current || ""); $("welcomeStatus").textContent = "Đã sao chép đường dẫn project hiện tại."; } catch (err) { $("welcomeStatus").textContent = `Copy thất bại: ${err.message}`; } });
+})();
+
+/* Round 3 wiring: knowledge/skills, vision, plugin install/download and
+   the magnetic toggle. Every control is guarded (the panel may be hidden)
+   and every handler calls a real server op — no dead buttons. Follows the
+   gapBatch2Wiring pattern above. */
+(function round3Wiring() {
+  const out = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+  const show = async (fn) => { try { await fn(); } catch (err) { out("knowledgeResult", err.message); } };
+  const ks = $("btnKnowledgeSkills");
+  if (ks) ks.addEventListener("click", () => show(async () => {
+    const d = await post({ op: "skills_list" });
+    const list = $("knowledgeList");
+    const skills = d.result.skills || d.skills || [];
+    if (list) list.innerHTML = skills.map((s) => `<li>${s.id || s.name || JSON.stringify(s)}${s.title ? " — " + s.title : ""}${s.enabled === false ? " (disabled)" : ""}</li>`).join("") || "<li>No skills found.</li>";
+    out("knowledgeResult", `Skills: ${skills.length}.`);
+  }));
+  const kl = $("btnKnowledgeLessons");
+  if (kl) kl.addEventListener("click", () => show(async () => {
+    const d = await post({ op: "knowledge", action: "lessons" });
+    const list = $("knowledgeList");
+    const lessons = d.result.lessons || [];
+    if (list) list.innerHTML = lessons.map((l) => `<li>${l.title || l.id || ""} — ${(l.text || "").slice(0, 120)}</li>`).join("") || "<li>No lessons yet.</li>";
+    out("knowledgeResult", `Lessons: ${lessons.length}.`);
+  }));
+  const kg = $("btnKnowledgeGet");
+  if (kg) kg.addEventListener("click", () => show(async () => {
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill / lesson id first."); return; }
+    try {
+      const d = await post({ op: "skills_get", skill: id });
+      out("knowledgeResult", `Skill ${id}: ${JSON.stringify(d.result.skill || d.result)}`);
+    } catch (err) {
+      const d = await post({ op: "knowledge", action: "get", lesson: id });
+      out("knowledgeResult", `Lesson ${id}: ${JSON.stringify(d.result)}`);
+    }
+  }));
+  const kd = $("btnKnowledgeSkillDisable");
+  if (kd) kd.addEventListener("click", () => show(async () => {
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    await post({ op: "skills_disable", skill: id }); out("knowledgeResult", `Skill ${id} disabled.`);
+  }));
+  const ke = $("btnKnowledgeSkillEnable");
+  if (ke) ke.addEventListener("click", () => show(async () => {
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    await post({ op: "skills_enable", skill: id }); out("knowledgeResult", `Skill ${id} enabled.`);
+  }));
+  const kr = $("btnKnowledgeSkillRemove");
+  if (kr) kr.addEventListener("click", () => show(async () => {
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    const confirmBox = $("knowledgeRemoveConfirm");
+    if (!confirmBox || !confirmBox.checked) { out("knowledgeResult", "Tick the confirm checkbox first — skill remove is irreversible except via git."); return; }
+    await post({ op: "skills_remove", skill: id, confirm: true }); out("knowledgeResult", `Skill ${id} removed.`);
+  }));
+  const ksf = $("knowledgeSaveForm");
+  if (ksf) ksf.addEventListener("submit", (e) => { e.preventDefault(); show(async () => {
+    const d = await post({ op: "skills_save", skill: $("knowledgeSaveId").value.trim(), title: $("knowledgeSaveTitle").value, body: $("knowledgeSaveBody").value, overwrite: !!$("knowledgeSaveOverwrite").checked });
+    out("knowledgeResult", `Skill saved: ${JSON.stringify(d.result)}`);
+  }); });
+  const kp = $("btnKnowledgePropose");
+  if (kp) kp.addEventListener("click", () => show(async () => {
+    const d = await post({ op: "skills_propose", skill: $("knowledgeSaveId").value.trim(), title: $("knowledgeSaveTitle").value, body: $("knowledgeSaveBody").value });
+    out("knowledgeResult", `Proposal draft saved (not an active skill): ${JSON.stringify(d.result)}`);
+  }));
+  const klf = $("knowledgeLessonForm");
+  if (klf) klf.addEventListener("submit", (e) => { e.preventDefault(); show(async () => {
+    const d = await post({ op: "knowledge", action: "add_lesson", text: $("knowledgeLessonText").value, title: $("knowledgeLessonTitle").value || null });
+    out("knowledgeResult", `Lesson added: ${JSON.stringify(d.result)}`);
+  }); });
+  const vision = async (op, extra) => {
+    const media = $("visionMedia") ? $("visionMedia").value : "";
+    if (!media) { out("visionResult", "Choose a media item first."); return; }
+    try { const d = await post(Object.assign({ op, media }, extra || {})); out("visionResult", JSON.stringify(d.result, null, 2)); }
+    catch (err) { out("visionResult", err.message); }
+  };
+  const vo = $("btnVisionOcr"); if (vo) vo.addEventListener("click", () => vision("vision_ocr"));
+  const vf = $("btnVisionFaces"); if (vf) vf.addEventListener("click", () => vision("vision_faces"));
+  const vc = $("btnVisionCutout"); if (vc) vc.addEventListener("click", () => vision("vision_cutout"));
+  const vm = $("btnVisionCutoutModel"); if (vm) vm.addEventListener("click", () => {
+    const model = $("visionModelPath") ? $("visionModelPath").value.trim() : "";
+    if (!model) { out("visionResult", "Enter a user-supplied ONNX model path first — no model is bundled."); return; }
+    vision("vision_cutout_model", { model });
+  });
+  const pif = $("pluginInstallForm");
+  if (pif) pif.addEventListener("submit", (e) => { e.preventDefault(); (async () => {
+    try { const d = await post({ op: "plugin_install", source: $("pluginInstallSource").value.trim(), source_label: $("pluginInstallLabel").value.trim() || null });
+      out("pluginInstallResult", `Installed (disabled by default): ${JSON.stringify(d.result)}`); }
+    catch (err) { out("pluginInstallResult", err.message); }
+  })(); });
+  const pdf = $("pluginDownloadForm");
+  if (pdf) pdf.addEventListener("submit", (e) => { e.preventDefault(); (async () => {
+    try {
+      if (!$("pluginDownloadConfirm").checked) { out("pluginInstallResult", "Tick the confirm checkbox first — download only, never installs."); return; }
+      const d = await post({ op: "plugin_download", url: $("pluginDownloadUrl").value.trim(), confirm: true });
+      out("pluginInstallResult", `Downloaded only (not installed): ${JSON.stringify(d.result)}`);
+    } catch (err) { out("pluginInstallResult", err.message); }
+  })(); });
+  const mg = $("tlMagnetic");
+  if (mg) mg.addEventListener("change", async () => {
+    try { await post({ op: "magnetic_set", enabled: mg.checked }); setStatus(`Magnetic Main: ${mg.checked ? "on" : "off"}.`); }
+    catch (err) { setStatus(err.message, true); }
+  });
 })();

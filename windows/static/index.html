@@ -33,6 +33,8 @@
 <button type="button" class="rail-btn" data-tab="transitions">Transitions</button>
 <button type="button" class="rail-btn" data-tab="filters">Filters</button>
 <button type="button" class="rail-btn" data-tab="voice">Voice</button>
+<button type="button" class="rail-btn" data-tab="knowledge">Knowledge</button>
+<button type="button" class="rail-btn" data-tab="vision">Vision</button>
 <button type="button" class="rail-btn" data-action="timeline">Timeline</button>
 <button type="button" class="rail-btn" data-tab="templates">More</button>
 </nav>
@@ -58,9 +60,11 @@
 </section>
 <section class="panel tool-panel" data-panel="voice" hidden>
 <h3>Voiceover</h3>
-<p class="voice-note">Voice generation and voice cloning are <b>not available</b> in this Windows port yet. What works here: importing audio and placing it on the Voiceover track.</p>
-<label>Provider <select id="voiceProvider"><option value="import-only">Import only — no generation provider connected</option></select></label>
-<label>Voice <select id="voiceVoice"><option value="preset">Preset voice (used only if generation is connected — it is not)</option></select></label>
+<p class="voice-note">Voice generation works here when a backend is installed (Edge TTS via <code>pip install edge-tts</code>, or the Piper binary plus a <code>.onnx</code> model). Voice <b>cloning</b> is still not available — no cloning provider model exists in this build. Importing audio and placing it on the Voiceover track also works.</p>
+<label>Provider <select id="voiceProvider"><option value="auto">Auto (Piper if present, else Edge TTS)</option><option value="edge">Edge TTS (online)</option><option value="piper">Piper (local binary + .onnx model)</option></select></label>
+<label>Voice <select id="voiceVoice"><option value="">Default for the provider</option><option value="vi-VN-HoaiMyNeural">vi-VN-HoaiMyNeural (Edge, female)</option><option value="vi-VN-NamMinhNeural">vi-VN-NamMinhNeural (Edge, male)</option><option value="en-US-AriaNeural">en-US-AriaNeural (Edge)</option></select></label>
+<label>Piper model path (.onnx, only for the Piper provider) <input id="voiceGenModel" placeholder="C:\voices\model.onnx"></label>
+<label>Text to speak <textarea id="voiceGenText" rows="3" placeholder="Nhập câu thoại cần tạo giọng…"></textarea></label>
 <div class="panel">
 <h4>Clone voice from</h4>
 <p>Choose a clean 3–8 second reference clip. Cloning itself is not available yet — choosing a file imports it as media so you can place it on the Voiceover track below.</p>
@@ -77,6 +81,41 @@
 <div id="voiceResult"></div>
 <h4>Voiceover takes on this project</h4>
 <ul id="voiceList"><li>No voiceover takes yet.</li></ul>
+</section>
+<section class="panel tool-panel" data-panel="knowledge" hidden>
+<h3>Knowledge &amp; Skills</h3>
+<p>Agent knowledge lives in this project's data (lessons, facts, prefs, claims, proposals); skills live in <code>windows/skills/</code>. Nothing here invents content — every lesson, fact and skill body is text you type or text already stored.</p>
+<button type="button" id="btnKnowledgeSkills" class="secondary">List skills</button><button type="button" id="btnKnowledgeLessons" class="secondary">List lessons</button>
+<label>Skill / lesson id <input id="knowledgeId" placeholder="timeline-editing"></label>
+<button type="button" id="btnKnowledgeGet" class="secondary">Show skill / lesson</button>
+<button type="button" id="btnKnowledgeSkillDisable" class="secondary">Disable skill</button><button type="button" id="btnKnowledgeSkillEnable" class="secondary">Enable skill</button>
+<label><input type="checkbox" id="knowledgeRemoveConfirm"> Confirm delete (skill remove is irreversible except via git)</label>
+<button type="button" id="btnKnowledgeSkillRemove" class="danger">Remove skill</button>
+<form id="knowledgeSaveForm">
+<label>New skill id <input id="knowledgeSaveId" required></label>
+<label>Title <input id="knowledgeSaveTitle"></label>
+<label>Body <textarea id="knowledgeSaveBody" rows="4" required></textarea></label>
+<label><input type="checkbox" id="knowledgeSaveOverwrite"> Overwrite existing skill</label>
+<button type="submit" class="primary">Save skill</button>
+<button type="button" id="btnKnowledgePropose" class="secondary">Save as proposal (draft, not an active skill)</button>
+</form>
+<form id="knowledgeLessonForm">
+<label>New lesson text <textarea id="knowledgeLessonText" rows="3" required></textarea></label>
+<label>Lesson title <input id="knowledgeLessonTitle"></label>
+<button type="submit" class="primary">Add lesson</button>
+</form>
+<div id="knowledgeResult"></div><ul id="knowledgeList"></ul>
+</section>
+<section class="panel tool-panel" data-panel="vision" hidden>
+<h3>Vision</h3>
+<p>OCR uses Tesseract, faces use OpenCV Haar cascades, cutout uses OpenCV grabCut, and learned cutout uses a user-supplied ONNX model. When a backend is missing the app says so plainly and returns nothing fake.</p>
+<label>Media <select id="visionMedia" required></select></label>
+<button type="button" id="btnVisionOcr" class="secondary">OCR (Tesseract)</button>
+<button type="button" id="btnVisionFaces" class="secondary">Detect faces (OpenCV)</button>
+<button type="button" id="btnVisionCutout" class="secondary">Cutout (grabCut)</button>
+<label>ONNX segmentation model path <input id="visionModelPath" placeholder="C:\models\person-seg.onnx"></label>
+<button type="button" id="btnVisionCutoutModel" class="secondary">Cutout (learned model)</button>
+<div id="visionResult"></div>
 </section>
 <section class="panel tool-panel" data-panel="audio" hidden>
 <h3>Audio</h3>
@@ -150,6 +189,19 @@
         <option value="squeezev">Squeeze vertical</option>
         <option value="vert-open">Vertical open (barn door)</option>
         <option value="horz-open">Horizontal open (barn door)</option>
+        <option value="spin">Spin (motion)</option>
+        <option value="swing">Swing (motion)</option>
+        <option value="arc">Arc (motion)</option>
+        <option value="arc-right">Arc right (motion)</option>
+        <option value="diamond">Diamond mask (motion)</option>
+        <option value="crash-out">Crash out (motion)</option>
+        <option value="infinite-out">Infinite out (motion)</option>
+        <option value="screen-in">Screen in (motion)</option>
+        <option value="screen-out">Screen out (motion)</option>
+        <option value="dip-black">Dip to black (motion)</option>
+        <option value="color-shift">Colour shift (motion)</option>
+        <option value="flicker">Flicker (motion)</option>
+        <option value="kaleidoscope">Kaleidoscope tile (motion, approximation)</option>
       </select></label>
       <label>Duration (s, 0.1–2.0) <input id="trDur" type="number" step="0.1" min="0.1" max="2" value="0.5"></label>
       <button type="submit" class="primary">Add transition after selected clip</button>
@@ -185,6 +237,19 @@
       <label><input type="checkbox" id="otioImportMerge"> Merge into existing project in that folder</label>
       <button type="submit" class="primary">Import OTIO</button>
     </form><div id="phase4Result"></div>
+<h3>Install plugin</h3>
+<p>Installs a folder or <code>.zip</code> bundle into <code>windows/plugins/</code> after manifest validation (unsafe ids, path traversal, symlinks, oversized or multi-folder bundles are refused). A newly installed plugin starts <b>disabled</b> — enable it in the Plugins panel. Nothing is executed during install.</p>
+<form id="pluginInstallForm">
+<label>Folder or .zip path <input id="pluginInstallSource" placeholder="C:\plugins\my-plugin or C:\downloads\my-plugin.zip" required></label>
+<label>Label <input id="pluginInstallLabel" placeholder="Optional source label"></label>
+<button type="submit" class="primary">Install plugin</button>
+</form>
+<form id="pluginDownloadForm">
+<label>Bundle URL <input id="pluginDownloadUrl" placeholder="https://example.com/my-plugin.zip" required></label>
+<label><input type="checkbox" id="pluginDownloadConfirm"> I confirm this is an untrusted source — download only, do not install</label>
+<button type="submit" class="secondary">Download bundle only</button>
+</form>
+<div id="pluginInstallResult"></div>
 </section>
 <section class="panel tool-panel" data-panel="ai" hidden>
 <h3>AI &amp; Review</h3>
@@ -302,7 +367,7 @@
 </div>
 <!-- Timeline strip at the bottom, CapCut-style -->
 <section class="timeline-wrap">
-  <div class="timeline-toolbar"><button type="button" id="tlAdd" title="Add clip (opens Media tab)" data-tab="media">+ Add</button><button type="button" id="tlUndo" title="Undo">↩ Undo</button><button type="button" id="tlRedo" title="Redo">↪ Redo</button><button type="button" id="tlSplit" title="Split selected clip at playhead">✂ Split</button><button type="button" id="tlDelete" class="danger" title="Delete selected clip">🗑 Delete</button><button type="button" id="tlAddLayer" title="Add a new track layer">＋ Add Layer</button><button type="button" id="tlCloseGaps" title="Close gaps on the Main track">Khít khoảng trống</button><button type="button" id="tlSections" title="List timeline markers (sections)">Sections</button><button type="button" id="tlAskAgent" title="Ask the agent about the selected clip">Ask agent</button><span class="timeline-toolbar-note">Timeline tools mirror the top-bar actions.</span></div><div class="timeline-empty" id="timelineEmptyHint">Drag material here and start to create</div>
+  <div class="timeline-toolbar"><button type="button" id="tlAdd" title="Add clip (opens Media tab)" data-tab="media">+ Add</button><button type="button" id="tlUndo" title="Undo">↩ Undo</button><button type="button" id="tlRedo" title="Redo">↪ Redo</button><button type="button" id="tlSplit" title="Split selected clip at playhead">✂ Split</button><button type="button" id="tlDelete" class="danger" title="Delete selected clip">🗑 Delete</button><button type="button" id="tlAddLayer" title="Add a new track layer">＋ Add Layer</button><button type="button" id="tlCloseGaps" title="Close gaps on the Main track">Khít khoảng trống</button><label title="Magnetic Main: direct Main edits ripple following clips"><input type="checkbox" id="tlMagnetic" checked> Magnetic</label><button type="button" id="tlSections" title="List timeline markers (sections)">Sections</button><button type="button" id="tlAskAgent" title="Ask the agent about the selected clip">Ask agent</button><span class="timeline-toolbar-note">Timeline tools mirror the top-bar actions.</span></div><div class="timeline-empty" id="timelineEmptyHint">Drag material here and start to create</div>
   <div class="timeline-tools">
     <span>Timeline</span>
     <label>Zoom <input id="zoom" type="range" min="10" max="200" value="60"> <span id="zoomLabel">60 px/s</span></label>
