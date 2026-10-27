@@ -1,7 +1,7 @@
 """Code-gap batch 2 tests: timeline redo + tiny query tools, export
 presets, speed curves, reverse, freeze, review workflow, library/brand,
 plugin enable/disable, welcome recents, new transitions, new UI ids,
-and the updated MCP count (144 -> 472). Real FFmpeg renders for
+and the updated MCP count (144 -> 472, round 3 -> 478). Real FFmpeg renders for
 reverse and one export preset.
 
 Run from windows/:  py -m unittest discover -s tests -v (Windows) / python3 -m unittest discover -s tests -v (Linux)
@@ -348,7 +348,7 @@ class TestNewTransitionsAndUi(unittest.TestCase):
 
     def test_mcp_count_is_472(self):
         names = [t["name"] for t in TOOLS]
-        self.assertEqual(len(TOOLS), 472)
+        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
         self.assertEqual(len(names), len(set(names)))
         for name in ("vibeedit_timeline_redo", "vibeedit_adjustments_list",
                      "vibeedit_beats_list", "vibeedit_track_get",

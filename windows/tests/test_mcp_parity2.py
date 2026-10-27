@@ -444,8 +444,9 @@ HONEST_SAMPLE = [
     "vibeedit_app_update", "vibeedit_app_update_later",
     "vibeedit_app_update_skip",
     "vibeedit_voice_clone_add", "vibeedit_voice_clone_list", "vibeedit_voice_clone_remove",
-    "vibeedit_voice_synthesize", "vibeedit_voice_speak", "vibeedit_voice_lines",
-    "vibeedit_voice_use", "vibeedit_voice_fit", "vibeedit_voice_place",
+    # Round 3: generation (synthesize/speak/lines/use/fit/place) is
+    # real now, so those names left this honest-error sample; only
+    # cloning (no provider model) stays honest.
     "vibeedit_image_generate", "vibeedit_image_generate_list", "vibeedit_image_style",
     "vibeedit_image_disclose",
     "vibeedit_library_search", "vibeedit_library_generate", "vibeedit_library_brand_pose",
@@ -501,12 +502,12 @@ class TestRegistry(unittest.TestCase):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(TOOLS), len(names))
         self.assertEqual(len(set(names)), len(names))
-        self.assertEqual(len(TOOLS), 472)
+        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
         for tool in TOOLS:
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 138)
+        self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real
 
 
 if __name__ == "__main__":

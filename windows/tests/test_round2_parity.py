@@ -196,10 +196,10 @@ class TestRound2Tools(unittest.TestCase):
     def test_registry_counts(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(TOOLS), 472)
+        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 138)
+        self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real
         for new in ("vibeedit_knowledge_add_lesson",
                     "vibeedit_knowledge_verdicts",
                     "vibeedit_skills_save", "vibeedit_skills_propose",
