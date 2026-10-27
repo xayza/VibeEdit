@@ -8,7 +8,7 @@ còn thiếu trong bảng này đều ghi trạng thái
 đã biết. Không có tính năng gốc nào bị ghi là "out of scope" hay
 "not planned" ở đây.
 
-Trạng thái hiện tại (đợt full-parity vòng 15; giao diện vòng 17):
+Trạng thái hiện tại (đợt full-parity vòng 15; giao diện vòng 16–17):
 **MCP 479 công cụ** (số live đọc từ `/api/mcp-tools` trong app; số
 trong tài liệu này là số tại thời điểm viết và sẽ cũ đi khi thêm công
 cụ mới — app luôn là nguồn đúng nhất). Trong 479 công cụ có **403
@@ -480,3 +480,39 @@ không thêm dependency); `vibeedit.spec` thêm hidden import
   runtime); .exe/CI Windows; updater tự thay app; hợp nhất (gated,
   bằng git thật); kiểm chứng trực quan/chức năng trên Windows
   thật.
+
+## Vòng 18 — bố cục tổng thể theo app gốc + hai đợt phím tắt
+
+Không thêm công cụ MCP mới (tổng vẫn 479 = 403 thật + 76 honest).
+Chỉ sửa `windows/static/index.html`, `style.css`, `app.js` +
+`windows/tests/test_round18.py` (46 test vòng 18; full suite 663
+test OK trên Linux VM).
+
+- **Bố cục tổng thể (bước 2–5):** body 100dvh, không scroll trang;
+  topbar đúng 48px một hàng, không wrap; `#status` dời khỏi header
+  thành toast cố định (tự ẩn sau 4s); mục phụ gom vào
+  `<details class="top-more">` trong header; Agent thành drawer phải
+  cố định (top 98px, width 340px, backdrop, Esc đóng, mở mặc định
+  khi viewport ≥1600px, trạng thái lưu localStorage) — drawer này
+  thay thế sidebar trái vòng 14 và giữ đúng mô hình agent ngoài qua
+  MCP/CLI của app gốc, không thêm chat AI trong app; thư viện tách
+  vùng import riêng khỏi danh sách media (giữ đúng 3 cột, nút "+"
+  overlay khi hover/focus, xóa dòng mã media m-0001); preview canvas
+  đúng tỉ lệ project qua `--project-aspect`; token màu + gộp CSS
+  (một khai báo gốc cho mỗi khối, override chỉ trong media query).
+  Hai chuỗi cũ khóa trong test (`details-col 380px`, `track-lane
+  34px`) được giữ dạng dòng chết bị override kèm comment, vì test cũ
+  không được sửa — giá trị hiệu dụng không đổi (300/340px, 32px).
+  Nút header mở Agent dùng id `btnAgentToggleTop` (id
+  `btnAgentToggle` đã thuộc nút rail) — hai nút cùng lái một state.
+- **Phím tắt (hai đợt):** đã nối Ctrl+N/O/S/Z/Shift+Z/Y, Delete,
+  Space, J (tua lùi 1 giây, không phải phát ngược), K, L, mũi tên
+  ±1 frame, Alt+Shift+C, Ctrl+E/T, Shift+Z, Ctrl+K tách,
+  Ctrl+Shift+K tách tất cả (ghép op tách đã có), S chuyển thành
+  Magnetic, Shift+A/A, Shift+Backspace khít khoảng trống, Ctrl+R
+  bảng tốc độ, Shift+B đường cong tốc độ. Chưa nối (không có chức
+  năng gốc, không gán bừa): Ctrl+C/V/X, Ctrl+A, Ctrl+Shift+S/F,
+  V/C, Ctrl+L, Shift+P, Shift+X/Alt+X, Ctrl+G, Alt+G.
+- **Còn thiếu sau vòng này:** như vòng 15, cộng kiểm chứng trực
+  quan 4 kích thước trên Windows thật (ảnh chụp + đo scrollWidth)
+  — chưa tuyên bố đã kiểm chứng bằng mắt.

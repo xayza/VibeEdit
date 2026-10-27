@@ -67,11 +67,20 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   shared-handler design), and round 15 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
-- **UI round 17:** the tool rail moved to a horizontal top row
+- **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
+  cyan only for active/selected/focus + CTA + clip-type colors +
+  playhead, Export CTA gradient softened to #0e7490→#be185d, clip
+  colors muted to translucent fills, AI Agent column widened
+  300px→340px); round 17 moved the tool rail to a horizontal top row
   (CapCut-style, same 12 tools, same handlers); the timeline ruler
   and lane playheads now share one origin (ruler margin equals the
   track-label width plus gap), so ruler ticks, the ruler playhead,
-  the lane playheads and clips align at the same time; 617 tests OK.
+  the lane playheads and clips align at the same time; round 18
+  finished the overall layout (48px topbar, status toast, right-side
+  agent drawer, split library, aspect-correct preview canvas, CSS
+  tokens/dedup) and added two keyboard-shortcut batches (mapped keys
+  listed in windows/README.md, unmapped keys honestly reported, no
+  fakes); 663 tests OK.
 - **Working:** project/media/timeline editing (cut, trim, move,
   copy/paste, split, undo/redo, markers, close gaps), full magnetic
   Main block-move + linked audio, source and export preview, audio

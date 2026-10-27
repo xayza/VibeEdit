@@ -10,10 +10,17 @@ function fps() {
   const f = project.format.fps;
   return Array.isArray(f) ? f[0] / f[1] : f;
 }
+let statusTimer = 0;
 function setStatus(msg, isError) {
   const el = $("status");
+  if (!el) return;
   el.textContent = msg;
   el.style.color = isError ? "#c96f68" : "#b8b1a6";
+  // Round 18 step 2: the toast shows while .show is set and hides
+  // itself after 4s; the text and error colours are unchanged.
+  el.classList.add("show");
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => el.classList.remove("show"), 4000);
 }
 async function api(path, body) {
   const res = await fetch(path, {
@@ -35,12 +42,20 @@ function findItem(id) {
 async function load() {
   const data = await api("/api/project");
   project = data.project;
+  // Round 18 step 3: the preview canvas follows the project format.
+  if (project.format) document.documentElement.style.setProperty("--project-aspect", project.format.width + "/" + project.format.height);
   $("projectName").value = project.name || "";
   const revEl = $("projectRev");
   if (revEl) revEl.textContent = "Edited rev " + (project.rev ?? 0);
   $("durationLabel").textContent = data.duration_seconds.toFixed(2) + "s";
   $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
-  $("timelineText").textContent = data.timeline;
+  // Round 18: the status bar under the tracks shows ONE line only
+  // (project line + track/clip counts). The full multi-line readout
+  // still exists server-side for the MCP timeline_sheet tool and the
+  // Inspector; only this display is condensed, nothing is deleted.
+  const statusClips = project.tracks.reduce((n, t) => n + t.items.length, 0);
+  $("timelineText").textContent =
+    data.timeline.split("\n")[0] + ` · ${project.tracks.length} track · ${statusClips} clip`;
   $("btnUndo").disabled = !data.can_undo;
   $("btnRedo").disabled = !data.can_redo;
   syncFormatUI();
@@ -61,7 +76,7 @@ function renderTransitions() {
   list.innerHTML = trans.map((t) =>
     `<li>${t.kind} ${t.from} → ${t.to} (${t.duration} frames) <button data-tr="${t.id}" class="danger">Remove</button></li>`).join("") || "<li>No transitions yet.</li>";
   list.querySelectorAll("button[data-tr]").forEach((b) => b.addEventListener("click", async () => {
-    try { await api("/api/project", { op: "remove_transition", transition: b.dataset.tr }); setStatus("Transition removed."); await load(); }
+    try { await api("/api/project", { op: "remove_transition", transition: b.dataset.tr }); setStatus("Đã xóa transition."); await load(); }
     catch (err) { setStatus(err.message, true); }
   }));
 }
@@ -122,7 +137,7 @@ async function addMediaToTimeline(mediaId) {
     : (project.tracks.find((t) => t.role === "main") || project.tracks.find((t) => t.kind === "video") || null);
   if (!track) { setMediaStatus("Không có track phù hợp cho file này.", true); return; }
   const dur = mediaDurFrames(m);
-  if (!dur) { setMediaStatus(`Không thêm được ${mediaBaseName(m)}: file này không có thời lượng ghi nhận, hãy dùng form Add clip và nhập Duration thủ công.`, true); return; }
+  if (!dur) { setMediaStatus(`Không thêm được ${mediaBaseName(m)}: file này không có thời lượng ghi nhận, hãy dùng form Thêm clip và nhập Thời lượng thủ công.`, true); return; }
   const at = freePosition(track, dur);
   try {
     const data = await api("/api/project", { op: "add_clip", media: m.id, track: track.id, at, in: 0, dur, speed: 1 });
@@ -148,8 +163,10 @@ async function renderMedia() {
     const thumb = m.kind === "audio"
       ? `<div class="media-thumb media-thumb-audio" title="Audio — không có thumbnail">♪</div>`
       : `<img class="media-thumb" src="/api/thumbnail/${encodeURIComponent(m.id)}" alt="" loading="lazy" onerror="this.style.display='none'">`;
-    return `<li class="media-card" data-media="${m.id}" title="Bấm để xem file này, bấm đúp để thêm vào timeline">${thumb}${durLabel === "—" ? "" : `<span class="media-duration-badge">${durLabel}</span>`}<div class="media-card-body"><div class="media-card-name">${icon} ${name}</div><div class="media-card-meta">${m.kind || "?"} · ${durLabel}${dims ? " · " + dims : ""}</div><div class="media-card-id">${m.id}</div></div>${used.has(m.id) ? '<span class="media-added-badge">Đã thêm</span>' : ""}<button type="button" class="media-add-btn primary" data-add-media="${m.id}">Thêm vào timeline</button></li>`;
+    return `<li class="media-card" data-media="${m.id}" title="Bấm để xem file này, bấm đúp để thêm vào timeline">${thumb}${durLabel === "—" ? "" : `<span class="media-duration-badge">${durLabel}</span>`}<div class="media-card-body"><div class="media-card-name">${icon} ${name}</div><div class="media-card-meta">${m.kind || "?"} · ${durLabel}${dims ? " · " + dims : ""}</div></div>${used.has(m.id) ? '<span class="media-added-badge">Đã thêm</span>' : ""}<button type="button" class="media-add-btn primary" data-add-media="${m.id}" title="Thêm vào timeline" aria-label="Thêm vào timeline">+</button></li>`;
   }).join("") || "<li>Chưa có media.</li>";
+  const mc = $("mediaCount");
+  if (mc) mc.textContent = project.media.length ? project.media.length + " file" : "";
   const ct = document.querySelector(".create-tools");
   if (ct) ct.hidden = project.media.length > 0;
   $("mediaList").querySelectorAll(".media-card").forEach((li) => {
@@ -175,12 +192,45 @@ async function renderMedia() {
   if (vms) vms.innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   try { const mg = await api("/api/project", { op: "magnetic_get" });
-    const cb = $("tlMagnetic"); if (cb) cb.checked = !!mg.magnetic;
+    const btn = $("tlMagnetic");
+    // Round 18: tlMagnetic is an icon toggle button now (was a
+    // checkbox); aria-pressed + .active carry the same state.
+    if (btn) { btn.setAttribute("aria-pressed", mg.magnetic ? "true" : "false"); btn.classList.toggle("active", !!mg.magnetic); }
   } catch (e) { /* magnetic toggle keeps its default when offline */ }
   $("addTrack").innerHTML = project.tracks.filter((t) => t.kind === "video").map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
   $("inspTrack").innerHTML = project.tracks.map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
+}
+// Round 18 timeline restyle: pure helpers, tested in test_round18.py
+// via node extraction (no DOM needed).
+const TRACK_CODES = { captions: "CC", overlay: "V2", main: "V1", background: "V3", dialogue: "A1", voiceover: "A2", music: "A3", sfx: "A4", adjustment: "FX" };
+// Sample-style header: icon row (code + static eye/speaker) above the
+// name. The indicators are STATIC spans, never buttons: hide/mute/
+// lock do not exist in this port, so nothing here pretends to toggle.
+function trackHeaderHtml(role, name, kind) {
+  const code = TRACK_CODES[role] || "?";
+  const speaker = kind === "audio" ? `<span class="track-ico" title="Track âm thanh">🔊</span>` : "";
+  return `<div class="track-label" title="${role} · ${kind}"><span class="track-head-row"><span class="track-code code-${kind}">${code}</span><span class="track-ico" title="Đang hiển thị">👁</span>${speaker}</span><span class="track-name">${name}</span></div>`;
+}
+// Effect chip label from the clip's OWN stored colour data only:
+// preset name, else "LUT" when a LUT file is set, else no chip.
+// Sample-photo effect names must never appear here — they are not
+// this project's data, so they are deliberately not named.
+function effectChipNameForClip(item) {
+  const col = (item && item.color) || {};
+  if (col.preset && col.preset !== "none") return col.preset;
+  if (col.lut) return "LUT";
+  return null;
+}
+// Ruler labels stay readable at any zoom: the smallest step whose
+// labels sit at least 64px apart. Positions stay exact multiples of
+// the step — the step only thins labels, never moves them.
+function rulerLabelStep(pxPerSec) {
+  for (const s of [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]) {
+    if (s * pxPerSec >= 64) return s;
+  }
+  return 600;
 }
 function renderTracks() {
   const wrap = $("tracks");
@@ -190,13 +240,27 @@ function renderTracks() {
   const tc = $("tlTimecode");
   const fmtTc = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(2).padStart(5, "0")}`;
   if (tc) tc.textContent = `${fmtTc(playheadFrame / fps())} / ${fmtTc(totalS)}`;
+  // Round 18 continued: the empty-timeline hint shows only when no
+  // track has a clip; it never covers real clips (pointer-events
+  // none in CSS, and hidden here as soon as any clip exists).
+  const hint = $("timelineEmptyHint");
+  if (hint) hint.hidden = project.tracks.some((t) => t.items.length > 0);
   const ruler = $("ruler");
   ruler.style.width = widthPx + "px";
   const totalSecs = totalS;
+  const labelStep = rulerLabelStep(pxPerSec);
+  const stepPx = Math.max(1, labelStep * pxPerSec);
+  // Grid lines follow the label step, so the background never
+  // disagrees with the seconds at a zoom other than 60 px/s.
+  ruler.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0, transparent ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx}px)`;
   let rulerHtml = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
   for (let sec = 0; sec <= Math.ceil(totalSecs); sec++) {
-    const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
-    rulerHtml += `<div class="ruler-tick" style="left:${sec * pxPerSec}px">${mm}:${ss}</div>`;
+    if (sec % labelStep === 0) {
+      const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
+      rulerHtml += `<div class="ruler-tick" style="left:${sec * pxPerSec}px">${mm}:${ss}</div>`;
+    } else {
+      rulerHtml += `<div class="ruler-tick-minor" style="left:${sec * pxPerSec}px"></div>`;
+    }
   }
   ruler.innerHTML = rulerHtml +
     ((project.beatGrid && project.beatGrid.beats) || []).map((b) =>
@@ -213,14 +277,12 @@ function renderTracks() {
   // Beauty-photo headers: short code + name + indicators (no fake
   // toggles: hide/mute/lock do not exist in this port, so the eye
   // only states the track is visible and the speaker marks audio).
-  const TRACK_CODES = { captions: "CC", overlay: "V2", main: "V1", background: "V3", dialogue: "A1", voiceover: "A2", music: "A3", sfx: "A4", adjustment: "FX" };
-  const trackHeader = (role, name, kind) => `<div class="track-label" title="${role} · ${kind}"><span class="track-code code-${kind}">${TRACK_CODES[role] || "?"}</span><span class="track-name">${name}</span><span class="track-ico" title="Đang hiển thị">👁</span>${kind === "audio" ? `<span class="track-ico" title="Track âm thanh">🔊</span>` : ""}</div>`;
   for (const track of ordered) {
     const row = document.createElement("div");
     // Main lane is taller in the original (TimelineLayout.mainRowHeight
     // 46pt vs 29pt for other rows); the class carries that, ids unchanged.
     row.className = "track-row" + (track.role === "main" ? " track-row-main" : "");
-    row.innerHTML = trackHeader(track.role, track.name, track.kind);
+    row.innerHTML = trackHeaderHtml(track.role, track.name, track.kind);
     const lane = document.createElement("div");
     lane.className = "track-lane";
     lane.style.width = widthPx + "px";
@@ -264,8 +326,7 @@ function renderTracks() {
         el.append(img, nm, du);
         // Real effect chip only: the clip's own stored colour data
         // (preset name, or LUT when no preset). Nothing is invented.
-        const col = item.color || {};
-        const fxName = (col.preset && col.preset !== "none") ? col.preset : (col.lut ? "LUT" : null);
+        const fxName = effectChipNameForClip(item);
         if (fxName) { const fx = document.createElement("span"); fx.className = "clip-fx"; fx.textContent = fxName; el.appendChild(fx); }
       } else if (medium) {
         const nm = document.createElement("span"); nm.className = "clip-name"; nm.textContent = baseName;
@@ -335,7 +396,7 @@ function renderTracks() {
     for (const [role, name, kind] of emptyRoles) {
       const row = document.createElement("div");
       row.className = "track-row track-row-empty";
-      row.innerHTML = trackHeader(role, name, kind) + `<div class="track-lane empty-lane" style="width:${widthPx}px">Trống — dùng Add Layer rồi kéo clip vào đây</div>`;
+      row.innerHTML = trackHeaderHtml(role, name, kind) + `<div class="track-lane empty-lane" style="width:${widthPx}px">Trống — dùng Add Layer rồi kéo clip vào đây</div>`;
       wrap.appendChild(row);
     }
     if (emptyRoles.length) {
@@ -355,20 +416,24 @@ function renderVoiceover() {
     if (t.role !== "voiceover") continue;
     for (const it of t.items) takes.push(`${it.id} — ${it.media || it.text || ""} at ${(it.at / fps()).toFixed(2)}s`);
   }
-  list.innerHTML = takes.length ? takes.map((x) => `<li>${x}</li>`).join("") : "<li>No voiceover takes yet.</li>";
+  list.innerHTML = takes.length ? takes.map((x) => `<li>${x}</li>`).join("") : "<li>Chưa có take voiceover nào.</li>";
 }
 function fillDetailsProject() {
   if (!project) return;
+  if (project.format) document.documentElement.style.setProperty("--project-aspect", project.format.width + "/" + project.format.height);
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("detailsName", project.name || "—");
+  const nm = $("detailsName");
+  if (nm) nm.title = project.name || "";
   set("detailsFormat", `${project.format.width}×${project.format.height}`);
   set("detailsFps", `${fps().toFixed(2)} fps`);
   let totalS = 0;
   for (const t of project.tracks) for (const it of t.items) totalS = Math.max(totalS, (it.at + it.dur) / fps());
   set("detailsLength", `${totalS.toFixed(2)}s`);
   set("detailsClips", String(project.tracks.reduce((n, t) => n + t.items.length, 0)));
-  if (window.__projectDir) set("detailsPath", window.__projectDir);
-  else api("/api/info").then((d) => { window.__projectDir = d.project_dir || ""; set("detailsPath", window.__projectDir || "—"); }).catch(() => {});
+  const setPathTitle = () => { const p = $("detailsPath"); if (p) p.title = p.textContent || ""; };
+  if (window.__projectDir) { set("detailsPath", window.__projectDir); setPathTitle(); }
+  else api("/api/info").then((d) => { window.__projectDir = d.project_dir || ""; set("detailsPath", window.__projectDir || "—"); setPathTitle(); }).catch(() => {});
 }
 function renderInspector() {
   const found = selectedId ? findItem(selectedId) : null;
@@ -584,11 +649,32 @@ async function fillSettingsInfo() {
   }
 }
 function applyAgentCollapsePref() {
-  const dock = $("agentDock"), box = $("settingsAgentCollapsed");
-  if (!dock) return;
-  const collapsed = localStorage.getItem("vibeedit_agent_collapsed") === "1";
-  dock.hidden = collapsed;
+  const col = $("agentCol"), box = $("settingsAgentCollapsed");
+  if (!col) return;
+  // Round 18 step 3: the agent column is a fixed right drawer. A
+  // stored pref wins; with no pref the drawer follows the
+  // original-app rule — open on wide windows (>=1600px), closed
+  // below it — so it never eats grid space when closed.
+  const stored = localStorage.getItem("vibeedit_agent_collapsed");
+  const wide = (typeof window !== "undefined" && typeof window.innerWidth === "number") ? window.innerWidth >= 1600 : true;
+  const collapsed = stored === "1" ? true : (stored === "0" ? false : !wide);
+  col.classList.toggle("open", !collapsed);
+  const backdrop = $("agentBackdrop");
+  if (backdrop) backdrop.classList.toggle("show", !collapsed);
   if (box) box.checked = collapsed;
+  // The rail "AI Agent" toggle and the header toggle mirror the same
+  // state — active + aria-expanded while the drawer is open.
+  const toggle = $("btnAgentToggle");
+  if (toggle) { toggle.classList.toggle("active", !collapsed); toggle.setAttribute("aria-expanded", String(!collapsed)); }
+  const top = $("btnAgentToggleTop");
+  if (top) { top.classList.toggle("active", !collapsed); top.setAttribute("aria-expanded", String(!collapsed)); }
+}
+function toggleInspectorColumn() {
+  const wb = document.querySelector(".workbench");
+  if (!wb) return;
+  const hidden = wb.classList.toggle("details-hidden");
+  const btn = $("btnInspectorToggle");
+  if (btn) btn.setAttribute("aria-expanded", String(!hidden));
 }
 
 $("ruler").addEventListener("click", (e) => {
@@ -613,8 +699,10 @@ $("btnRedo").addEventListener("click", async () => { try { await api("/api/redo"
    explicit save. preventDefault only where the browser would
    otherwise hijack the shortcut (Ctrl+S opens the browser save
    dialog; Ctrl+Z/Y are also claimed by editable fields, which is
-   why inputs are skipped below). The single-letter shortcuts
-   (S split, I/O/E/Q source) keep working unchanged. */
+   why inputs are skipped below). Round 18 batch 2 reassigned the
+   single-letter S key: S is now the magnetic (auto-snap) toggle
+   and split moved to Ctrl+K; I/O/E/Q source shortcuts keep
+   working unchanged. */
 document.addEventListener("keydown", async (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const tag = (e.target.tagName || "").toLowerCase();
@@ -638,12 +726,12 @@ document.addEventListener("keydown", async (e) => {
   } catch (err) { setStatus(err.message, true); }
 });
 async function doExport(preset) {
-  setStatus("Exporting (" + preset + ")… this can take a while.");
+  setStatus("Đang xuất (" + preset + ")… có thể mất một lúc.");
   try {
     const data = await api("/api/export", { preset, normalize: $("exportNormalize") ? $("exportNormalize").checked : false });
-    setStatus(`Export done: ${data.report.output} (${data.report.duration}s, ${data.report.width}x${data.report.height}).`);
+    setStatus(`Xuất xong: ${data.report.output} (${data.report.duration} giây, ${data.report.width}x${data.report.height}).`);
     await load();
-  } catch (err) { setStatus("Export failed: " + err.message, true); }
+  } catch (err) { setStatus("Xuất thất bại: " + err.message, true); }
 }
 $("btnExportDraft").addEventListener("click", () => doExport("draft"));
 $("btnExportFull").addEventListener("click", () => doExport("full"));
@@ -656,7 +744,7 @@ $("addClipForm").addEventListener("submit", async (e) => {
     await load();
     const newId = data.result && data.result.id;
     if (newId) { selectClipAndPreview(newId); setStatus("Clip đã thêm — đang xem file gốc của clip, bấm ▶ để phát."); }
-    else setStatus("Clip added.");
+    else setStatus("Đã thêm clip.");
   } catch (err) { setStatus(err.message, true); }
 });
 const btnQuick = $("btnAddClipQuick");
@@ -710,7 +798,7 @@ $("addTextForm").addEventListener("submit", async (e) => {
   try {
     await api("/api/project", { op: "add_text", track: "t1", text: $("addText").value,
       at: Number($("addTextAt").value), dur: Number($("addTextDur").value) });
-    setStatus("Text added."); await load();
+    setStatus("Đã thêm chữ."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
 $("inspectorForm").addEventListener("submit", async (e) => {
@@ -727,36 +815,36 @@ $("inspectorForm").addEventListener("submit", async (e) => {
     if ($("inspEqSaturation").value !== "") eqVals.saturation = Number($("inspEqSaturation").value);
     if ($("inspEqGamma").value !== "") eqVals.gamma = Number($("inspEqGamma").value);
     if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "" || $("inspPresetStrength").value !== "" || Object.keys(eqVals).length) await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value), preset_strength: $("inspPresetStrength").value === "" ? null : Number($("inspPresetStrength").value), eq: Object.keys(eqVals).length ? eqVals : null });
-    setStatus("Clip updated."); await load();
+    setStatus("Đã cập nhật clip."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
 $("transitionForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const found = selectedId ? findItem(selectedId) : null;
-  if (!found) { setStatus("Select the clip on the left of the cut first.", true); return; }
+  if (!found) { setStatus("Chọn clip ở bên trái điểm cắt trước.", true); return; }
   const main = project.tracks.find((t) => t.role === "main");
   const items = [...main.items].sort((a, b) => a.at - b.at);
   const idx = items.findIndex((i) => i.id === found.item.id);
   const next = items[idx + 1];
-  if (!next || next.at !== found.item.at + found.item.dur) { setStatus("Selected clip has no directly consecutive next clip on the main track.", true); return; }
+  if (!next || next.at !== found.item.at + found.item.dur) { setStatus("Clip đang chọn không có clip kế tiếp liền kề trên track chính.", true); return; }
   try {
     await api("/api/project", { op: "add_transition", from: found.item.id, to: next.id, kind: $("trKind").value, duration: Number($("trDur").value) });
-    setStatus("Transition added."); await load();
+    setStatus("Đã thêm transition."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
 $("keyframeForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!selectedId) return;
+  if (!selectedId) { setStatus("Chọn một clip trước.", true); return; }
   try {
     await api("/api/project", { op: "add_keyframe", item: selectedId, at: Number($("kfAt").value), property: $("kfProp").value, value: Number($("kfValue").value) });
-    setStatus("Keyframe added."); await load();
+    setStatus("Đã thêm keyframe."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
 $("srtImportForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     const data = await api("/api/project", { op: "srt_import", track: "t1", srt: $("srtText").value });
-    setStatus(`Imported ${data.result.length} SRT cues.`); await load();
+    setStatus(`Đã import ${data.result.length} cue SRT.`); await load();
   } catch (err) { setStatus(err.message, true); }
 });
 $("btnSrtExport").addEventListener("click", async () => {
@@ -765,21 +853,39 @@ $("btnSrtExport").addEventListener("click", async () => {
     const blob = new Blob([data.srt], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "captions.srt"; a.click();
-    setStatus("SRT exported.");
+    setStatus("Đã xuất SRT.");
   } catch (err) { setStatus(err.message, true); }
 });
 async function splitAtPlayhead() {
   const found = selectedId ? findItem(selectedId) : null;
-  if (!found) { setStatus("Select a clip first.", true); return; }
+  if (!found) { setStatus("Chọn một clip trước.", true); return false; }
   try {
     await api("/api/project", { op: "split", item: found.item.id, atFrame: playheadFrame });
-    setStatus("Split done."); await load();
-  } catch (err) { setStatus(err.message, true); }
+    setStatus("Đã tách clip."); await load(); return true;
+  } catch (err) { setStatus(err.message, true); return false; }
+}
+/* Round 18 batch 2: split ALL clips intersecting the playhead.
+   Composed only from the existing "split" op: the intersecting
+   list is snapshotted first (splitting never changes the other
+   items' ranges), then each item is split in turn and the original
+   selection is restored. No new op. */
+async function splitAllAtPlayhead() {
+  if (!project) return;
+  const targets = [];
+  for (const t of project.tracks) for (const it of t.items)
+    if (playheadFrame >= it.at && playheadFrame < it.at + it.dur) targets.push(it.id);
+  if (!targets.length) { setStatus("Không có clip nào tại playhead để tách.", true); return; }
+  const before = selectedId;
+  let done = 0;
+  for (const id of targets) { selectedId = id; if (await splitAtPlayhead()) done++; }
+  selectedId = before;
+  await load();
+  setStatus(`Đã tách tất cả: ${done}/${targets.length} clip tại playhead.`);
 }
 $("btnSplit").addEventListener("click", splitAtPlayhead);
 $("btnPlayheadSplit").addEventListener("click", splitAtPlayhead);
 $("btnDelete").addEventListener("click", async () => {
-  if (!selectedId) return;
+  if (!selectedId) { setStatus("Chọn một clip trước.", true); return; }
   try { await api("/api/project", { op: "delete", item: selectedId }); selectedId = null; await load(); }
   catch (err) { setStatus(err.message, true); }
 });
@@ -789,13 +895,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "s" || e.key === "S") {
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
-    splitAtPlayhead();
+    // Round 18 batch 2: S is now the auto-snap toggle. The app has
+    // no persistent drag-snap switch; the magnetic Main toggle is
+    // the only persistent auto-attach switch, so S clicks it.
+    // Split moved to Ctrl+K (see the round 18 shortcut block).
+    const mg = $("tlMagnetic"); if (mg) mg.click();
   }
 });
 $("uploadForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const file = $("uploadFile").files[0];
-  if (!file) return;
+  if (!file) { setStatus("Chọn một file trước.", true); return; }
   const fd = new FormData();
   fd.append("file", file);
   const res = await fetch("/api/media/upload", { method: "POST", body: fd });
@@ -804,7 +914,7 @@ $("uploadForm").addEventListener("submit", async (e) => {
   else { await load(); loadMediaPreview(data.media.id); setStatus("Đã tải lên: " + data.media.path + " — đang xem file gốc, bấm ▶ để phát."); }
 });
 
-load().catch((err) => setStatus("Failed to load project: " + err.message, true));
+load().catch((err) => setStatus("Tải project thất bại: " + err.message, true));
 
 /* Phase 5 agent dock: live MCP tool list from /api/mcp-tools. A
    failure here must never break the editor above, so it is fenced
@@ -836,71 +946,71 @@ loadMcpTools();
 $("batchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const folders = $("batchFolders").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-  setStatus("Batch exporting… this can take a while.");
+  setStatus("Đang xuất batch… có thể mất một lúc.");
   try {
     const data = await api("/api/batch", { folders, preset: "full", normalize: $("batchNormalize").checked });
     const ok = data.results.filter((r) => r.ok).length;
-    $("batchResult").textContent = `Batch done: ${ok}/${data.results.length} succeeded. ` + data.results.map((r) => `${r.project}: ${r.ok ? "OK" : "FAIL " + r.error}`).join(" | ");
-    setStatus(`Batch done: ${ok}/${data.results.length} succeeded.`);
-  } catch (err) { setStatus("Batch failed: " + err.message, true); }
+    $("batchResult").textContent = `Xuất batch xong: ${ok}/${data.results.length} thành công. ` + data.results.map((r) => `${r.project}: ${r.ok ? "OK" : "FAIL " + r.error}`).join(" | ");
+    setStatus(`Xuất batch xong: ${ok}/${data.results.length} thành công.`);
+  } catch (err) { setStatus("Xuất batch thất bại: " + err.message, true); }
 });
 $("otioImportForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     const data = await api("/api/otio-import", { otio: $("otioImportPath").value, dest: $("otioImportDest").value, merge: $("otioImportMerge").checked });
     $("phase4Result").textContent = `OTIO imported: ${data.report.clips} clips, ${data.report.transitions} transitions, ${data.report.markers} markers. Missing: ${data.report.missing.join(", ") || "none"}. Warnings: ${data.report.warnings.join("; ") || "none"}.`;
-    setStatus("OTIO imported (into the destination folder, not the open project).");
-  } catch (err) { setStatus("OTIO import failed: " + err.message, true); }
+    setStatus("Đã import OTIO (vào thư mục đích, không phải project đang mở).");
+  } catch (err) { setStatus("Import OTIO thất bại: " + err.message, true); }
 });
 $("karaokeForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!selectedId) { setStatus("Select a text item first.", true); return; }
+  if (!selectedId) { setStatus("Chọn một text item trước.", true); return; }
   try {
     await api("/api/project", { op: "karaoke_add", item: selectedId, words: JSON.parse($("karaokeWords").value) });
-    setStatus("Karaoke timings added."); await load();
-  } catch (err) { setStatus("Karaoke failed: " + err.message, true); }
+    setStatus("Đã thêm thời gian karaoke."); await load();
+  } catch (err) { setStatus("Karaoke thất bại: " + err.message, true); }
 });
 $("btnKaraokeAss").addEventListener("click", async () => {
   try {
     const data = await api("/api/karaoke-ass", {});
     const blob = new Blob([data.ass], { type: "text/plain" }); const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "karaoke.ass"; a.click();
-    setStatus(`Karaoke .ass exported: ${data.report.karaoke_items} items.`);
-  } catch (err) { setStatus("Karaoke export failed: " + err.message, true); }
+    setStatus(`Đã xuất karaoke .ass: ${data.report.karaoke_items} mục.`);
+  } catch (err) { setStatus("Xuất karaoke thất bại: " + err.message, true); }
 });
 $("adjustmentForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     await api("/api/project", { op: "adjustment_add", at: Number($("adjAt").value), dur: Number($("adjDur").value), preset: $("adjPreset").value || null, lut: $("adjLut").value || null });
-    setStatus("Adjustment layer added."); await load();
-  } catch (err) { setStatus("Adjustment failed: " + err.message, true); }
+    setStatus("Đã thêm lớp hiệu chỉnh."); await load();
+  } catch (err) { setStatus("Hiệu chỉnh thất bại: " + err.message, true); }
 });
 $("beatForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  setStatus("Detecting beats…");
+  setStatus("Đang phát hiện nhịp…");
   try {
     const data = await api("/api/project", { op: "beat_detect", media: $("beatMedia").value });
-    setStatus(`Beats detected: ${data.result.beats.length} beats.`); await load();
-  } catch (err) { setStatus("Beat detection failed: " + err.message, true); }
+    setStatus(`Đã phát hiện nhịp: ${data.result.beats.length} nhịp.`); await load();
+  } catch (err) { setStatus("Phát hiện nhịp thất bại: " + err.message, true); }
 });
 $("btnBeatsMarkers").addEventListener("click", async () => {
-  try { await api("/api/project", { op: "beats_to_markers" }); setStatus("Beats copied to markers."); await load(); }
+  try { await api("/api/project", { op: "beats_to_markers" }); setStatus("Đã chép nhịp thành marker."); await load(); }
   catch (err) { setStatus(err.message, true); }
 });
 $("btnSnap").addEventListener("click", async () => {
   const beats = (project.beatGrid && project.beatGrid.beats) || [];
-  if (!beats.length) { setStatus("No beat grid yet — detect beats first.", true); return; }
+  if (!beats.length) { setStatus("Chưa có lưới nhịp — phát hiện nhịp trước.", true); return; }
   const t = playheadFrame / fps();
   const nearest = beats.reduce((a, b) => Math.abs(b - t) < Math.abs(a - t) ? b : a);
   playheadFrame = Math.round(nearest * fps()); renderTracks();
-  setStatus(`Playhead snapped to beat at ${nearest}s.`);
+  setStatus(`Playhead đã nhảy tới nhịp tại ${nearest} giây.`);
 });
 $("duckingForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     await api("/api/project", { op: "ducking_set", enabled: $("duckEnabled").checked, amount_db: Number($("duckAmount").value) });
-    setStatus("Ducking saved."); await load();
-  } catch (err) { setStatus("Ducking failed: " + err.message, true); }
+    setStatus("Đã lưu ducking."); await load();
+  } catch (err) { setStatus("Lưu ducking thất bại: " + err.message, true); }
 });
 $("btnOtio").addEventListener("click", async () => {
   try {
@@ -908,8 +1018,8 @@ $("btnOtio").addEventListener("click", async () => {
     const blob = new Blob([data.otio], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "timeline.otio"; a.click();
-    setStatus(`OTIO exported: ${data.report.tracks} tracks, ${data.report.clips} items.`);
-  } catch (err) { setStatus("OTIO failed: " + err.message, true); }
+    setStatus(`Đã xuất OTIO: ${data.report.tracks} track, ${data.report.clips} mục.`);
+  } catch (err) { setStatus("Xuất OTIO thất bại: " + err.message, true); }
 });
 
 /* Phase 8: review panel + transition preview still. Both are fenced
@@ -928,27 +1038,27 @@ $("btnReview").addEventListener("click", async () => {
     else
       lines.push("Chưa có bản xuất nên không có mục nào bị bỏ qua để báo cáo.");
     box.textContent = lines.join(" ");
-    setStatus("Review refreshed.");
+    setStatus("Đã làm mới review.");
   } catch (err) { box.textContent = "Review failed: " + err.message; setStatus(err.message, true); }
 });
 $("btnTransitionPreview").addEventListener("click", async () => {
   const found = selectedId ? findItem(selectedId) : null;
-  if (!found) { setStatus("Select the clip on the left of the cut first.", true); return; }
+  if (!found) { setStatus("Chọn clip ở bên trái điểm cắt trước.", true); return; }
   const main = project.tracks.find((t) => t.role === "main");
   const items = [...main.items].sort((a, b) => a.at - b.at);
   const idx = items.findIndex((i) => i.id === found.item.id);
   const next = items[idx + 1];
   const trans = (project.transitions || []).find((t) => t.from === found.item.id && next && t.to === next.id);
-  if (!trans) { setStatus("No transition after the selected clip yet — add one first.", true); return; }
-  setStatus("Rendering transition preview… (draft render of the cut window)");
+  if (!trans) { setStatus("Chưa có transition sau clip đang chọn — thêm một cái trước.", true); return; }
+  setStatus("Đang render xem trước transition… (bản nháp của đoạn cắt)");
   try {
     const data = await api("/api/transition-preview", { transition: trans.id });
     const box = $("transitionPreviewBox");
     box.hidden = false;
     $("transitionPreviewImg").src = "/api/transition-preview?transition=" + encodeURIComponent(trans.id) + "&t=" + Date.now();
     $("transitionPreviewLabel").textContent = `${data.preview.kind} at ${data.preview.midpoint_seconds}s (draft ${data.preview.width}x${data.preview.height}).`;
-    setStatus("Transition preview ready.");
-  } catch (err) { setStatus("Transition preview failed: " + err.message, true); }
+    setStatus("Xem trước transition đã sẵn sàng.");
+  } catch (err) { setStatus("Xem trước transition thất bại: " + err.message, true); }
 });
 
 /* CapCut-style shell wiring (redesign): tab switching, rail actions,
@@ -1088,37 +1198,37 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const lower = msg.toLowerCase();
     try {
       if (lower === "help" || lower.includes("help")) {
-        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (the live tool count is shown in the list below). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
+        agentSay("Các lệnh tôi thực sự chạy được ở đây: list clips, export, review, stats, undo, redo, workspace, project context. Để AI sửa thật, kết nối một agent ngoài: python windows\\vibeedit.py mcp <project-folder> (số công cụ trực tiếp hiển thị trong danh sách bên dưới). Tôi không phải LLM đã kết nối nên không viết kịch bản hay tạo giọng trong panel này.");
       } else if (lower.includes("list clip")) {
         const items = [];
         for (const t of project.tracks) for (const it of t.items) items.push(`${t.name}: ${it.text || it.media || it.id} (${(it.at / fps()).toFixed(2)}s)`);
         agentSay(items.length ? `Clips (${items.length}): ${items.join(" | ")}` : "No clips on the timeline yet.");
       } else if (lower.includes("export")) {
-        agentSay("Exporting a draft (real export, via the same Export draft action)…");
+        agentSay("Đang xuất bản nháp (xuất thật, qua cùng nút Export draft)…");
         doExport("draft");
       } else if (lower.includes("review")) {
         const r = $("btnReview"); if (r) r.click();
-        agentSay("Review refreshed — see the Review panel in the AI tab for validation, stats and skipped items.");
+        agentSay("Review đã làm mới — xem panel Review trong tab AI để thấy kiểm chứng, thống kê và mục đã bỏ qua.");
       } else if (lower.includes("stats") || lower.includes("project context")) {
         const data = await api("/api/project", { op: "project_stats" });
         const st = data.result;
-        agentSay(`Project context: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
+        agentSay(`Bối cảnh project: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
       } else if (lower.includes("workspace")) {
         agentSay(`Workspace: project "${project.name}", rev ${project.rev ?? 0}, ${project.format.width}x${project.format.height}, ${project.tracks.length} tracks. Open project folder via the server project path shown in the console.`);
       } else if (lower === "undo") {
         const b = $("btnUndo"); if (b) b.click();
-        agentSay("Undo requested.");
+        agentSay("Đã yêu cầu hoàn tác.");
       } else if (lower === "redo") {
         const b = $("btnRedo"); if (b) b.click();
-        agentSay("Redo requested.");
+        agentSay("Đã yêu cầu làm lại.");
       } else {
-        agentSay("I cannot do that with an LLM in this app yet — no provider is connected here. Try: help, list clips, export, review, stats, undo, redo. For AI generation, connect an external agent: python windows\\vibeedit.py mcp <project-folder>.");
+        agentSay("Tôi chưa thể làm việc đó bằng LLM trong app này — chưa có provider nào được kết nối ở đây. Thử: help, list clips, export, review, stats, undo, redo. Để AI tạo nội dung, kết nối một agent ngoài: python windows\\vibeedit.py mcp <project-folder>.");
       }
-    } catch (err) { agentSay("Command failed: " + err.message); }
+    } catch (err) { agentSay("Lệnh thất bại: " + err.message); }
   });
   const provider = $("agentProvider");
   if (provider) provider.addEventListener("change", () => {
-    if (provider.value === "ollama") agentSay("Ollama is not connected in this app yet — no endpoint is configured, so I cannot generate with it. The External agent (MCP) option is the working route.");
+    if (provider.value === "ollama") agentSay("Ollama chưa được kết nối trong app này — chưa cấu hình endpoint nên tôi không thể tạo nội dung bằng nó. Lựa chọn External agent (MCP) mới là đường đang hoạt động.");
   });
   function agentBtn(id, fn) {
     const b = $(id); if (b) b.addEventListener("click", fn);
@@ -1128,12 +1238,12 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     try {
       const data = await api("/api/project", { op: "project_stats" });
       const st = data.result;
-      agentSay(`Project context: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
-    } catch (err) { agentSay("Project context failed: " + err.message); }
+      agentSay(`Bối cảnh project: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
+    } catch (err) { agentSay("Lấy bối cảnh project thất bại: " + err.message); }
   });
-  agentBtn("btnAgentSurvey", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Survey = Review refreshed — see the Review panel in the AI tab."); });
-  agentBtn("btnAgentWriteVO", () => agentSay("Write VO (AI script writing) is not available in-app yet. Use the Voice panel to import voiceover audio, or an external agent via MCP to draft lines."));
-  agentBtn("btnAgentReview", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Review refreshed — see the Review panel in the AI tab."); });
+  agentBtn("btnAgentSurvey", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Survey: Review đã làm mới — xem panel Review trong tab AI."); });
+  agentBtn("btnAgentWriteVO", () => agentSay("Write VO (viết kịch bản bằng AI) chưa có trong app. Dùng panel Voice để import audio voiceover, hoặc một agent ngoài qua MCP để soạn lời."));
+  agentBtn("btnAgentReview", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Review đã làm mới — xem panel Review trong tab AI."); });
   document.querySelectorAll('[data-action="focus-agent"]').forEach((b) => b.addEventListener("click", () => focusAgent("")));
 
   // Voice panel (real import + place; generation/cloning/recording honest notes)
@@ -1148,7 +1258,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       }
       await api("/api/project", { op: "add_clip", media: $("voiceMedia").value, track: track.id, at: Number($("voiceAt").value), dur: null });
       $("voiceResult").textContent = "Voiceover take added to the Voiceover track.";
-      setStatus("Voiceover take added."); await load();
+      setStatus("Đã thêm take voiceover."); await load();
     } catch (err) { $("voiceResult").textContent = "Voiceover take failed: " + err.message; setStatus(err.message, true); }
   });
   const cloneBtn = $("btnVoiceClone");
@@ -1160,7 +1270,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) { $("voiceResult").textContent = "Upload failed: " + data.error; return; }
     $("voiceResult").textContent = "Reference audio imported as media (" + data.media.path + "). Voice cloning is not available yet — place it on the Voiceover track with the form below.";
-    setStatus("Reference audio imported."); await load();
+    setStatus("Đã import audio mẫu."); await load();
   });
   const genBtn = $("btnVoiceGenerate");
   if (genBtn) genBtn.addEventListener("click", async () => {
@@ -1346,7 +1456,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     if (e.key === "e" || e.key === "E") placeSource(false);
     if (e.key === "q" || e.key === "Q") placeSource(true);
   });
-  // Close gaps on the Main track.
+  // Khít khoảng trống trên track Main.
   const closeGapsBtn = $("tlCloseGaps");
   if (closeGapsBtn) closeGapsBtn.addEventListener("click", async () => {
     try {
@@ -1376,7 +1486,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const openProjBtn = $("btnProjectOpen");
   if (openProjBtn) openProjBtn.addEventListener("click", async () => {
     const folder = $("projectSelect").value;
-    if (!folder) return;
+    if (!folder) { setStatus("Chọn một project trong danh sách trước.", true); return; }
     try { await api("/api/project/open", { folder }); await load(); await refreshProjectList(); setStatus("Đã mở project: " + folder); }
     catch (err) { setStatus(err.message, true); }
   });
@@ -1421,7 +1531,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (reportBtn) reportBtn.addEventListener("click", () => {
     const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
     const r = $("btnReview"); if (r) r.click();
-    setStatus("Export report refreshed (Review panel).");
+    setStatus("Đã làm mới Export report (panel Review).");
   });
 })();
 
@@ -1448,6 +1558,40 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     localStorage.setItem("vibeedit_agent_collapsed", collapseBox.checked ? "1" : "0");
     applyAgentCollapsePref();
   });
+  // Round 18: rail "AI Agent" button toggles the same collapse state
+  // the Settings checkbox owns, so the two controls can never drift
+  // apart. Default (no stored pref) is shown, so the first press
+  // hides the dock and the next press shows it again.
+  const agentToggle = $("btnAgentToggle");
+  if (agentToggle) agentToggle.addEventListener("click", () => {
+    const collapsed = localStorage.getItem("vibeedit_agent_collapsed") === "1";
+    localStorage.setItem("vibeedit_agent_collapsed", collapsed ? "0" : "1");
+    applyAgentCollapsePref();
+  });
+  // Round 18 step 3: the header toggle drives the same drawer state,
+  // the backdrop and Esc close it, the inspector toggle hides the
+  // Details column (workbench drops to two tracks).
+  const agentToggleTop = $("btnAgentToggleTop");
+  if (agentToggleTop) agentToggleTop.addEventListener("click", () => {
+    const collapsed = localStorage.getItem("vibeedit_agent_collapsed") === "1";
+    localStorage.setItem("vibeedit_agent_collapsed", collapsed ? "0" : "1");
+    applyAgentCollapsePref();
+  });
+  const agentBackdrop = $("agentBackdrop");
+  if (agentBackdrop) agentBackdrop.addEventListener("click", () => {
+    localStorage.setItem("vibeedit_agent_collapsed", "1");
+    applyAgentCollapsePref();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const col = $("agentCol");
+    if (col && col.classList.contains("open")) {
+      localStorage.setItem("vibeedit_agent_collapsed", "1");
+      applyAgentCollapsePref();
+    }
+  });
+  const inspToggle = $("btnInspectorToggle");
+  if (inspToggle) inspToggle.addEventListener("click", toggleInspectorColumn);
   applyAgentCollapsePref();
   const expBtn = $("btnPreviewExport");
   if (expBtn) expBtn.addEventListener("click", async () => {
@@ -1647,8 +1791,12 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     } catch (err) { out("pluginInstallResult", err.message); }
   })(); });
   const mg = $("tlMagnetic");
-  if (mg) mg.addEventListener("change", async () => {
-    try { await post({ op: "magnetic_set", enabled: mg.checked }); setStatus(`Magnetic Main: ${mg.checked ? "on" : "off"}.`); }
+  // Round 18: icon toggle button — the pressed state flips only
+  // after the server confirms, so the UI can never disagree with
+  // the project about whether magnetic is on.
+  if (mg) mg.addEventListener("click", async () => {
+    const on = mg.getAttribute("aria-pressed") !== "true";
+    try { await post({ op: "magnetic_set", enabled: on }); mg.setAttribute("aria-pressed", on ? "true" : "false"); mg.classList.toggle("active", on); setStatus(`Magnetic Main: ${on ? "on" : "off"}.`); }
     catch (err) { setStatus(err.message, true); }
   });
 })();
@@ -1713,7 +1861,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     };
     recorder.start();
     recBtn.hidden = true; if (stopBtn) stopBtn.hidden = false;
-    say("Đang ghi… bấm ■ Stop recording để dừng.");
+    say("Đang ghi… bấm ■ Dừng thu để dừng.");
   });
   if (stopBtn) stopBtn.addEventListener("click", () => {
     if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -1801,3 +1949,118 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   video.addEventListener("timeupdate", syncPlayheadFromPreview);
   video.addEventListener("seeked", syncPlayheadFromPreview);
 })();
+
+/* Round 18 shortcuts (batches 1 + 2). One document keydown
+   listener for shortcuts that did NOT already exist. Deliberately
+   NOT re-bound here (their existing handlers own them): Ctrl+S
+   save, Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, plain S magnetic
+   toggle, plain I/O/E/Q source marks. Deliberately NOT bound at
+   all (no matching feature exists in this web build — never
+   faked): Ctrl+C/V/X copy/paste/cut (no web-UI flow, no
+   /api/project op; MCP-only), Ctrl+A select-all (single-selection
+   model), Ctrl+Shift+S share (no share feature), Ctrl+Shift+F
+   audio split/detach (no such feature), V/C tool modes (no
+   tool-mode concept), Ctrl+L linked toggle (link_audio op exists
+   but no UI toggle deciding which audio to link), Shift+P
+   preview-axis toggle (no such toggle), Shift+X/Alt+X region
+   select (no region concept), Ctrl+G/Ctrl+Shift+G group (no
+   grouping), Alt+G/Alt+Shift+G compound clip (no compound clips).
+   Typing guard: when focus is in an input/textarea/select or a
+   contenteditable element, every shortcut below is skipped so
+   native typing, copy/paste/cut and select-all keep working.
+   J is a 1-second seek back, NOT reverse playback: a <video>
+   element cannot play in reverse. Ctrl+N/Ctrl+T are registered
+   with preventDefault, but desktop Chrome/Edge may swallow them
+   before the page sees them (the pywebview shell receives them). */
+function shortcutIsTypingTarget(e) {
+  const tag = (e.target.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || !!e.target.isContentEditable;
+}
+function stepPlayhead(frames) {
+  if (!project) return;
+  playheadFrame = Math.max(0, playheadFrame + frames);
+  seekPreviewToPlayhead();
+  renderTracks();
+}
+let __prevZoomPx = null;
+function toggleTimelineZoom() {
+  if (__prevZoomPx === null) {
+    __prevZoomPx = pxPerSec;
+    const fit = $("tlFit"); if (fit) fit.click();
+  } else {
+    pxPerSec = __prevZoomPx; __prevZoomPx = null;
+    const z = $("zoom"); if (z) z.value = pxPerSec;
+    const zl = $("zoomLabel"); if (zl) zl.textContent = pxPerSec + " px/s";
+    renderTracks();
+  }
+}
+function openCreateProject() {
+  const wp = $("welcomePanel");
+  if (wp && wp.hidden) { const wb = $("btnWelcome"); if (wb) wb.click(); }
+  const name = $("projectNewName"); if (name) name.focus();
+}
+function openSavedProject() {
+  const sel = $("projectSelect");
+  if (sel && sel.value) { const b = $("btnProjectOpen"); if (b) b.click(); return; }
+  const wp = $("welcomePanel");
+  if (wp && wp.hidden) { const wb = $("btnWelcome"); if (wb) wb.click(); }
+  if (sel) sel.focus();
+}
+function playPreviewFromKey() {
+  const img = $("previewImage");
+  if (img && !img.hidden) { setStatus("Đây là ảnh tĩnh — chỉ xem, không phát được.", true); return; }
+  const v = $("preview");
+  if (!v || !v.src) { setStatus("Chưa có gì để phát — bấm vào một clip/media, hoặc xuất bản nháp trước.", true); return; }
+  if (v.paused) v.play();
+}
+function openSpeedCurve() {
+  const tab = $("inspTabSpeed"); if (tab) tab.click();
+  const form = $("speedCurveForm");
+  if (form) {
+    const d = form.closest("details"); if (d) d.open = true;
+    const sel = $("speedCurvePreset"); if (sel) sel.focus();
+  }
+}
+document.addEventListener("keydown", (e) => {
+  if (shortcutIsTypingTarget(e)) return;
+  const key = (e.key || "").toLowerCase();
+  const ctrl = e.ctrlKey || e.metaKey, shift = e.shiftKey, alt = e.altKey;
+  const click = (id) => { const el = $(id); if (el) el.click(); };
+  const railClick = (tab) => { const el = document.querySelector(`.tool-rail [data-tab="${tab}"]`); if (el) el.click(); };
+  if (ctrl && !alt) {
+    if (key === "n" && !shift) { e.preventDefault(); openCreateProject(); }
+    else if (key === "o" && !shift) { e.preventDefault(); openSavedProject(); }
+    else if (key === "e" && !shift) { e.preventDefault(); railClick("effects"); }
+    else if (key === "t" && !shift) { e.preventDefault(); railClick("text"); }
+    else if (key === "r" && !shift) { e.preventDefault(); click("inspTabSpeed"); }
+    else if (key === "k" && !shift) { e.preventDefault(); splitAtPlayhead(); }
+    else if (key === "k" && shift) { e.preventDefault(); splitAllAtPlayhead(); }
+    return;
+  }
+  if (alt && !ctrl) {
+    if (key === "c" && shift) { click("btnExportFull"); }
+    return;
+  }
+  if (shift && !ctrl && !alt) {
+    if (key === "z") { toggleTimelineZoom(); }
+    else if (key === "a") { stepPlayhead(-1); }
+    else if (key === "b") { openSpeedCurve(); }
+    else if (key === "backspace") { e.preventDefault(); click("tlCloseGaps"); }
+    return;
+  }
+  if (!ctrl && !shift && !alt) {
+    if (key === "delete") { click("btnDelete"); }
+    else if (key === " ") {
+      const tt = (e.target.tagName || "").toLowerCase();
+      if (tt === "button" || tt === "video" || tt === "audio") return;
+      e.preventDefault(); click("btnPreviewPlay");
+    }
+    else if (key === "j") { if (project) stepPlayhead(-Math.round(fps())); }
+    else if (key === "k") { const v = $("preview"); if (v && !v.paused) v.pause(); }
+    else if (key === "l") { playPreviewFromKey(); }
+    else if (key === "arrowleft") { stepPlayhead(-1); }
+    else if (key === "arrowright") { stepPlayhead(1); }
+    else if (key === "a") { stepPlayhead(1); }
+  }
+});
+/* End round 18 shortcuts. */

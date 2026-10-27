@@ -245,11 +245,26 @@ Kiểm chứng: py_compile, node --check, MCP 479 = 403 + 76, test 249
 tên gốc vẫn đủ, full suite trên Linux VM, smoke server project tạm.
 Chi tiết ở [`PARITY.md`](PARITY.md) mục vòng 15.
 
+## Giao diện vòng 16 — hài hòa màu, cột AI Agent to hơn
+
+- **Chrome về trung tính:** nút primary nền #1e1e24 chữ trắng không glow; vạch accent trước tiêu đề vùng, badge Windows MVP, link, nhãn import, tiêu đề Details, hover, safe-area, divider Compare đều về xám; cyan chỉ còn ở trạng thái active/selected/focus, nút CTA chính, màu clip theo loại và playhead.
+- **CTA Export Video dịu lại:** gradient từ #06b6d4→#ec4899 thành #0e7490→#be185d, glow giảm; màu clip giữ phân theo loại nhưng mờ xuống (fill 0.08 + viền 0.45); playhead giữ đường đỏ #ef4444 làm điểm nhấn chức năng duy nhất.
+- **Cột AI Agent 300px → 340px** (tổng ở 1280 vẫn 1256 ≤ 1280; hành vi gập ở màn hẹp giữ nguyên).
+- Kiểm chứng: node --check, py_compile, 48 test mục tiêu OK, full suite 584 test OK trên Linux VM; chỉ sửa `static/style.css` + assertion CTA trong `test_round14.py`; cây Swift không động.
+
 ## Giao diện vòng 17 — thanh công cụ lên hàng ngang trên cùng, sửa lệch playhead timeline
 
 - **Thanh công cụ dọc thành hàng ngang trên cùng (kiểu CapCut):** `<nav class="tool-rail">` dời ra khỏi cột trái, thành hàng full-width ngay dưới topbar; đủ 12 nút theo đúng thứ tự cũ (Media, Audio, Text, Stickers, Effects, Transitions, Filters, Voice, Knowledge, Vision, Timeline, More) với cùng data-tab/data-action nên handler chuyển panel giữ nguyên; cột panel công cụ vẫn ở bên trái preview, thu từ 356px về 280px; cột AI Agent giữ 340px; màn hẹp hàng tự cuộn ngang trong chính nó.
 - **Sửa lệch playhead:** nguyên nhân là thước và lane dùng hai gốc tọa độ khác nhau — vạch lane đặt trong `.track-lane` (sau cột nhãn 128px + gap 10px) còn thước đứng riêng với gốc là mép trái timeline-wrap, lệch đúng 138px. Cách sửa: `.ruler` thêm `margin-left: 138px` (94px ở breakpoint ≤720px, nơi nhãn thu về 84px) để hai gốc trùng nhau; handler click thước dùng `rect.left` của ruler nên tự đúng theo, không cần sửa JS. Test `tests/test_round17.py` (12 test mới) chứng minh tick thước = vạch lane = vị trí clip tại cùng thời điểm (sai số ≤1px) và click thước đặt playhead đúng trong 1 frame.
 - Kiểm chứng: node --check, py_compile, 60 test mục tiêu OK, full suite 617 test OK trên Linux VM; MCP giữ 479 = 403 + 76; cây Swift không động, không merge.
+
+## Giao diện vòng 18 — bố cục tổng thể theo app gốc + phím tắt
+
+- **Topbar 48px một hàng:** sửa đúng 3 nguyên nhân gây wrap (flex-wrap, label dạng cột, status chiếm cả hàng); `#status` dời khỏi header thành toast cố định góc dưới-trái, tự ẩn sau 4s; các mục phụ (Export report, Plugins, Review, Settings, tỉ lệ, preset xuất) gom vào `<details class="top-more">` trong header, giữ nguyên id; thêm nút mở Agent và nút đóng/mở Details cạnh Export; xóa thẻ "Windows MVP" khỏi giao diện (cả tiêu đề tab).
+- **Agent thành drawer phải:** cố định top 98px, rộng 340px, có backdrop, đóng bằng Esc hoặc click backdrop, khi đóng không chiếm chỗ; mở mặc định khi viewport ≥1600px, trạng thái lưu localStorage; drawer giữ nguyên nội dung dock hiện có (lệnh MCP + lệnh an toàn), đúng mô hình agent ngoài qua MCP/CLI của app gốc, không thêm chat AI trong app.
+- **Thư viện / preview / token:** vùng import tách riêng khỏi danh sách media (giữ đúng 3 cột, nút "+" overlay khi hover/focus, xóa dòng mã media m-0001); preview canvas đúng tỉ lệ project qua `--project-aspect`, cao tối đa min(52vh,600px); token màu chuẩn hóa, CSS gộp mỗi khối thành một khai báo gốc.
+- **Phím tắt (hai đợt):** đã nối Ctrl+N/O/S/Z/Shift+Z/Y, Delete, Space, J (tua lùi 1 giây, không phải phát ngược), K, L, mũi tên ±1 frame, Alt+Shift+C, Ctrl+E/T, Shift+Z, Ctrl+K tách, Ctrl+Shift+K tách tất cả, S chuyển thành Magnetic, Shift+A/A, Shift+Backspace khít khoảng trống, Ctrl+R bảng tốc độ, Shift+B đường cong tốc độ. Chưa nối vì app chưa có chức năng gốc (không gán bừa): Ctrl+C/V/X, Ctrl+A, Ctrl+Shift+S/F, V/C, Ctrl+L, Shift+P, Shift+X/Alt+X, Ctrl+G, Alt+G.
+- Kiểm chứng: node --check, py_compile, 129 test mục tiêu OK, full suite 663 test OK trên Linux VM; MCP giữ 479 = 403 + 76; cây Swift không động, không merge. Kiểm chứng trực quan 4 kích thước trên Windows thật vẫn để lại cho người dùng sau khi pull.
 
 ## Full-parity vòng 13 — kiểm chứng tích hợp end-to-end, rà soát docs, checklist test Windows
 
