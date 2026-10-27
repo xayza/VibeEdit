@@ -1242,15 +1242,16 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             filter_parts.append(
                 f"[{vchain}]split=2[{vs_a}][{vs_b}]")
             vpre = next_label("mpre")
+            # Round 11: exact chain frames at project fps (was .3f
+            # trims, which mis-split the chain at non-ms frames).
             filter_parts.append(
-                f"[{vs_a}]trim=start=0:end={pre_dur:.3f},"
+                f"[{vs_a}]{_frame_trim(0, pre_dur, fps)},"
                 f"setpts=PTS-STARTPTS,format=yuv420p[{vpre}]")
             pieces.append(vpre)
             vtail = next_label("mtail")
             filter_parts.append(
-                f"[{vs_b}]trim=start={pre_dur:.3f}:"
-                f"end={vchain_dur:.3f},setpts=PTS-STARTPTS,"
-                f"format=yuv420p[{vtail}]")
+                f"[{vs_b}]{_frame_trim(pre_dur, vchain_dur, fps)},"
+                f"setpts=PTS-STARTPTS,format=yuv420p[{vtail}]")
         else:
             vtail = vchain
         if post_dur > 1e-6:
@@ -1259,11 +1260,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 f"[{label}]split=2[{is_a}][{is_b}]")
             vhead = next_label("mhead")
             filter_parts.append(
-                f"[{is_a}]trim=start=0:end={trans_s:.3f},"
+                f"[{is_a}]{_frame_trim(0, trans_s, fps)},"
                 f"setpts=PTS-STARTPTS,format=yuv420p[{vhead}]")
             vpost = next_label("mpost")
             filter_parts.append(
-                f"[{is_b}]trim=start={trans_s:.3f}:end={dur_s:.3f},"
+                f"[{is_b}]{_frame_trim(trans_s, dur_s, fps)},"
                 f"setpts=PTS-STARTPTS,format=yuv420p[{vpost}]")
         else:
             vhead = label
@@ -2019,7 +2020,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                         held = op_pts[0][1]
                     sub_src = src_s + b0 * speed
                     sub_src_dur = (b1 - b0) * speed
-                    ofilters = [f"trim=start={sub_src:.3f}:end={sub_src + sub_src_dur:.3f}",
+                    # Round 11: exact source frames (was .3f trim,
+                    # which dropped the boundary frame at 30 fps).
+                    ofilters = [_frame_trim(sub_src,
+                                            sub_src + sub_src_dur,
+                                            media_fps(medium)),
                                 "setpts=PTS-STARTPTS"]
                     if speed != 1.0:
                         ofilters.append(f"setpts=PTS/{speed:.4f}")
@@ -2057,7 +2062,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                     current = out_label
                     overlay_count += 1
             else:
-                ofilters = [f"trim=start={src_s:.3f}:end={src_s + dur_s * speed:.3f}",
+                # Round 11: exact source frames (was .3f trim).
+                ofilters = [_frame_trim(src_s, src_s + dur_s * speed,
+                                        media_fps(medium)),
                             "setpts=PTS-STARTPTS"]
                 if speed != 1.0:
                     ofilters.append(f"setpts=PTS/{speed:.4f}")
@@ -2294,6 +2301,27 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         filter_parts.append(
             f"{audio_map}loudnorm=I=-16:TP=-1.5:LRA=11[aoutn]")
         audio_map = "[aoutn]"
+    if audio_map is not None:
+        # Round 11: pad the final mix one frame past the video end
+        # so -shortest can never eat the last video frame. The
+        # output uses -shortest, which drops any frame ending past
+        # the shortest stream; the audio chain's .3f-rounded
+        # silence durations (58/30 = 1.93333 -> "1.933") fall a
+        # fraction of a millisecond short of the video duration,
+        # which cost exactly the last video frame on every render
+        # whose total was not millisecond-aligned (proven: a 58+60
+        # concat rendered 117 frames with -shortest, 118 without).
+        # Padding makes the video the shortest stream, so -shortest
+        # truncates the audio tail at the video EOF instead, and
+        # the output duration stays the video duration. Mixes that
+        # already reach past the video end are untouched (apad is
+        # a no-op there); audio segment rounding itself is left
+        # alone on purpose (continuous timestamps).
+        pad_label = next_label("aoutp")
+        filter_parts.append(
+            f"{audio_map}apad=whole_dur={total_s + 1.0 / fps:.6f}"
+            f"[{pad_label}]")
+        audio_map = f"[{pad_label}]"
 
     filter_complex = ";".join(filter_parts)
     cmd = [find_tool("ffmpeg"), "-y"]

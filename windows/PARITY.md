@@ -246,7 +246,7 @@ gọn + cuộn nội bộ; toolbar gấp mục (bản gốc) tương đương v�
 và player-head wrap hàng (bản web, không cắt nội dung); timeline giữ
 chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
 
-## Lỗi đã biết (phát hiện trong vòng 9, đã sửa trong vòng 10)
+## Lỗi đã biết (phát hiện trong vòng 9, đã sửa trong vòng 10 và 11)
 
 - Freeze ở fps mà khung hình cuối không rơi đúng mốc thập phân 3 chữ
   số (ví dụ 30 fps: khung 29/30 = 0,9667 s bị trim thành "0.967"
@@ -260,11 +260,41 @@ chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
   freeze 30 fps nay ra đủ khung và đúng thời lượng report
   (kiểm chứng thật: report 3,0 s, file 3,0 s / 90 khung), và
   clip chính bắt đầu ở khung 29 nay giữ đủ 30 khung bắt đầu
-  bằng khung đỏ đúng thay vì rớt sang khung xanh. Lưu ý còn
-  lại: các trim `.3f` ở đường overlay video và cửa sổ
-  transition vẫn dùng định dạng cũ (cùng họ làm tròn, nhưng
-  ngoài phạm vi vòng 10 và chưa có test tái hiện) — ứng cử
-  viên cho vòng sau nếu cần.
+  bằng khung đỏ đúng thay vì rớt sang khung xanh.
+- ĐÃ SỬA trong vòng 11: cùng họ làm tròn `.3f` ở đường overlay
+  video (render.py ~2022 đường chia theo opacity, ~2060 đường
+  thường) và cửa sổ transition motion (chia pre/tail/head/post
+  ~1246-1266), kèm test tái hiện `tests/test_round11.py` (fail
+  trước sửa, pass sau sửa): overlay bắt đầu ở khung nguồn 29
+  nay hiện đúng khung đỏ đầu tiên thay vì khung xanh 30; transition
+  dip-black 58 + 60 khung với cửa sổ 29 khung nay ra đúng 89
+  khung (trước sửa: 88); spin cùng hình học nay đặt đúng khung
+  trắng duy nhất của clip vào ở khung xuất 58 (pre 29 + đoạn 29).
+  Nhánh dip-black trong (chia nửa ~1133-1138) được GIỮ NGUYÊN
+  có chủ ý: điểm chia nửa khung cách biên khung gần nhất 16,7 ms
+  ở 30 fps, lớn hơn nhiều so với sai số làm tròn 0,5 ms, nên trim
+  `.3f` và trim khung cho cùng một kết quả — test đếm dip-black
+  pass khi chỉ sửa các chia ngoài đã chứng minh điều này.
+  Cũng trong vòng 11, quá trình tái hiện phát hiện thêm một lỗi
+  chặn khác cùng họ: lệnh xuất dùng `-shortest` mà chuỗi âm
+  thanh im lặng bị làm tròn `.3f` (58/30 = 1,93333 → "1.933")
+  nên ngắn hơn video một chút, khiến `-shortest` loại đúng khung
+  video cuối cùng trên mọi render có tổng thời lượng không rơi
+  đúng mốc mili-giây (kiểm chứng: nối 58 + 60 không transition
+  ra 117 khung khi có `-shortest`, 118 khi bỏ nó). ĐÃ SỬA: mix
+  âm thanh cuối được pad thêm một khung hình quá cuối video
+  trước khi xuất, nên video luôn là luồng ngắn nhất và
+  `-shortest` chỉ cắt phần đuôi âm thanh ở cuối video thay vì
+  ăn khung hình; thời lượng file vẫn bằng thời lượng video.
+  Âm thanh atrim, xfade/acrossfade (offset theo timestamp, không
+  rớt khung) được giữ nguyên có chủ ý. Quan sát kề bên chưa sửa
+  (không phải lỗi trim): cửa sổ enable của overlay dùng
+  `between(t, start, end)` dạng bao hàm cả hai đầu nên overlay
+  còn hiện thêm một khung lặp ở đúng thời điểm kết thúc (kể cả
+  khi thời lượng rơi đúng mili-giây) — ngữ nghĩa enable này là
+  hành vi chung của mọi overlay từ trước, cần một vòng riêng
+  quyết định (giữ bao hàm hay chuyển sang đầu cuối loại trừ)
+  kèm kiểm tra hồi quy toàn bộ overlay trước khi đổi.
 
 ## Những gì KHÔNG phải là tính năng thiếu
 

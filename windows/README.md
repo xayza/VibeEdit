@@ -189,6 +189,47 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
   `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
 
+## Full-parity vòng 11 — trim chính xác theo khung hình cho overlay video + cửa sổ transition, sửa lỗi `-shortest` ăn khung cuối
+
+- **Overlay video + transition (tái hiện trước, sửa sau):**
+  `_frame_trim` của vòng 10 nay mở rộng sang trim overlay video
+  (đường chia theo opacity và đường thường, dùng fps của media
+  nguồn) và các chia pre/tail/head/post của transition motion
+  (dùng fps project, vì chuỗi chain đã chuẩn hoá về fps project
+  qua filter `fps`). Test tái hiện `tests/test_round11.py`
+  (4 test, fail trước sửa, pass sau sửa): overlay bắt đầu ở
+  khung nguồn 29 nay hiện đúng khung đỏ đầu tiên; dip-black
+  58 + 60 khung với cửa sổ 29 khung nay ra đúng 89 khung;
+  spin cùng hình học nay đặt đúng khung trắng duy nhất ở khung
+  xuất 58. Nhánh dip-black trong (chia nửa) giữ nguyên vì đã
+  chứng minh cho cùng kết quả (xem `PARITY.md`).
+- **Lỗi chặn phát hiện trong lúc tái hiện:** lệnh xuất dùng
+  `-shortest` mà chuỗi âm thanh im lặng làm tròn `.3f` nên ngắn
+  hơn video một chút, khiến `-shortest` loại đúng khung video
+  cuối cùng trên mọi render có tổng thời lượng không rơi đúng
+  mốc mili-giây (nối 58 + 60 không transition: 117 khung khi có
+  `-shortest`, 118 khi bỏ nó). Đã sửa bằng cách pad mix âm
+  thanh cuối thêm một khung hình quá cuối video: video luôn là
+  luồng ngắn nhất nên `-shortest` chỉ cắt đuôi âm thanh ở cuối
+  video, thời lượng file vẫn bằng thời lượng video. Atrim,
+  xfade/acrossfade giữ nguyên có chủ ý.
+- **Trường hợp bình thường không đổi:** nối không transition
+  58 + 60 nay ra đúng 118 khung; transition rơi đúng mili-giây
+  (dip-black/spin 30 khung) vẫn ra đúng 88 khung; still chính
+  29 khung vẫn ra đúng 29 khung (trim `end` ở đường still đã
+  kiểm chứng là chính xác, không phải lỗi). Quan sát kề bên
+  chưa sửa: cửa sổ enable của overlay dạng bao hàm cả hai đầu
+  nên overlay còn hiện thêm một khung lặp ở đúng thời điểm kết
+  thúc — cần vòng riêng quyết định ngữ nghĩa enable kèm kiểm
+  tra hồi quy overlay trước khi đổi.
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **401 thật / 78 honest**; **556 tests OK** trên Linux VM
+  (552 + 4 test vòng mười một mới); test 249 tên gốc chạy lại
+  vẫn đủ. Cây Swift không động, không hợp nhất, chưa đẩy.
+  Smoke server trên project tạm riêng: `GET /` 200,
+  `/api/mcp-tools` 479 công cụ, `/api/info` 200 (Python 3.12.3,
+  FFmpeg 8.1.2).
+
 ## Full-parity vòng 8 — state/workflow + provider-local thật, 28 công cụ từ honest thành thật
 
 - **Nhóm state/workflow (đọc spec gốc trước khi code):**
