@@ -600,3 +600,31 @@ form { margin: 0; }
 .wave-bar { flex: 1; background: rgba(255, 255, 255, 0.75); border-radius: 1px; min-width: 1px; }
 .timeline-capabilities { color: var(--muted); }
 .timeline-capabilities summary { cursor: pointer; font-weight: 700; color: var(--text); }
+
+/* ---- Finishing batch: full-viewport layout, no page scroll ---- */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.topbar { position: static; }
+.tool-toolbar { position: static; }
+.workbench { flex: 1; min-height: 0; overflow: hidden; }
+.tool-col { min-height: 0; }
+.centre-col { overflow-y: auto; min-height: 0; }
+.details-col { display: flex; flex-direction: column; overflow: hidden; }
+.details-col > .panel { flex: 1; min-height: 0; overflow-y: auto; }
+.details-col .agent-dock { flex-shrink: 0; max-height: 48%; overflow-y: auto; }
+.timeline-wrap { flex-shrink: 0; max-height: 40vh; overflow-y: auto; }
+.preview-wrap video { height: auto; max-height: 36vh; }
+.preview-wrap img { height: auto; max-height: 36vh; width: auto; max-width: 100%; margin: 0 auto; background: #000; border-radius: var(--radius); border: 1px solid var(--line); display: block; object-fit: contain; }
+.preview-wrap img[hidden] { display: none; }
+.media-item { cursor: pointer; }
+.media-item:hover { color: var(--accent); }
+.settings-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(520px, 92vw); max-height: 88vh; overflow-y: auto; z-index: 50; background: var(--bg-panel); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+.settings-modal[hidden] { display: none; }
+.settings-modal h3 { margin: 0 0 8px; }
+.settings-modal h4 { margin: 14px 0 6px; }
+#settingsProjectInfo, #settingsEnvInfo { font-size: 12px; color: var(--muted); background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; word-break: break-word; }
+@media (max-width: 1100px) {
+  .workbench { flex-wrap: nowrap; overflow-x: auto; }
+  .tool-col { width: 300px; border-right: 1px solid var(--line); border-bottom: 0; }
+  .details-col { width: 280px; border-left: 1px solid var(--line); border-top: 0; }
+}

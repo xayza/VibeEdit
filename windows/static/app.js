@@ -3,6 +3,7 @@
    latest export only (Phase 1 limit); dragging a clip saves once on
    drop, and the server rejects overlaps. */
 let project = null, selectedId = null, playheadFrame = 0, pxPerSec = 60;
+let previewMode = "export", previewMediaId = null, previewItemId = null;
 
 const $ = (id) => document.getElementById(id);
 function fps() {
@@ -42,10 +43,14 @@ async function load() {
   $("timelineText").textContent = data.timeline;
   $("btnUndo").disabled = !data.can_undo;
   $("btnRedo").disabled = !data.can_redo;
-  if (data.last_export) {
+  syncFormatUI();
+  if (previewMode !== "source" && data.last_export) {
     $("preview").src = "/api/preview?" + Date.now();
-    $("previewLabel").textContent = "Preview: latest export.";
+    $("previewImage").hidden = true;
+    $("preview").hidden = false;
+    $("previewLabel").textContent = "Đang xem: bản xuất gần nhất.";
   }
+  fillSettingsInfo();
   renderMedia(); renderTracks(); renderInspector(); renderTransitions(); renderVoiceover();
 }
 function renderTransitions() {
@@ -76,7 +81,8 @@ function renderKeyframes() {
 }
 function renderMedia() {
   $("mediaList").innerHTML = project.media.map((m) =>
-    `<li>${m.id} — ${m.path} (${m.kind || "?"})</li>`).join("") || "<li>No media yet.</li>";
+    `<li class="media-item" data-media="${m.id}" title="Bấm để xem file này">${m.id} — ${m.path} (${m.kind || "?"})</li>`).join("") || "<li>No media yet.</li>";
+  $("mediaList").querySelectorAll("[data-media]").forEach((li) => li.addEventListener("click", () => loadMediaPreview(li.dataset.media)));
   $("addMedia").innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("beatMedia").innerHTML = project.media.map((m) =>
@@ -178,7 +184,7 @@ function renderTracks() {
           }).catch(() => {});
       }
       el.draggable = true;
-      el.addEventListener("click", () => { selectedId = item.id; renderTracks(); renderInspector(); renderKeyframes(); });
+      el.addEventListener("click", () => selectClipAndPreview(item.id));
       el.addEventListener("dragstart", () => { selectedId = item.id; });
       lane.appendChild(el);
     }
@@ -240,12 +246,138 @@ function renderInspector() {
   renderKeyframes();
 }
 
+
+/* Finishing batch: aspect ratio, source preview, settings.
+   Every control here calls a real API or says plainly what is
+   not available — nothing fakes a preview, a format, or a tool. */
+const FORMAT_PRESETS = {"16:9": [1920, 1080], "9:16": [1080, 1920], "1:1": [1080, 1080],
+  "4:5": [1080, 1350], "3:4": [1080, 1440], "4:3": [1440, 1080], "21:9": [1920, 810]};
+function presetKeyFor(w, h) {
+  for (const [k, v] of Object.entries(FORMAT_PRESETS)) if (v[0] === w && v[1] === h) return `${w}x${h}`;
+  return "custom";
+}
+function applyPreviewAspect() {
+  if (!project) return;
+  const ratio = `${project.format.width} / ${project.format.height}`;
+  $("preview").style.aspectRatio = ratio;
+  $("previewImage").style.aspectRatio = ratio;
+}
+function syncFormatUI() {
+  if (!project) return;
+  const w = project.format.width, h = project.format.height;
+  const label = $("formatLabel");
+  if (label) label.textContent = `${w}×${h} (${presetKeyFor(w, h) === "custom" ? "Tùy chỉnh" : Object.keys(FORMAT_PRESETS).find((k) => FORMAT_PRESETS[k][0] === w && FORMAT_PRESETS[k][1] === h)})`;
+  const key = presetKeyFor(w, h);
+  for (const id of ["formatPreset", "settingsFormatPreset"]) {
+    const sel = $(id); if (sel) sel.value = key;
+  }
+  const cw = $("settingsFormatWidth"), ch = $("settingsFormatHeight");
+  if (cw) cw.value = w; if (ch) ch.value = h;
+  applyPreviewAspect();
+}
+async function applyFormat(w, h) {
+  try {
+    await api("/api/project", { op: "set_format", width: Number(w), height: Number(h) });
+    setStatus(`Đã đổi tỉ lệ thành ${w}×${h}. Các clip hiện có không bị co giãn — tỉ lệ mới áp dụng cho lần xuất tiếp theo.`);
+    await load();
+  } catch (err) { setStatus("Đổi tỉ lệ thất bại: " + err.message, true); }
+}
+function applyPresetValue(value) {
+  if (value === "custom") { setStatus("Chọn kích thước tùy chỉnh trong panel Cài đặt (nút ⚙)."); return; }
+  const [w, h] = value.split("x").map(Number);
+  applyFormat(w, h);
+}
+function baseNameOf(medium) { return medium ? medium.path.split(/[\\/]/).pop() : ""; }
+function showSourcePreview(medium) {
+  previewMode = "source"; previewMediaId = medium.id;
+  const video = $("preview"), img = $("previewImage");
+  $("previewLabel").textContent = `Đang xem: ${baseNameOf(medium)} — bấm ▶ để phát.`;
+  if (medium.kind === "image" || /\.(png|jpe?g|gif|webp|bmp)$/i.test(medium.path)) {
+    img.src = "/api/media/" + encodeURIComponent(medium.id);
+    img.hidden = false; video.hidden = true; video.removeAttribute("src"); video.load();
+  } else {
+    video.src = "/api/media/" + encodeURIComponent(medium.id);
+    video.hidden = false; img.hidden = true;
+  }
+  applyPreviewAspect();
+}
+function loadMediaPreview(mediaId) {
+  const medium = project.media.find((m) => m.id === mediaId);
+  if (!medium) { setStatus("Không tìm thấy media: " + mediaId, true); return; }
+  previewItemId = null;
+  showSourcePreview(medium);
+  setStatus(`Đang xem file gốc: ${baseNameOf(medium)}. Bấm ▶ để phát, hoặc thêm clip vào timeline để dựng.`);
+}
+function loadSourcePreviewForItem(item) {
+  const medium = item.media ? project.media.find((m) => m.id === item.media) : null;
+  if (!medium) return;
+  previewItemId = item.id;
+  showSourcePreview(medium);
+}
+function selectClipAndPreview(itemId) {
+  const found = findItem(itemId);
+  if (!found) return;
+  selectedId = itemId; renderTracks(); renderInspector(); renderKeyframes();
+  loadSourcePreviewForItem(found.item);
+  const tl = document.querySelector(".timeline-wrap");
+  if (tl) tl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function sourceTimeForPlayhead() {
+  // Timeline seconds -> source seconds for the selected clip, or
+  // plain timeline seconds when only a file (no clip) is previewed.
+  const t = playheadFrame / fps();
+  if (previewItemId) {
+    const found = findItem(previewItemId);
+    if (found) {
+      const medium = project.media.find((m) => m.id === found.item.media);
+      const mediaFps = medium && Array.isArray(medium.fps) ? medium.fps[0] / medium.fps[1] : (medium && medium.fps ? medium.fps : fps());
+      const inSec = (found.item.in || 0) / mediaFps;
+      const clipSec = Math.max(0, (playheadFrame - found.item.at) / fps());
+      const src = inSec + clipSec * (found.item.speed || 1);
+      const dur = medium && medium.duration ? medium.duration : Infinity;
+      return Math.max(0, Math.min(src, dur));
+    }
+  }
+  return t;
+}
+function seekPreviewToPlayhead() {
+  $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
+  const video = $("preview");
+  if (previewMode === "source") {
+    if (!video.hidden && video.src && !isNaN(video.duration)) {
+      video.currentTime = Math.min(sourceTimeForPlayhead(), video.duration);
+    }
+    return;
+  }
+  if (video.src && !isNaN(video.duration)) video.currentTime = Math.min(playheadFrame / fps(), video.duration);
+}
+async function fillSettingsInfo() {
+  const pi = $("settingsProjectInfo");
+  if (pi && project) {
+    const clips = project.tracks.reduce((n, t) => n + t.items.length, 0);
+    pi.textContent = `Tên: ${project.name} · Rev: ${project.rev ?? 0} · Khung hình: ${project.format.width}×${project.format.height} · FPS: ${fps().toFixed(2)} · ${project.tracks.length} track · ${clips} clip · ${project.media.length} file media`;
+  }
+  const ei = $("settingsEnvInfo");
+  if (ei && !ei.dataset.loaded) {
+    try {
+      const info = await api("/api/info");
+      ei.textContent = `Python ${info.python} · FFmpeg: ${info.ffmpeg} · FFprobe: ${info.ffprobe} · Thư mục project: ${info.project_dir}`;
+      ei.dataset.loaded = "1";
+    } catch (err) { ei.textContent = "Không lấy được thông tin môi trường: " + err.message; }
+  }
+}
+function applyAgentCollapsePref() {
+  const dock = $("agentDock"), box = $("settingsAgentCollapsed");
+  if (!dock) return;
+  const collapsed = localStorage.getItem("vibeedit_agent_collapsed") === "1";
+  dock.hidden = collapsed;
+  if (box) box.checked = collapsed;
+}
+
 $("ruler").addEventListener("click", (e) => {
   const rect = $("ruler").getBoundingClientRect();
   playheadFrame = Math.max(0, Math.round(((e.clientX - rect.left) / pxPerSec) * fps()));
-  $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
-  const video = $("preview");
-  if (video.src && !isNaN(video.duration)) video.currentTime = Math.min(playheadFrame / fps(), video.duration);
+  seekPreviewToPlayhead();
   renderTracks();
 });
 $("zoom").addEventListener("input", (e) => {
@@ -272,10 +404,13 @@ $("btnExportFull").addEventListener("click", () => doExport("full"));
 $("addClipForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    await api("/api/project", { op: "add_clip", media: $("addMedia").value, track: $("addTrack").value,
+    const data = await api("/api/project", { op: "add_clip", media: $("addMedia").value, track: $("addTrack").value,
       at: Number($("addAt").value), in: Number($("addIn").value),
       dur: $("addDur").value ? Number($("addDur").value) : null, speed: Number($("addSpeed").value) });
-    setStatus("Clip added."); await load();
+    await load();
+    const newId = data.result && data.result.id;
+    if (newId) { selectClipAndPreview(newId); setStatus("Clip đã thêm — đang xem file gốc của clip, bấm ▶ để phát."); }
+    else setStatus("Clip added.");
   } catch (err) { setStatus(err.message, true); }
 });
 $("addTextForm").addEventListener("submit", async (e) => {
@@ -367,7 +502,7 @@ $("uploadForm").addEventListener("submit", async (e) => {
   const res = await fetch("/api/media/upload", { method: "POST", body: fd });
   const data = await res.json();
   if (!res.ok) setStatus(data.error, true);
-  else { setStatus("Uploaded: " + data.media.path); await load(); }
+  else { await load(); loadMediaPreview(data.media.id); setStatus("Đã tải lên: " + data.media.path + " — đang xem file gốc, bấm ▶ để phát."); }
 });
 
 load().catch((err) => setStatus("Failed to load project: " + err.message, true));
@@ -717,11 +852,17 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (cmpBtn) cmpBtn.addEventListener("click", () => setStatus("Compare view is not available yet — the preview shows the latest export only.", true));
   const playBtn = $("btnPreviewPlay"), backBtn = $("btnPreviewBack");
   if (playBtn) playBtn.addEventListener("click", () => {
-    const v = $("preview"); if (!v || !v.src) { setStatus("No preview yet — export a draft first.", true); return; }
+    const img = $("previewImage");
+    if (img && !img.hidden) { setStatus("Đây là ảnh tĩnh — chỉ xem, không phát được.", true); return; }
+    const v = $("preview"); if (!v || !v.src) { setStatus("Chưa có gì để phát — bấm vào một clip/media, hoặc xuất bản nháp trước.", true); return; }
     if (v.paused) v.play(); else v.pause();
   });
   if (backBtn) backBtn.addEventListener("click", () => {
-    const v = $("preview"); if (v) { v.currentTime = 0; playheadFrame = 0; renderTracks(); }
+    if (previewMode === "source" && previewItemId) {
+      const found = findItem(previewItemId);
+      if (found) playheadFrame = found.item.at;
+    } else playheadFrame = 0;
+    seekPreviewToPlayhead(); renderTracks();
   });
 
   // Timeline toolbar: Add Layer, Sections, Ask agent, Export report
@@ -743,5 +884,37 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
     const r = $("btnReview"); if (r) r.click();
     setStatus("Export report refreshed (Review panel).");
+  });
+})();
+
+/* Finishing batch wiring: ratio pickers, Settings gear, source
+   playback controls. Guarded lookups only — a missing element
+   never breaks the editor above. */
+(function finishBatchWiring() {
+  const preset = $("formatPreset");
+  if (preset) preset.addEventListener("change", () => applyPresetValue(preset.value));
+  const sPreset = $("settingsFormatPreset");
+  if (sPreset) sPreset.addEventListener("change", () => applyPresetValue(sPreset.value));
+  const customBtn = $("btnFormatCustom");
+  if (customBtn) customBtn.addEventListener("click", () => applyFormat($("settingsFormatWidth").value, $("settingsFormatHeight").value));
+  const panel = $("settingsPanel");
+  const gear = $("btnSettings"), close = $("btnSettingsClose");
+  if (gear && panel) gear.addEventListener("click", () => { panel.hidden = !panel.hidden; if (!panel.hidden) fillSettingsInfo(); });
+  if (close && panel) close.addEventListener("click", () => { panel.hidden = true; });
+  const fitBtn = $("btnSettingsFit"), realFit = $("btnPreviewFit");
+  if (fitBtn && realFit) fitBtn.addEventListener("click", () => realFit.click());
+  const safeBtn = $("btnSettingsSafe"), realSafe = $("btnPreviewSafe");
+  if (safeBtn && realSafe) safeBtn.addEventListener("click", () => realSafe.click());
+  const collapseBox = $("settingsAgentCollapsed");
+  if (collapseBox) collapseBox.addEventListener("change", () => {
+    localStorage.setItem("vibeedit_agent_collapsed", collapseBox.checked ? "1" : "0");
+    applyAgentCollapsePref();
+  });
+  applyAgentCollapsePref();
+  const expBtn = $("btnPreviewExport");
+  if (expBtn) expBtn.addEventListener("click", async () => {
+    previewMode = "export"; previewMediaId = null; previewItemId = null;
+    await load();
+    setStatus("Đang xem: bản xuất gần nhất. Muốn xem file gốc thì bấm vào clip hoặc file media.");
   });
 })();
