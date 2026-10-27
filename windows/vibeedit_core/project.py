@@ -50,7 +50,21 @@ LEGACY_PROJECT_FILENAME = "project.bashcut.json"
 # dissolve, wipe, wipe-right, wipe-up, wipe-down, slide and slide-up;
 # those are accepted as aliases and stored verbatim.
 TRANSITION_XFADE = {
-    "dissolve": "fade", "crossfade": "fade", "fade": "fade",
+    # Code-gap batch 2: "dissolve" now maps to FFmpeg's literal
+    # dissolve xfade (it used to map to fade; both render, dissolve
+    # is the original's own kind). New original kinds below map to
+    # the nearest real xfade, in the same honest-equivalent style
+    # as whip->wind: shutter squeezes horizontally (squeezeh),
+    # crash/seamless/infinite zoom are zoom-in, blink/flash are a
+    # white flash (fadewhite). Motion-only kinds (spin, roll with
+    # rotation, swing/arc, diamond, kaleidoscope, crash-out,
+    # infinite-out) have no xfade and still error, never substitute.
+    "dissolve": "dissolve", "crossfade": "fade", "fade": "fade",
+    "shutter": "squeezeh", "double-exposure": "dissolve",
+    "seamless-zoom": "zoomin", "infinite-zoom": "zoomin",
+    "crash-zoom": "zoomin", "blur": "hblur",
+    "flash": "fadewhite", "blink": "fadewhite",
+    "roll": "slideright", "roll-right": "slideright",
     "wipe": "wiperight", "wipe-left": "wipeleft", "wipe-right": "wiperight",
     "wipe-up": "wipeup", "wipe-down": "wipedown",
     "wipe-tl": "wipetl", "wipe-tr": "wipetr",
@@ -931,6 +945,264 @@ class Project:
         track["items"].sort(key=lambda i: i["at"])
         self._bump()
         return {"track": track_id, "moved": moved}
+
+    # -- Code-gap batch 2: speed curves, reverse, freeze --------------
+    # Speed-curve presets copied verbatim from the original's
+    # SpeedCurve.swift presets: (t, speed) control points, t in 0..1.
+    SPEED_CURVE_PRESETS = {
+        "montage": [(0, 1), (0.2, 2.5), (0.5, 0.6), (0.8, 2.5), (1, 1)],
+        "hero": [(0, 2), (0.35, 2), (0.5, 0.3), (0.65, 2), (1, 2)],
+        "bullet": [(0, 2.5), (0.4, 0.25), (0.6, 0.25), (1, 2.5)],
+        "jump-cut": [(0, 1), (0.4, 1), (0.5, 5), (0.6, 1), (1, 1)],
+        "flash-in": [(0, 5), (0.3, 1), (1, 1)],
+        "flash-out": [(0, 1), (0.7, 1), (1, 5)],
+    }
+
+    @staticmethod
+    def _curve_speed(points, t: float) -> float:
+        """Linear interpolation of a speed curve at fraction t."""
+        if t <= points[0][0]:
+            return float(points[0][1])
+        for (t0, v0), (t1, v1) in zip(points, points[1:]):
+            if t <= t1:
+                if t1 == t0:
+                    return float(v1)
+                return float(v0 + (v1 - v0) * (t - t0) / (t1 - t0))
+        return float(points[-1][1])
+
+    def apply_speed_curve(self, item_id: str, preset: str) -> dict:
+        """Apply an original speed-curve preset to a clip.
+
+        The clip keeps its total timeline length; it is split at the
+        preset's control-point fractions and each segment gets the
+        curve's speed at that segment's midpoint. Splits happen
+        first (at the original speed) so source offsets stay correct,
+        then speeds are set per segment. Each segment records the
+        preset id in ``speedCurve``. Only media clips (not text).
+        """
+        if preset not in self.SPEED_CURVE_PRESETS:
+            raise ValueError(
+                f"Unknown speed-curve preset: {preset!r} "
+                f"(choose one of {', '.join(sorted(self.SPEED_CURVE_PRESETS))})")
+        track, item = self.item(item_id)
+        if "media" not in item:
+            raise ValueError("Speed curves apply to media clips only")
+        points = self.SPEED_CURVE_PRESETS[preset]
+        start, dur = int(item["at"]), int(item["dur"])
+        if dur <= 0:
+            raise ValueError("Clip duration must be positive")
+        bounds = []
+        for t, _ in points[1:-1]:
+            at = start + int(round(dur * t))
+            if start < at < start + dur:
+                bounds.append(at)
+        bounds = sorted(set(bounds))
+        # Split from the right so earlier ids/boundaries stay valid.
+        segment_ids = [item["id"]]
+        for at in reversed(bounds):
+            right = self.split(item["id"], at)
+            segment_ids.insert(1, right["id"])
+        # Segments are now in timeline order on the same track.
+        segments = []
+        for seg_id in segment_ids:
+            _, seg = self.item(seg_id)
+            segments.append(seg)
+        segments.sort(key=lambda i: i["at"])
+        for seg in segments:
+            mid = (int(seg["at"]) - start + int(seg["dur"]) / 2) / dur
+            seg["speed"] = self._curve_speed(points, mid)
+            seg["speedCurve"] = preset
+        self._bump()
+        return {"item": item_id, "preset": preset,
+                "segments": [s["id"] for s in segments],
+                "speeds": [s["speed"] for s in segments]}
+
+    def set_reverse(self, item_id: str, reverse: bool = True) -> dict:
+        """Flag a media clip to play backwards (FFmpeg reverse/areverse
+        in the render chain). The flag is data, not a render trick:
+        clearing it restores forward playback."""
+        _, item = self.item(item_id)
+        if "media" not in item:
+            raise ValueError("Reverse applies to media clips only")
+        item["reverse"] = bool(reverse)
+        self._bump()
+        return item
+
+    def freeze_clip(self, item_id: str, extra_frames: int) -> dict:
+        """Append a freeze-frame segment after a media clip: a new clip
+        on the same track, at the end of the source clip, flagged
+        ``freeze`` so the render chain holds its first source frame
+        for the whole segment (audio is silence for that segment).
+        The new clip's ``in`` points at the source clip's last frame.
+        """
+        track, item = self.item(item_id)
+        if "media" not in item:
+            raise ValueError("Freeze applies to media clips only")
+        extra_frames = int(extra_frames)
+        if extra_frames <= 0:
+            raise ValueError("Freeze length must be positive frames")
+        try:
+            media_fps = fps_value(self.media(item["media"]).get(
+                "fps", self.fps))
+        except KeyError:
+            media_fps = fps_value(self.fps)
+        last_in = int(item.get("in", 0)) + int(round(
+            int(item["dur"]) / fps_value(self.fps)
+            * float(item.get("speed", 1.0)) * media_fps)) - 1
+        frozen = copy.deepcopy(item)
+        frozen["id"] = _new_id("c")
+        frozen["at"] = int(item["at"]) + int(item["dur"])
+        frozen["dur"] = extra_frames
+        frozen["in"] = max(0, last_in)
+        frozen["freeze"] = True
+        frozen["speed"] = 1.0
+        self._check_overlap(track, frozen)
+        track["items"].append(frozen)
+        track["items"].sort(key=lambda i: i["at"])
+        self._bump()
+        return frozen
+
+    # -- Code-gap batch 2: review workflow ----------------------------
+    def run_review(self) -> dict:
+        """Run a review: validation + stats + skipped/warnings are
+        already real project data (see validate()/project_stats());
+        this stores the run in data['review'] with its issue count so
+        accept/verify can compare against it. No verdict is invented:
+        issues are exactly the validation errors/warnings."""
+        validation = self.validate()
+        issues = list(validation.get("errors", [])) + [
+            str(w) for w in validation.get("warnings", [])]
+        review = {
+            "status": "run",
+            "issues": issues,
+            "issue_count": len(issues),
+            "stats": self.project_stats(),
+            "rev": self.rev,
+        }
+        self.data["review"] = review
+        self._bump()
+        return review
+
+    def accept_review(self) -> dict:
+        """Accept the last review run: records the reviewed rev and
+        marks status accepted. Requires a prior run_review call."""
+        review = self.data.get("review")
+        if not review or review.get("status") not in ("run", "verified"):
+            raise ValueError("Run a review before accepting it")
+        review["status"] = "accepted"
+        review["accepted_rev"] = self.rev
+        self._bump()
+        return review
+
+    def verify_review(self) -> dict:
+        """Re-run validation and compare issue counts with the last
+        review run. Returns the new count, the old count and whether
+        the count changed; status becomes verified. Never invents a
+        pass/fail verdict beyond the counts."""
+        old = self.data.get("review")
+        if not old:
+            raise ValueError("Run a review before verifying it")
+        fresh = self.run_review()
+        fresh["status"] = "verified"
+        fresh["previous_issue_count"] = old.get("issue_count")
+        fresh["issue_count_changed"] = (
+            fresh["issue_count"] != old.get("issue_count"))
+        self.data["review"] = fresh
+        self._bump()
+        return fresh
+
+    # -- Code-gap batch 2: library + brand ----------------------------
+    def library_add(self, item_id: str, name: str = "") -> dict:
+        """Save a clip/text item as a library item (a copy of its
+        data, stored in data['library']). Library items are data
+        only; placing one re-creates a real clip (see library_place).
+        """
+        _, item = self.item(item_id)
+        entry = {"id": _new_id("lib"), "name": name.strip() or
+                 item.get("text") or item.get("media") or item["id"],
+                 "item": copy.deepcopy(item)}
+        self.data.setdefault("library", []).append(entry)
+        self._bump()
+        return entry
+
+    def library_list(self) -> list[dict]:
+        return copy.deepcopy(self.data.get("library", []))
+
+    def library_remove(self, entry_id: str) -> dict:
+        before = len(self.data.get("library", []))
+        self.data["library"] = [e for e in self.data.get("library", [])
+                                if e["id"] != entry_id]
+        if len(self.data["library"]) == before:
+            raise KeyError(f"Unknown library item: {entry_id}")
+        self._bump()
+        return {"deleted": entry_id}
+
+    def library_place(self, entry_id: str, track_id: str | None = None,
+                      at: int | None = None) -> dict:
+        """Place a library item onto the timeline at a free position
+        (playhead-equivalent: ``at`` if given and free, else the end
+        of the target track). Media items become real clips; text
+        items become real text items. The library entry is kept."""
+        entry = next((e for e in self.data.get("library", [])
+                      if e["id"] == entry_id), None)
+        if entry is None:
+            raise KeyError(f"Unknown library item: {entry_id}")
+        src = entry["item"]
+        if "media" in src:
+            if track_id is None:
+                track_id = next(
+                    (t["id"] for t in self.data["tracks"]
+                     if t["kind"] == "video"
+                     and t.get("role") == "main"),
+                    self.data["tracks"][0]["id"])
+            track = self.track(track_id)
+            if at is None:
+                at = max([i["at"] + i["dur"] for i in track["items"]],
+                         default=0)
+            return self.add_clip(src["media"], track_id, int(at),
+                                 int(src.get("in", 0)),
+                                 int(src["dur"]),
+                                 float(src.get("speed", 1.0)))
+        if track_id is None:
+            track_id = next(
+                (t["id"] for t in self.data["tracks"]
+                 if t["kind"] == "text"),
+                self.data["tracks"][0]["id"])
+        track = self.track(track_id)
+        if at is None:
+            at = max([i["at"] + i["dur"] for i in track["items"]],
+                     default=0)
+        return self.add_text(track_id, src.get("text", ""),
+                             int(at), int(src["dur"]))
+
+    def brand_set(self, colours: list | None = None,
+                  logo_media: str | None = None) -> dict:
+        """Store a brand kit: brand colours (hex strings) and an
+        optional logo media id (which must be a real project media
+        entry). Colours are stored as data; they do not invent a
+        brand-pose engine — the UI reuses them as text/overlay
+        colour suggestions."""
+        brand = dict(self.data.get("brand") or {})
+        if colours is not None:
+            if not isinstance(colours, list):
+                raise ValueError("Brand colours must be a list")
+            for c in colours:
+                if not isinstance(c, str) or not c.startswith("#"):
+                    raise ValueError(
+                        f"Brand colour must be a hex string: {c!r}")
+            brand["colours"] = list(colours)
+        if logo_media is not None:
+            if logo_media == "":
+                brand.pop("logo_media", None)
+            else:
+                self.media(logo_media)  # raises if unknown
+                brand["logo_media"] = logo_media
+        self.data["brand"] = brand
+        self._bump()
+        return brand
+
+    def brand_get(self) -> dict:
+        return copy.deepcopy(self.data.get("brand") or {})
 
     def rename_track(self, track_id: str, name: str) -> dict:
         """Rename a track (name only; id, kind and role unchanged)."""

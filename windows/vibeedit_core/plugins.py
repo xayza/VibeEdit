@@ -81,6 +81,67 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
     return plugins
 
 
+def _state_path(plugins_dir: str | None = None) -> str:
+    """plugins.json next to the plugins/ folder (windows/plugins.json
+    in a source checkout). Stores enable/disable state only — never
+    plugin code or project data."""
+    folder = plugins_dir or PLUGINS_DIR
+    return os.path.join(os.path.dirname(os.path.abspath(folder)),
+                        "plugins.json")
+
+
+def load_plugin_state(plugins_dir: str | None = None) -> dict:
+    try:
+        import json as _json
+        with open(_state_path(plugins_dir), encoding="utf-8") as fh:
+            data = _json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def set_plugin_enabled(name: str, enabled: bool,
+                       plugins_dir: str | None = None) -> dict:
+    """Enable/disable a plugin by name. The name must be a discovered
+    plugin (unknown names error, never silently create an entry)."""
+    plugins = load_plugins(plugins_dir)
+    if name not in plugins:
+        raise KeyError(f"Unknown plugin: {name!r}")
+    import json as _json
+    state = load_plugin_state(plugins_dir)
+    disabled = set(state.get("disabled", []))
+    if enabled:
+        disabled.discard(name)
+    else:
+        disabled.add(name)
+    state["disabled"] = sorted(disabled)
+    path = _state_path(plugins_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        _json.dump(state, fh, indent=2, sort_keys=True)
+    return {"plugin": name, "enabled": enabled}
+
+
+def list_plugins(plugins_dir: str | None = None) -> list[dict]:
+    """Discovered plugins with enable state. Disabled plugins are
+    listed but never run (apply_plugin refuses them). Re-scanning
+    the folder is the reload: load_plugins() imports fresh each call."""
+    plugins = load_plugins(plugins_dir)
+    disabled = set(load_plugin_state(plugins_dir).get("disabled", []))
+    out = []
+    for name, info in sorted(plugins.items()):
+        if name.startswith("_"):
+            continue
+        hooks = sorted(k for k, v in info.items() if callable(v))
+        out.append({"name": name, "description": info.get("description", ""),
+                    "hooks": hooks, "enabled": name not in disabled})
+    errors = plugins.get("_errors", {})
+    if errors:
+        out.append({"name": "_errors", "description": "",
+                    "hooks": [], "enabled": False, "errors": errors})
+    return out
+
+
 def apply_plugin(project, plugin_name: str, hook: str,
                  item_id: str, plugins_dir: str | None = None) -> dict:
     """Run one plugin hook on one item. Returns the updated item."""
@@ -89,6 +150,8 @@ def apply_plugin(project, plugin_name: str, hook: str,
         raise KeyError(
             f"Unknown plugin: {plugin_name!r} "
             f"(available: {', '.join(sorted(k for k in plugins if not k.startswith('_')))})")
+    if plugin_name in set(load_plugin_state(plugins_dir).get("disabled", [])):
+        raise ValueError(f"Plugin {plugin_name!r} is disabled; enable it first")
     info = plugins[plugin_name]
     fn = info.get(hook)
     if not callable(fn):

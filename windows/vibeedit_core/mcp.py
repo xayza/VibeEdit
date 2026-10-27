@@ -283,6 +283,52 @@ TOOLS = [
      "description": "Count clips per track and in total."},
     {"name": "vibeedit_source_overwrite",
      "description": "Overwrite the timeline at a frame with a marked source range (original Q)."},
+    # Code-gap batch 2 tools — each calls a real Project/server
+    # operation below; none returns canned data.
+    {"name": "vibeedit_timeline_redo",
+     "description": "Redo the last undone edit (one step, from the .redo file written by undo)."},
+    # NOTE: vibeedit_marker_move and vibeedit_ducking_get already exist
+    # in this list from earlier batches; they are not re-listed here.
+    {"name": "vibeedit_adjustments_list",
+     "description": "List the project's adjustment layers."},
+    {"name": "vibeedit_beats_list",
+     "description": "List detected beat times in seconds."},
+    {"name": "vibeedit_track_get",
+     "description": "Read one track by id."},
+    {"name": "vibeedit_media_get",
+     "description": "Read one media entry by id."},
+    {"name": "vibeedit_speed_curve_apply",
+     "description": "Apply an original speed-curve preset (montage/hero/bullet/jump-cut/flash-in/flash-out) to a clip."},
+    {"name": "vibeedit_clip_reverse",
+     "description": "Flag a clip to play backwards (or clear the flag)."},
+    {"name": "vibeedit_clip_freeze",
+     "description": "Append a freeze-frame segment after a clip."},
+    {"name": "vibeedit_review_run",
+     "description": "Run a review (validation + stats) and store it on the project."},
+    {"name": "vibeedit_review_accept",
+     "description": "Accept the last review run."},
+    {"name": "vibeedit_review_verify",
+     "description": "Re-run validation and compare issue counts with the last review."},
+    {"name": "vibeedit_library_add",
+     "description": "Save a clip/text item as a library item."},
+    {"name": "vibeedit_library_list",
+     "description": "List library items."},
+    {"name": "vibeedit_library_place",
+     "description": "Place a library item onto the timeline."},
+    {"name": "vibeedit_library_remove",
+     "description": "Remove a library item (data only, timeline untouched)."},
+    {"name": "vibeedit_brand_set",
+     "description": "Store brand colours and/or a logo media id on the project."},
+    {"name": "vibeedit_brand_get",
+     "description": "Read the project's brand kit."},
+    {"name": "vibeedit_export_preset",
+     "description": "Export with an original ExportPreset (youtube-1080, youtube-4k, prores, tiktok, feed-4x5, square, portrait-3x4, quick-draft)."},
+    {"name": "vibeedit_plugin_list",
+     "description": "List discovered plugins with enable state."},
+    {"name": "vibeedit_plugin_enable",
+     "description": "Enable a plugin by name."},
+    {"name": "vibeedit_plugin_disable",
+     "description": "Disable a plugin by name (listed, never run)."},
 ]
 
 
@@ -333,16 +379,121 @@ class MCPServer:
             return {"media": self._require().data["media"]}
         if name == "vibeedit_timeline_undo":
             import os
+            import shutil
             if self.path is None:
                 raise RuntimeError("No project open")
             bak = self.path + ".bak"
             if not os.path.isfile(bak):
                 raise RuntimeError("Nothing to undo (no backup file)")
+            # Save the pre-undo state so redo can restore it.
+            shutil.copyfile(self.path, self.path + ".redo")
             data = load_project(bak)
             assert self.project is not None
             self.project.restore(data)
             self._save()
             return {"rev": self.project.rev}
+        if name == "vibeedit_timeline_redo":
+            import os
+            if self.path is None:
+                raise RuntimeError("No project open")
+            redo = self.path + ".redo"
+            if not os.path.isfile(redo):
+                raise RuntimeError(
+                    "Nothing to redo (undo first; redo restores the "
+                    "state saved at undo time)")
+            data = load_project(redo)
+            assert self.project is not None
+            self.project.restore(data)
+            self._save()
+            return {"rev": self.project.rev}
+        if name == "vibeedit_adjustments_list":
+            return {"adjustments": self._require().list_adjustments()}
+        if name == "vibeedit_beats_list":
+            return {"beats": self._require().beat_list()}
+        if name == "vibeedit_track_get":
+            return {"track": self._require().track(args["track"])}
+        if name == "vibeedit_media_get":
+            return {"media": self._require().media(args["media"])}
+        if name == "vibeedit_speed_curve_apply":
+            proj = self._require()
+            result = proj.apply_speed_curve(args["item"], args["preset"])
+            self._save()
+            return result
+        if name == "vibeedit_clip_reverse":
+            proj = self._require()
+            result = proj.set_reverse(args["item"],
+                                      bool(args.get("reverse", True)))
+            self._save()
+            return result
+        if name == "vibeedit_clip_freeze":
+            proj = self._require()
+            result = proj.freeze_clip(args["item"],
+                                      int(args.get("frames", 30)))
+            self._save()
+            return result
+        if name == "vibeedit_review_run":
+            proj = self._require()
+            result = proj.run_review()
+            self._save()
+            return result
+        if name == "vibeedit_review_accept":
+            proj = self._require()
+            result = proj.accept_review()
+            self._save()
+            return result
+        if name == "vibeedit_review_verify":
+            proj = self._require()
+            result = proj.verify_review()
+            self._save()
+            return result
+        if name == "vibeedit_library_add":
+            proj = self._require()
+            result = proj.library_add(args["item"], args.get("name", ""))
+            self._save()
+            return result
+        if name == "vibeedit_library_list":
+            return {"items": self._require().library_list()}
+        if name == "vibeedit_library_place":
+            proj = self._require()
+            result = proj.library_place(
+                args["entry"], args.get("track"),
+                int(args["at"]) if args.get("at") is not None else None)
+            self._save()
+            return result
+        if name == "vibeedit_library_remove":
+            proj = self._require()
+            result = proj.library_remove(args["entry"])
+            self._save()
+            return result
+        if name == "vibeedit_brand_set":
+            proj = self._require()
+            result = proj.brand_set(args.get("colours"),
+                                    args.get("logo_media"))
+            self._save()
+            return result
+        if name == "vibeedit_brand_get":
+            return self._require().brand_get()
+        if name == "vibeedit_export_preset":
+            from .render import render, export_preset_info
+            import os
+            proj = self._require()
+            info = export_preset_info(
+                args["preset"], proj.width(), proj.height())
+            out = os.path.join(proj.folder, "render",
+                               f"export-{args['preset']}.{info['ext']}")
+            report = render(proj.data, proj.folder, out, preset="full",
+                            export_preset=args["preset"])
+            self.last_export = report
+            return report
+        if name == "vibeedit_plugin_list":
+            from .plugins import list_plugins
+            return {"plugins": list_plugins()}
+        if name == "vibeedit_plugin_enable":
+            from .plugins import set_plugin_enabled
+            return set_plugin_enabled(args["plugin"], True)
+        if name == "vibeedit_plugin_disable":
+            from .plugins import set_plugin_enabled
+            return set_plugin_enabled(args["plugin"], False)
         if name == "vibeedit_project_create":
             from .project import new_project
             import os

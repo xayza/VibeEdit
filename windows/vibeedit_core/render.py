@@ -373,12 +373,86 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
     return filters
 
 
+# Code-gap batch 2: export presets from the original's
+# ExportPreset.swift (sizes/bitrates verbatim; ProRes uses FFmpeg
+# prores_ks in a .mov container). ``size`` None = project size
+# (proRes) or the original's quickDraft rule (720p-ish). Unknown
+# preset names are a hard error, never a silent H.264 fallback.
+EXPORT_PRESETS = {
+    "tiktok": {"width": 1080, "height": 1920, "bitrate": 8_000_000,
+               "codec": "libx264", "ext": "mp4"},
+    "reels": {"width": 1080, "height": 1920, "bitrate": 8_000_000,
+              "codec": "libx264", "ext": "mp4"},
+    "shorts": {"width": 1080, "height": 1920, "bitrate": 8_000_000,
+               "codec": "libx264", "ext": "mp4"},
+    "feed4x5": {"width": 1080, "height": 1350, "bitrate": 5_000_000,
+                "codec": "libx264", "ext": "mp4"},
+    "square": {"width": 1080, "height": 1080, "bitrate": 8_000_000,
+               "codec": "libx264", "ext": "mp4"},
+    "portrait3x4": {"width": 1080, "height": 1440, "bitrate": 8_000_000,
+                    "codec": "libx264", "ext": "mp4"},
+    "youtube1080": {"width": 1920, "height": 1080, "bitrate": 12_000_000,
+                    "codec": "libx264", "ext": "mp4"},
+    "youtube4k": {"width": 3840, "height": 2160, "bitrate": 45_000_000,
+                  "codec": "libx264", "ext": "mp4"},
+    "quickdraft": {"width": None, "height": None, "bitrate": 4_000_000,
+                   "codec": "libx264", "ext": "mp4"},
+    "prores": {"width": None, "height": None, "bitrate": None,
+               "codec": "prores_ks", "ext": "mov"},
+    "prores422hq": {"width": None, "height": None, "bitrate": None,
+                    "codec": "prores_ks", "ext": "mov"},
+}
+
+
+def export_preset_info(name: str, project_width: int,
+                       project_height: int) -> dict:
+    """Resolve an export preset name to concrete parameters. Aliases
+    follow the original's ExportPreset.aliases (e.g. youtube-1080,
+    youtube-4k, prores-422-hq, draft)."""
+    key = (name or "").lower().replace("_", "-")
+    aliases = {"tiktok-9x16": "tiktok", "instagram-reels": "reels",
+               "youtube-shorts": "shorts", "feed-4x5": "feed4x5",
+               "4x5": "feed4x5", "instagram-feed": "feed4x5",
+               "1x1": "square", "feed-1x1": "square",
+               "portrait-3x4": "portrait3x4", "3x4": "portrait3x4",
+               "xiaohongshu": "portrait3x4", "youtube-1080": "youtube1080",
+               "youtube-1080p": "youtube1080", "youtube-4k": "youtube4k",
+               "quick-draft": "quickdraft", "draft": "quickdraft",
+               "720p": "quickdraft", "prores-422-hq": "prores",
+               "prores": "prores"}
+    key = aliases.get(key, key)
+    if key not in EXPORT_PRESETS:
+        raise ValueError(
+            f"Unknown export preset: {name!r} "
+            f"(choose one of {', '.join(sorted(EXPORT_PRESETS))})")
+    info = dict(EXPORT_PRESETS[key])
+    if info["width"] is None:
+        if key == "quickdraft":
+            if project_width == project_height:
+                info["width"], info["height"] = 720, 720
+            elif project_width >= project_height:
+                info["width"] = 1280
+                info["height"] = max(2, 1280 * project_height
+                                     // project_width // 2 * 2)
+            else:
+                info["width"] = max(2, 1280 * project_width
+                                    // project_height // 2 * 2)
+                info["height"] = 1280
+        else:
+            info["width"], info["height"] = project_width, project_height
+    return info
+
+
 def render(project: dict, folder: str, output: str, preset: str = "full",
-           normalize_audio: bool = False, ducking: bool | None = None) -> dict:
+           normalize_audio: bool = False, ducking: bool | None = None,
+           export_preset: str | None = None) -> dict:
     """Render the project with FFmpeg. Returns a report dict.
 
     ``preset``: "full" (project resolution, fast preset) or "draft"
     (half resolution, veryfast preset, higher CRF).
+    ``export_preset``: an original ExportPreset name (see
+    EXPORT_PRESETS) overriding resolution/codec/bitrate/container;
+    unknown names raise, never fall back silently.
     ``normalize_audio``: single-pass EBU R128 loudnorm (I=-16, TP=-1.5,
     LRA=11) applied to the final mixed audio.
     ``ducking``: None = use the project's audio.ducking setting;
@@ -388,7 +462,8 @@ def render(project: dict, folder: str, output: str, preset: str = "full",
     lut_dir = tempfile.mkdtemp(prefix="vibeedit-lut-")
     try:
         return _render_inner(project, folder, output, preset,
-                             normalize_audio, lut_dir, ducking)
+                             normalize_audio, lut_dir, ducking,
+                             export_preset)
     finally:
         import shutil
         shutil.rmtree(lut_dir, ignore_errors=True)
@@ -396,7 +471,8 @@ def render(project: dict, folder: str, output: str, preset: str = "full",
 
 def _render_inner(project: dict, folder: str, output: str, preset: str,
                   normalize_audio: bool, lut_dir: str,
-                  ducking_override: bool | None = None) -> dict:
+                  ducking_override: bool | None = None,
+                  export_preset: str | None = None) -> dict:
     fmt = project["format"]
     width, height = int(fmt["width"]), int(fmt["height"])
     fps = fps_value(fmt["fps"])
@@ -406,6 +482,16 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         ff_preset, crf = "veryfast", "28"
     else:
         out_w, out_h, ff_preset, crf = width, height, "fast", "20"
+    # Code-gap batch 2: export presets override resolution/codec.
+    preset_info = None
+    video_codec, video_bitrate = "libx264", None
+    if export_preset:
+        preset_info = export_preset_info(export_preset, width, height)
+        out_w, out_h = preset_info["width"], preset_info["height"]
+        video_codec = preset_info["codec"]
+        video_bitrate = preset_info["bitrate"]
+        if video_codec == "prores_ks":
+            ff_preset, crf = None, None
 
     def media_path(item_media: str) -> str:
         for medium in project["media"]:
@@ -641,6 +727,31 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             filter_parts.append(
                 f"[{idx}:v]{','.join(img_filters)}[{label}]")
             return label, dur_s
+        if item.get("freeze"):
+            # Code-gap batch 2: hold the clip's first source frame
+            # (freeze_clip points ``in`` at the source clip's last
+            # frame) for the whole segment. Motion/tilt are not
+            # applied to a held frame; colour and fades still are.
+            frame_dur = 1.0 / media_fps(medium)
+            fscale = (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+                      f"crop={out_w}:{out_h}")
+            ffilters = [f"trim=start={src_s:.3f}:end={src_s + frame_dur:.3f}",
+                        "setpts=PTS-STARTPTS",
+                        "loop=loop=-1:size=1:start=0",
+                        f"trim=end={dur_s:.3f}",
+                        "setpts=PTS-STARTPTS",
+                        fscale]
+            ffilters.extend(_color_filters(item, lut_dir))
+            ffilters.append(f"fps={fps_str}")
+            ffilters.append("format=yuv420p")
+            if fade_in > 0:
+                ffilters.append(
+                    f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
+            if fade_out > 0:
+                ffilters.append(
+                    f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:d={min(fade_out, dur_s):.3f}")
+            filter_parts.append(f"[{idx}:v]{','.join(ffilters)}[{label}]")
+            return label, dur_s
         zoom = 1.0
         transform = item.get("transform") or {}
         if isinstance(transform, dict) and transform.get("zoom"):
@@ -656,6 +767,10 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                     "setpts=PTS-STARTPTS"]
         if speed != 1.0:
             vfilters.append(f"setpts=PTS/{speed:.4f}")
+        if item.get("reverse"):
+            # Code-gap batch 2: play the trimmed range backwards.
+            vfilters.append("reverse")
+            vfilters.append("setpts=PTS-STARTPTS")
         vfilters.append(scale)
         vfilters.extend(_color_filters(item, lut_dir))
         motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
@@ -747,6 +862,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             filter_parts.append(
                 f"anullsrc=r=48000:cl=stereo:d={dur_s:.3f}[{label}]")
             return label, dur_s
+        if item.get("freeze"):
+            # A held frame has no source audio; silence for the segment.
+            filter_parts.append(
+                f"anullsrc=r=48000:cl=stereo:d={dur_s:.3f}[{label}]")
+            return label, dur_s
         src = media_path(item["media"])
         idx = add_input(src)
         src_s = item.get("in", 0) / media_fps(medium)
@@ -755,6 +875,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                     "asetpts=PTS-STARTPTS"]
         if speed != 1.0:
             afilters.append(_atempo_chain(speed))
+        if item.get("reverse"):
+            afilters.append("areverse")
+            afilters.append("asetpts=PTS-STARTPTS")
         fade_in = 0.0 if skip_fade_in else float(item.get("fadeIn", 0) or 0)
         fade_out = 0.0 if skip_fade_out else float(item.get("fadeOut", 0) or 0)
         _afade(afilters, dur_s, fade_in, fade_out)
@@ -975,6 +1098,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                                 "setpts=PTS-STARTPTS"]
                     if speed != 1.0:
                         ofilters.append(f"setpts=PTS/{speed:.4f}")
+                    if item.get("reverse"):
+                        ofilters.append("reverse")
+                        ofilters.append("setpts=PTS-STARTPTS")
                     if scale_pts:
                         sexpr = _piecewise_expr(
                             [(t - b0, v) for t, v in scale_pts
@@ -1010,6 +1136,9 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                             "setpts=PTS-STARTPTS"]
                 if speed != 1.0:
                     ofilters.append(f"setpts=PTS/{speed:.4f}")
+                if item.get("reverse"):
+                    ofilters.append("reverse")
+                    ofilters.append("setpts=PTS-STARTPTS")
                 if scale_pts:
                     sexpr = _piecewise_expr(scale_pts, "t")
                     ofilters.append(
@@ -1247,8 +1376,17 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         cmd += ["-i", path]
     cmd += ["-filter_complex", filter_complex,
             "-map", f"[{current}]", "-r", fps_str,
-            "-c:v", "libx264", "-preset", ff_preset, "-crf", crf,
-            "-pix_fmt", "yuv420p"]
+            "-c:v", video_codec]
+    if video_codec == "prores_ks":
+        cmd += ["-pix_fmt", "yuv422p10le"]
+    else:
+        if ff_preset is not None:
+            cmd += ["-preset", ff_preset]
+        if video_bitrate is not None:
+            cmd += ["-b:v", str(video_bitrate)]
+        else:
+            cmd += ["-crf", crf]
+        cmd += ["-pix_fmt", "yuv420p"]
     if audio_map:
         cmd += ["-map", audio_map, "-c:a", "aac", "-b:a", "160k", "-shortest"]
     cmd += [output]
@@ -1262,7 +1400,10 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         raise RuntimeError(
             f"FFmpeg failed ({proc.returncode}): {proc.stderr[-2000:]}")
     return {
-        "output": output, "preset": preset, "width": out_w, "height": out_h,
+        "output": output, "preset": preset,
+        "export_preset": export_preset,
+        "video_codec": video_codec, "video_bitrate": video_bitrate,
+        "width": out_w, "height": out_h,
         "duration": round(total_s, 3), "fps": fps,
         "text_overlays": text_count, "overlay_clips": overlay_count,
         "overlay_audio_clips": len(overlay_audio),

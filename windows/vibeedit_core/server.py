@@ -135,6 +135,61 @@ class State:
                             == os.path.abspath(self.project_dir)})
         return out
 
+    def _recent_path(self) -> str:
+        return os.path.join(self.projects_root(), ".recent.json")
+
+    def recent_projects(self) -> list[dict]:
+        """Recent projects: folder names recorded on open/create in
+        projects/.recent.json, filtered to folders that still contain
+        a project file. No invented entries; an unreadable file is
+        an empty list, not an error."""
+        try:
+            import json as _json
+            with open(self._recent_path(), encoding="utf-8") as fh:
+                names = _json.load(fh)
+        except Exception:
+            return []
+        out = []
+        for name in names if isinstance(names, list) else []:
+            folder = os.path.join(self.projects_root(), name)
+            if os.path.isdir(folder) and find_project_file(folder):
+                out.append({"folder": name, "path": folder})
+        return out
+
+    def record_recent(self, folder: str) -> None:
+        """Move ``folder`` (a name under projects_root) to the front
+        of the recent list, capped at 20. Failures are ignored: a
+        recent list must never block opening a project."""
+        try:
+            import json as _json
+            root = self.projects_root()
+            name = os.path.relpath(os.path.abspath(folder), root)
+            if name.startswith(".."):
+                return
+            names = [n for n in self.recent_projects()
+                     if isinstance(n, dict)]
+            ordered = [name] + [n["folder"] for n in names
+                                if n["folder"] != name]
+            with open(self._recent_path(), "w",
+                      encoding="utf-8") as fh:
+                _json.dump(ordered[:20], fh)
+        except Exception:
+            pass
+
+    def remove_recent(self, folder: str) -> dict:
+        """Remove a recent entry only — never deletes project files."""
+        import json as _json
+        try:
+            with open(self._recent_path(), encoding="utf-8") as fh:
+                names = _json.load(fh)
+        except Exception:
+            names = []
+        names = [n for n in (names if isinstance(names, list) else [])
+                 if n != folder]
+        with open(self._recent_path(), "w", encoding="utf-8") as fh:
+            _json.dump(names[:20], fh)
+        return {"removed": folder, "recent": self.recent_projects()}
+
     def open_project(self, folder: str) -> dict:
         """Restart-free project switch (code-gap batch): resolve
         ``folder`` (a project folder name, a folder path, or a project
@@ -165,6 +220,7 @@ class State:
         self.redo_stack.clear()
         self.last_export = None
         self.last_report = None
+        self.record_recent(candidate)
         return {"name": data.get("name"), "folder": candidate,
                 "rev": data.get("rev")}
 
@@ -317,6 +373,45 @@ class State:
                 if op.get("height"):
                     fmt["height"] = int(op["height"])
                 result = {"name": proj.data["name"]}
+            elif kind == "speed_curve":
+                result = proj.apply_speed_curve(op["item"], op["preset"])
+            elif kind == "clip_reverse":
+                result = proj.set_reverse(op["item"],
+                                          bool(op.get("reverse", True)))
+            elif kind == "freeze_clip":
+                result = proj.freeze_clip(op["item"],
+                                          int(op.get("frames", 30)))
+            elif kind == "review_run":
+                result = proj.run_review()
+            elif kind == "review_accept":
+                result = proj.accept_review()
+            elif kind == "review_verify":
+                result = proj.verify_review()
+            elif kind == "library_add":
+                result = proj.library_add(op["item"],
+                                          op.get("name", ""))
+            elif kind == "library_list":
+                result = {"items": proj.library_list()}
+            elif kind == "library_remove":
+                result = proj.library_remove(op["entry"])
+            elif kind == "library_place":
+                result = proj.library_place(
+                    op["entry"], op.get("track"),
+                    int(op["at"]) if op.get("at") is not None else None)
+            elif kind == "brand_set":
+                result = proj.brand_set(op.get("colours"),
+                                        op.get("logo_media"))
+            elif kind == "brand_get":
+                result = proj.brand_get()
+            elif kind == "plugin_enable":
+                from .plugins import set_plugin_enabled
+                result = set_plugin_enabled(op["plugin"], True)
+            elif kind == "plugin_disable":
+                from .plugins import set_plugin_enabled
+                result = set_plugin_enabled(op["plugin"], False)
+            elif kind == "plugin_reload":
+                from .plugins import list_plugins
+                result = {"plugins": list_plugins()}
             else:
                 raise ValueError(f"Unknown operation: {kind}")
         except Exception:
@@ -418,7 +513,15 @@ def make_handler(state: State):
             elif parsed.path == "/api/projects":
                 with state.lock:
                     self._send_json({"projects": state.list_projects(),
+                                     "recent": state.recent_projects(),
                                      "current": state.project_dir})
+            elif parsed.path == "/api/recent":
+                with state.lock:
+                    self._send_json({"recent": state.recent_projects()})
+            elif parsed.path == "/api/plugins":
+                from .plugins import list_plugins
+                with state.lock:
+                    self._send_json({"plugins": list_plugins()})
             elif parsed.path == "/api/mcp-tools":
                 # Phase 5 agent dock: the live tool registry from
                 # mcp.py (names + descriptions), not a hardcoded list.
@@ -652,6 +755,34 @@ def make_handler(state: State):
                         result = state.open_project(folder)
                         self._send_json({"ok": True, "result": result,
                                          **self._project_view()})
+                    elif parsed.path == "/api/recent/remove":
+                        body = self._read_json()
+                        result = state.remove_recent(body["folder"])
+                        self._send_json({"ok": True, "result": result})
+                    elif parsed.path == "/api/reveal":
+                        body = self._read_json()
+                        folder = body.get("folder", "")
+                        root = state.projects_root()
+                        candidate = os.path.abspath(
+                            os.path.join(root, folder)) \
+                            if not os.path.isabs(folder) \
+                            else os.path.abspath(folder)
+                        if os.path.commonpath([candidate, root]) != root \
+                                or not os.path.isdir(candidate):
+                            raise ValueError(
+                                "Reveal target must be a project folder "
+                                "inside projects/")
+                        if sys.platform == "win32":
+                            os.startfile(candidate)  # noqa: S606
+                        elif shutil.which("xdg-open"):
+                            import subprocess
+                            subprocess.Popen(["xdg-open", candidate])
+                        else:
+                            raise RuntimeError(
+                                "Reveal is only supported on Windows "
+                                "(os.startfile); copy the project path "
+                                "from the welcome panel instead")
+                        self._send_json({"ok": True, "path": candidate})
                     elif parsed.path == "/api/undo":
                         self._read_json()
                         if not state.undo_stack:
@@ -671,11 +802,21 @@ def make_handler(state: State):
                     elif parsed.path == "/api/export":
                         body = self._read_json()
                         preset = body.get("preset", "full")
+                        export_preset = body.get("export_preset")
+                        ext = "mp4"
+                        if export_preset:
+                            from .render import export_preset_info
+                            fmt = state.project.data["format"]
+                            ext = export_preset_info(
+                                export_preset, int(fmt["width"]),
+                                int(fmt["height"]))["ext"]
+                        slug = (export_preset or preset).replace("/", "_")
                         out = os.path.join(state.project_dir, "render",
-                                           f"export-{preset}.mp4")
+                                           f"export-{slug}.{ext}")
                         report = render(state.project.data,
                                         state.project_dir, out, preset=preset,
-                                        normalize_audio=bool(body.get("normalize", False)))
+                                        normalize_audio=bool(body.get("normalize", False)),
+                                        export_preset=export_preset)
                         state.last_export = out
                         state.last_report = report
                         self._send_json({"ok": True, "report": report})
