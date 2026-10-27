@@ -130,9 +130,9 @@ class TestPhase6Mcp(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count_and_names(self):
-        self.assertEqual(len(TOOLS), 123)  # Code-gap batch: 106 -> 123
+        self.assertEqual(len(TOOLS), 144)  # Code-gap batch 2: 123 -> 144
         names = {t["name"] for t in TOOLS}
-        self.assertEqual(len(names), 123)  # Code-gap batch: 106 -> 123
+        self.assertEqual(len(names), 144)  # Code-gap batch 2: 123 -> 144
         for name in ("vibeedit_clip_copy",
                      "vibeedit_clip_paste_cross_project",
                      "vibeedit_text_preset_list",

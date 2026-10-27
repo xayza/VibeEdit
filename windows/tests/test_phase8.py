@@ -158,7 +158,7 @@ class TestReviewAndMcp(unittest.TestCase):
 
     def test_mcp_count_and_new_tools(self):
         names = [t["name"] for t in TOOLS]
-        self.assertEqual(len(TOOLS), 123)  # Code-gap batch: 106 -> 123
+        self.assertEqual(len(TOOLS), 144)  # Code-gap batch 2: 123 -> 144
         for name in ("vibeedit_transition_preview", "vibeedit_review_get",
                      "vibeedit_overlay_items", "vibeedit_clip_position_set",
                      "vibeedit_clip_scale_set", "vibeedit_clip_opacity_set",
