@@ -48,21 +48,35 @@ class TestCapcutShell(unittest.TestCase):
         self.assertIn("onerror=", html)
 
     def test_top_toolbar_matches_screenshot_items(self):
+        # SUPERSEDED (user decision 2026-10-27): the CapCut top icon
+        # toolbar was removed in favour of the original-app shell.
+        # The original has ONE far-left vertical rail, not a top row,
+        # so the shell must NOT contain the CapCut toolbar anymore.
         html = _read("static/index.html")
-        for label in ("Media", "Audio", "Text", "Stickers", "Effects",
-                      "Transitions", "Captions", "Filters", "Adjustment",
-                      "Templates", "AI"):
-            self.assertIn(f"<span>{label}</span>", html,
-                          f"toolbar item missing: {label}")
-        self.assertIn('class="tool-toolbar"', html)
-        self.assertIn('class="tool-btn active"', html)
+        self.assertNotIn('class="tool-toolbar"', html)
+        self.assertNotIn('class="tool-btn', html)
+        # The original's top bar keeps project, rev, Export report,
+        # Plugins, Review and Export — all still present.
+        for marker in ("projectRev", "btnExportReport", "btnPlugins",
+                       "btnReviewTop", "btnExportFull"):
+            self.assertIn(marker, html, marker)
 
     def test_left_rail_matches_screenshot_menu(self):
+        # Original-app rail (spec 01 section 1.3): Media, Audio, Text,
+        # Stickers, Effects, Transitions, Filters, Voice, Timeline, More.
         html = _read("static/index.html")
-        for label in ("Import", "Media", "Timeline", "Subprojects",
-                      "Yours", "Generate", "Spaces", "Library"):
+        for label in ("Media", "Audio", "Text", "Stickers", "Effects",
+                      "Transitions", "Filters", "Voice", "Timeline",
+                      "More"):
             self.assertIn(f">{label}</button>", html,
                           f"rail item missing: {label}")
+        # Rail only: the Media panel's "Create with these tools"
+        # Generate card is a different element, not a rail item.
+        import re as _re
+        rail = _re.search(r'<nav class="tool-rail".*?</nav>', html,
+                          _re.S).group(0)
+        self.assertNotIn(">Subprojects</button>", rail)
+        self.assertNotIn(">Generate</button>", rail)
 
     def test_shell_structure(self):
         html = _read("static/index.html")
@@ -119,7 +133,7 @@ class TestCapcutShell(unittest.TestCase):
     def test_teal_theme_and_legacy_selectors(self):
         css = _read("static/style.css")
         for snippet in ("#00c8d4", "#101014", "#1a1a1f",
-                        ".tool-toolbar", ".tool-btn.active", ".tool-rail",
+                        ".tool-rail",
                         ".workbench", ".details-col", ".timeline-toolbar",
                         ".preview-wrap video", ".panel h3::before",
                         ".clip.selected", ".ruler .playhead::after",

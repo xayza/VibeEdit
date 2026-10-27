@@ -17,6 +17,18 @@
   Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
   `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
 
+## Cửa sổ desktop thật (không phải tab trình duyệt)
+
+- **Cài một lần:** `pip install pywebview` trong `.venv` của bạn.
+- **Chạy:** bấm đúp `run_vibeedit_desktop.bat` trong thư mục `windows/`,
+  hoặc gõ `python desktop_app.py` trong terminal của thư mục đó.
+- Cửa sổ này dùng Edge WebView2 có sẵn trên Windows 10/11 để hiện đúng
+  giao diện web đã có (không viết lại UI, không Electron, không Qt),
+  nên trông như một app desktop thật: có thanh tiêu đề VibeEdit, không
+  có tab trình duyệt hay thanh địa chỉ. Nếu chưa cài pywebview, app sẽ
+  in hướng dẫn cài đặt rồi tự mở bằng trình duyệt như trước, không
+  đứng im và không báo lỗi khó hiểu.
+
 ## Original-app layout (after the CapCut shell)
 
 - **Layout, in the structure of the original BashCut macOS app
