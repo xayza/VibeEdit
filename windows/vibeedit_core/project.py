@@ -890,6 +890,28 @@ class Project:
         planned = self._build_planned(changes)
         self._check_planned(planned)
         self._apply_planned(changes)
+        # Markers follow the move. Magnetic Main moves ripple the
+        # tail, so markers at/after the old position shift by the
+        # move delta (they annotated the moved clip or its
+        # followers, both of which shift); leaving Main closes the
+        # gap exactly like a delete; entering Main inserts room
+        # exactly like an insert; any other move just carries the
+        # markers inside the moved clip's own span with it.
+        if self.magnetic_enabled and old_track["id"] == dest["id"] \
+                and self._is_main_track(track):
+            self._shift_markers_at(old_at, delta)
+        elif self.magnetic_enabled and self._is_main_track(old_track) \
+                and not self._is_main_track(dest):
+            self._collapse_markers(old_at, old_at + int(item["dur"]),
+                                   old_at)
+            self._shift_markers_at(old_at + int(item["dur"]),
+                                   -int(item["dur"]))
+        elif self.magnetic_enabled and not self._is_main_track(old_track) \
+                and self._is_main_track(dest):
+            self._shift_markers_at(new_at, int(item["dur"]))
+        else:
+            self._shift_markers_in_span(old_at,
+                                        old_at + int(item["dur"]), delta)
         self._bump()
         return item
 
@@ -1374,8 +1396,11 @@ class Project:
         # audio track refuses the whole close (data unchanged).
         changes: dict = {}
         moved = []
+        marker_moves = []
         cursor = 0
         for item in sorted(track["items"], key=lambda i: i["at"]):
+            marker_moves.append((int(item["at"]), int(item["dur"]),
+                                 cursor))
             if int(item["at"]) != cursor:
                 delta = cursor - int(item["at"])
                 moved.append(item["id"])
@@ -1390,6 +1415,7 @@ class Project:
         planned = self._build_planned(changes)
         self._check_planned(planned)
         self._apply_planned(changes)
+        self._remap_markers_close_gaps(marker_moves)
         self._bump()
         return {"track": track_id, "moved": moved}
 
@@ -1703,6 +1729,59 @@ class Project:
             if start <= int(marker["at"]) < end:
                 marker["at"] = to
 
+    def _shift_markers_in_span(self, start: int, end: int,
+                               delta: int) -> None:
+        """Shift markers inside [start, end) by ``delta`` frames
+        (clamped at 0). Used when a clip moves without rippling the
+        rest of the timeline: markers that annotated the moved clip
+        follow it, markers elsewhere stay put."""
+        for marker in self.data.get("markers", []):
+            if start <= int(marker["at"]) < end:
+                marker["at"] = max(0, int(marker["at"]) + delta)
+        self.data.get("markers", []).sort(key=lambda m: m["at"])
+
+    def _remap_markers_spans(self, spans: list) -> None:
+        """Remap markers in one pass from their ORIGINAL positions.
+        ``spans`` is a list of (start, end, delta); a marker inside
+        exactly one span shifts by that span's delta, markers
+        outside all spans stay. Single-pass matters: applying two
+        span shifts sequentially would let a marker shifted by the
+        first shift be caught (and shifted again) by the second
+        span, which is wrong for reorder (the spans are disjoint
+        in original coordinates but overlap after the first
+        shift)."""
+        for marker in self.data.get("markers", []):
+            at = int(marker["at"])
+            for start, end, delta in spans:
+                if start <= at < end:
+                    marker["at"] = max(0, at + delta)
+                    break
+        self.data.get("markers", []).sort(key=lambda m: m["at"])
+
+    def _remap_markers_close_gaps(self, moves: list) -> None:
+        """Remap markers after close_gaps. ``moves`` is a list of
+        (original_at, duration, new_at) sorted by original_at.
+        Markers inside a moved clip's original span shift with it;
+        markers in a gap before an item collapse to that item's new
+        start (the gap no longer exists); markers after the last
+        item's original end are unchanged."""
+        if not moves:
+            return
+        for marker in self.data.get("markers", []):
+            at = int(marker["at"])
+            for orig_at, dur, new_at in moves:
+                if orig_at <= at < orig_at + dur:
+                    marker["at"] = max(0, at + (new_at - orig_at))
+                    break
+            else:
+                prev_end = 0
+                for orig_at, dur, new_at in moves:
+                    if prev_end <= at < orig_at:
+                        marker["at"] = new_at
+                        break
+                    prev_end = orig_at + dur
+        self.data.get("markers", []).sort(key=lambda m: m["at"])
+
     def reorder_main(self, item_id: str, before_id: str | None = None) -> dict:
         """Magnetic reorder on Main: move a Main clip to just before
         another Main clip (or to the end when ``before_id`` is None).
@@ -1756,6 +1835,22 @@ class Project:
         planned = self._build_planned(changes)
         self._check_planned(planned)
         self._apply_planned(changes)
+        # Markers follow the reorder: the whole rearranged region
+        # moves as a block. Moving earlier, items in [target,
+        # old_at) shift right by dur and the moved clip shifts to
+        # target; moving later, the moved clip shifts to
+        # target - dur and items in (old_at, target) shift left
+        # by dur. Markers in each span shift with that span, in
+        # ONE pass from original positions (see
+        # _remap_markers_spans: sequential shifts would cascade).
+        if target < old_at:
+            self._remap_markers_spans([
+                (target, old_at, dur),
+                (old_at, old_at + dur, target - old_at)])
+        else:
+            self._remap_markers_spans([
+                (old_at, old_at + dur, target - dur - old_at),
+                (old_at + dur, target, -dur)])
         self._bump()
         return item
 

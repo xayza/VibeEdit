@@ -576,10 +576,45 @@ class State:
                     "piper": _sh.which("piper") is not None,
                     "edge_tts": _ilu.find_spec("edge_tts") is not None},
                     "voiceover_takes": takes}
+            elif kind == "voice_generate":
+                # Round 3: real generation via Edge TTS / Piper
+                # (vibeedit_core.voice). The output is added as
+                # project audio media; cloning is not wired.
+                from .voice import synthesize as _synth
+                out = os.path.join(proj.folder, "media",
+                                   op.get("file") or "voice_take.wav")
+                res = _synth(op["text"], out,
+                             provider=op.get("provider"),
+                             voice=op.get("voice"),
+                             model=op.get("model"))
+                medium = proj.add_media(res["path"], kind="audio",
+                                        duration=res["duration"])
+                result = {"media": medium["id"], "path": res["path"],
+                          "backend": res["backend"],
+                          "voice": res["voice"],
+                          "duration": res["duration"]}
+            elif kind == "voice_place":
+                from .voice import place_on_voiceover as _place
+                result = _place(proj, op["media"], op.get("at"))
+            elif kind == "voice_use":
+                proj.data["voice"] = {
+                    "provider": op.get("provider"),
+                    "voice": op.get("voice"),
+                    "model": op.get("model")}
+                result = {"voice": proj.data["voice"]}
+            elif kind == "voice_fit":
+                _track, item = proj.item(op["item"])
+                target = int(op.get("frames") or op["to_frame"])
+                if target <= 0:
+                    raise ValueError("voice_fit needs a positive "
+                                     "frames/to_frame target")
+                needed = int(item["dur"]) / target
+                proj.set_speed(op["item"], needed)
+                result = {"item": op["item"], "speed": needed,
+                          "frames": target}
             elif kind == "app_update_check":
-                result = {"current_version": "0.1.0",
-                          "update_channel": None,
-                          "status": "no updater configured in this build"}
+                from .updater import update_status as _update_status
+                result = _update_status()
             elif kind == "plugin_install":
                 from .plugins import install_plugin
                 result = install_plugin(
@@ -630,6 +665,13 @@ class State:
             elif kind == "skills_search":
                 from .skills import search_skills
                 result = {"skills": search_skills(None, op.get("query", ""))}
+            elif kind == "vision_cutout_model":
+                from .vision import cutout_segmented as _seg
+                medium = proj.media(op["media"])
+                path = medium["path"]
+                if not os.path.isabs(path):
+                    path = os.path.join(proj.folder, path)
+                result = _seg(path, op["model"], op.get("output"))
             elif kind in ("vision_ocr", "vision_faces", "vision_cutout"):
                 from .vision import VisionUnavailable
                 from .vision import cutout as _cut

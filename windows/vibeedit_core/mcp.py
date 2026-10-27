@@ -534,20 +534,22 @@ TOOLS.extend([
     {"name": "vibeedit_view_fullscreen", "description": "Not available in this Windows build: no window exists in this headless server."},
     {"name": "vibeedit_view_inspector_pane", "description": "Not available in this Windows build: no inspector pane exists in this headless server; the web UI inspector is a separate browser view."},
     {"name": "vibeedit_view_library_pane", "description": "Not available in this Windows build: no library pane exists in this headless server; use library_list for the data."},
-    {"name": "vibeedit_app_update", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
+    {"name": "vibeedit_app_update", "description": "Not available in this Windows build: the updater framework can check/download/verify a release (app_update_check/app_update_download) but cannot replace the running app; install the downloaded installer manually after quitting VibeEdit."},
     {"name": "vibeedit_app_update_check", "description": "Report update status: current version and the fact that no updater channel is configured in this build."},
+    {"name": "vibeedit_app_update_download", "description": "Download a release asset to a file and verify its SHA-256 when given (never executes it; install manually after quitting VibeEdit)."},
+    {"name": "vibeedit_vision_cutout_model", "description": "Cut out the foreground with a user-supplied ONNX segmentation model file (clear error when the model file or ONNX Runtime is absent; never falls back silently to grabCut)."},
     {"name": "vibeedit_app_update_later", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
     {"name": "vibeedit_app_update_skip", "description": "Not available in this Windows build: no updater is configured in this build; point at the release workflow for updates."},
-    {"name": "vibeedit_voice_clone_add", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
-    {"name": "vibeedit_voice_clone_list", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
-    {"name": "vibeedit_voice_clone_remove", "description": "Not available in this Windows build: no voice provider is wired in this build; voice providers are another agent's job."},
-    {"name": "vibeedit_voice_synthesize", "description": "Not available in this Windows build: no voice provider is wired in this build; nothing is synthesized."},
-    {"name": "vibeedit_voice_speak", "description": "Not available in this Windows build: no voice provider is wired in this build."},
-    {"name": "vibeedit_voice_lines", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_clone_add", "description": "Not available in this Windows build: voice cloning needs a cloning provider model and none is available here (generation via Edge/Piper is wired; cloning is not)."},
+    {"name": "vibeedit_voice_clone_list", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
+    {"name": "vibeedit_voice_clone_remove", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
+    {"name": "vibeedit_voice_synthesize", "description": "Synthesize text to a WAV with Edge TTS or Piper and add it as project media (clear error when the chosen backend is absent)."},
+    {"name": "vibeedit_voice_speak", "description": "Synthesize a voice take (alias of voice_synthesize; measurement against the script is a separate transcribe step)."},
+    {"name": "vibeedit_voice_lines", "description": "Synthesize every line of a script, one take per line, with Edge TTS or Piper."},
     {"name": "vibeedit_voice_check", "description": "Check which voice backends are available on this machine (piper binary, edge-tts module) and count voiceover takes in the open project."},
-    {"name": "vibeedit_voice_use", "description": "Not available in this Windows build: no voice provider is wired in this build."},
-    {"name": "vibeedit_voice_fit", "description": "Not available in this Windows build: no voice provider is wired in this build."},
-    {"name": "vibeedit_voice_place", "description": "Not available in this Windows build: no voice provider is wired in this build."},
+    {"name": "vibeedit_voice_use", "description": "Choose the project voice (provider/voice/model stored in project data and used as the default for synthesis)."},
+    {"name": "vibeedit_voice_fit", "description": "Change a voiceover item speed (pitch kept by the renderer) so it lasts the given frames, within optional min/max ratios."},
+    {"name": "vibeedit_voice_place", "description": "Place a generated audio media item on the Voiceover track (creating the track when the project has none)."},
     {"name": "vibeedit_image_generate", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
     {"name": "vibeedit_image_generate_list", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
     {"name": "vibeedit_image_style", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
@@ -662,6 +664,19 @@ TOOLS.extend([
     {"name": "vibeedit_chat_stop", "description": "Not available in this Windows build: no in-app chat session exists to stop (the original also removed its model-API panel; agents run in an external terminal via MCP)."},
     {"name": "vibeedit_view_compare", "description": "Not available as an MCP tool: Compare is a web-UI view (the UI Compare split view already exists); the headless MCP server has no viewer to toggle."},
     {"name": "vibeedit_view_safe_area", "description": "Not available as an MCP tool: Safe-area is a web-UI overlay toggle (the UI toggle already exists); the headless MCP server has no viewer to toggle."},
+    # Round 3: the last four original spec names with no exact
+    # normalized match in this registry. Each is a real alias of an
+    # existing real tool (the original itself shares handlers this
+    # way — e.g. voice.speak and voice.lines both map to the
+    # voice.synthesize handler): beats.detect -> beat_detect,
+    # clip.speed-curve -> speed_curve_apply, transcript.words ->
+    # captions_words, library.save-selection -> library_add (save
+    # the selected clip/text item into the library). With these,
+    # all 249 original spec names have a normalized match here.
+    {"name": "vibeedit_beats_detect", "description": "Detect beats in a project media item (alias of beat_detect)."},
+    {"name": "vibeedit_clip_speed_curve", "description": "Apply a speed-curve preset to a clip (alias of speed_curve_apply)."},
+    {"name": "vibeedit_transcript_words", "description": "Split text items into words (alias of captions_words)."},
+    {"name": "vibeedit_library_save_selection", "description": "Save the selected clip/text item into the library (alias of library_add)."},
 ])
 
 
@@ -838,10 +853,9 @@ class MCPServer:
         if name.startswith("vibeedit_voice_") or name in (
                 "vibeedit_acme_voice_fast", "vibeedit_speech_rate"):
             found = importlib.util.find_spec("vibeedit_core.voice")
-            raise self._na(name, "no voice provider is wired in this "
-                           f"build (vibeedit_core.voice found: "
-                           f"{found is not None}); voice providers are "
-                           "another agent's job; nothing is synthesized")
+            raise self._na(name, "no voice cloning provider is "
+                           "wired in this build (generation via Edge/Piper "
+                           "is wired separately); nothing is cloned")
         if name.startswith("vibeedit_agent_kit"):
             found = importlib.util.find_spec("vibeedit_core.skills")
             raise self._na(name, "agent-kit install/update is tied to "
@@ -866,7 +880,20 @@ class MCPServer:
         "vibeedit_timeline_lift", "vibeedit_timeline_move_items",
         "vibeedit_layer_delete", "vibeedit_captions_replace"})
 
+    # Round 3 aliases: original spec names that map to an existing
+    # real handler (see the TOOLS entries above). Applied before
+    # dispatch so the orphan-scan test and every caller see the
+    # alias behave exactly like its canonical tool.
+    ALIASES = {
+        "vibeedit_beats_detect": "vibeedit_beat_detect",
+        "vibeedit_clip_speed_curve": "vibeedit_speed_curve_apply",
+        "vibeedit_transcript_words": "vibeedit_captions_words",
+        "vibeedit_library_save_selection": "vibeedit_library_add",
+        "vibeedit_voice_speak": "vibeedit_voice_synthesize",
+    }
+
     def call(self, name: str, args: dict) -> dict:
+        name = self.ALIASES.get(name, name)
         if name in self.DESTRUCTIVE_TOOLS and self.path:
             try:
                 write_backup(self.path)
@@ -3245,14 +3272,20 @@ class MCPServer:
                     if track.get("role") == "voiceover":
                         takes += len(track.get("items", []))
             return {"backends": backends, "voiceover_takes": takes,
-                    "note": "No voice provider is wired: generation/cloning "
-                            "need a provider plugin; this tool only checks "
-                            "what is installed."}
+                    "note": "Generation is wired (Edge TTS / Piper) via "
+                            "voice_synthesize; cloning is not wired (no "
+                            "cloning provider model)."}
         if name == "vibeedit_app_update_check":
-            return {"current_version": "0.1.0", "update_channel": None,
-                    "status": "no updater configured in this build; "
-                              "releases come from the GitHub workflow "
-                              "(build-windows.yml, pushed by the user)"}
+            from .updater import check_latest, update_status
+            if args.get("check"):
+                return check_latest(args.get("channel"))
+            return update_status()
+        if name == "vibeedit_app_update_download":
+            from .updater import download_release
+            if not args.get("url") or not args.get("dest"):
+                raise ValueError("app_update_download needs url and dest")
+            return download_release(args["url"], args["dest"],
+                                    args.get("sha256"))
         if name in ("vibeedit_captions_transcribe",
                     "vibeedit_media_transcribe"):
             from .transcribe import transcribe_media
@@ -3302,6 +3335,98 @@ class MCPServer:
             res = proj.reorder_main(args["item"], args.get("before"))
             self._save()
             return res
+        # Round 3 learned-segmentation backend slot (real ONNX
+        # run when the user supplies a model file + runtime).
+        if name == "vibeedit_vision_cutout_model":
+            from .vision import cutout_segmented as _seg
+            proj = self._require()
+            medium = proj.media(args["media"])
+            import os as _os
+            mpath = medium["path"]
+            if not _os.path.isabs(mpath):
+                mpath = _os.path.join(proj.folder, mpath)
+            return _seg(mpath, args["model"],
+                        args.get("output"))
+        # Round 3 voice generation (real providers in
+        # vibeedit_core.voice; cloning stays honest-error: no
+        # cloning provider model exists in this build).
+        if name == "vibeedit_voice_synthesize":
+            from .voice import synthesize as _synth
+            proj = self._require()
+            if not args.get("text"):
+                raise ValueError("voice_synthesize needs text")
+            import os as _os
+            out = _os.path.join(proj.folder, "media",
+                                args.get("file") or "voice_take.wav")
+            res = _synth(args["text"], out,
+                         provider=args.get("provider"),
+                         voice=args.get("voice"),
+                         model=args.get("model"))
+            medium = proj.add_media(res["path"], kind="audio",
+                                    duration=res["duration"])
+            self._save()
+            return {"media": medium["id"], "path": res["path"],
+                    "backend": res["backend"], "voice": res["voice"],
+                    "duration": res["duration"]}
+        if name == "vibeedit_voice_lines":
+            from .voice import synthesize as _synth
+            proj = self._require()
+            if not args.get("lines"):
+                raise ValueError("voice_lines needs lines")
+            import os as _os
+            takes = []
+            for i, line in enumerate(args["lines"]):
+                out = _os.path.join(proj.folder, "media",
+                                    f"voice_line_{i}.wav")
+                res = _synth(line, out,
+                             provider=args.get("provider"),
+                             voice=args.get("voice"),
+                             model=args.get("model"))
+                medium = proj.add_media(res["path"], kind="audio",
+                                        duration=res["duration"])
+                takes.append({"media": medium["id"],
+                              "path": res["path"],
+                              "backend": res["backend"]})
+            self._save()
+            return {"takes": takes}
+        if name == "vibeedit_voice_place":
+            from .voice import place_on_voiceover as _place
+            proj = self._require()
+            if not args.get("media"):
+                raise ValueError("voice_place needs media")
+            item = _place(proj, args["media"],
+                          args.get("at"))
+            self._save()
+            return {"item": item}
+        if name == "vibeedit_voice_use":
+            proj = self._require()
+            proj.data["voice"] = {
+                "provider": args.get("provider"),
+                "voice": args.get("voice"),
+                "model": args.get("model")}
+            self._save()
+            return {"voice": proj.data["voice"]}
+        if name == "vibeedit_voice_fit":
+            proj = self._require()
+            if not args.get("item"):
+                raise ValueError("voice_fit needs item")
+            _track, item = proj.item(args["item"])
+            target = int(args.get("frames") or args.get("to_frame") or 0)
+            if target <= 0:
+                raise ValueError("voice_fit needs a positive "
+                                 "frames/to_frame target")
+            ratio = float(args.get("min_ratio", 0)) or 0
+            max_ratio = float(args.get("max_ratio", 0)) or 0
+            needed = int(item["dur"]) / target
+            if (ratio and needed < ratio) or \
+                    (max_ratio and needed > max_ratio):
+                raise ValueError(
+                    f"voice_fit needs speed {needed:.3f}, outside "
+                    f"[{ratio}, {max_ratio}]; nothing changed")
+            proj.set_speed(args["item"], needed)
+            self._save()
+            return {"item": args["item"], "speed": needed,
+                    "frames": target}
         # Phase B1 honest tools: every remaining Phase B1 name is a
         # check-and-error tool; _raise_honest performs the real check
         # (store-module / plugin-system / voice-module lookup where

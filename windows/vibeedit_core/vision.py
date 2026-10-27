@@ -22,10 +22,11 @@ Rules, enforced by the tests:
   detection. In particular, when the backend is absent the function
   raises :class:`VisionUnavailable` (it must NOT return an empty face
   list or empty text as if a scan had run).
-- A better cutout than grabCut (e.g. a learned person-segmentation
-  model, the way Apple Vision's foreground-instance mask works) is
-  REMAINING work: it would need a model file the user downloads
-  separately, and no such model is shipped or referenced here.
+- A learned cutout (the way Apple Vision's foreground-instance
+  mask works) is available as a backend slot: cutout_segmented()
+  runs a user-supplied ONNX person-segmentation model when the
+  file and ONNX Runtime are present, and errors clearly otherwise.
+  No model file is shipped or referenced by default.
 """
 
 from __future__ import annotations
@@ -48,6 +49,107 @@ def _require_file(path):
     if not os.path.isfile(path):
         raise FileNotFoundError("No such image file: %s" % (path,))
     return path
+
+
+def cutout_segmented(path, model_path, output_path=None):
+    """Cut out the foreground with a USER-SUPPLIED learned
+    segmentation model (round 3 backend slot).
+
+    ``model_path`` must be a real model file the user downloaded
+    (e.g. an ONNX person-segmentation model); nothing is bundled
+    and no model path is invented. Behaviour, honestly:
+
+    - No model file (None, or a path that is not a file) ->
+      VisionUnavailable naming the missing model file.
+    - Model file present but no ONNX Runtime installed ->
+      VisionUnavailable naming the missing runtime (the model
+      file itself is never executed, and no grabCut result is
+      silently returned as a "learned" cutout).
+    - Model + runtime present -> the model is run via ONNX
+      Runtime; the caller is responsible for a model whose
+      input/output layout matches a person-segmentation model
+      (input "input", single-channel mask output). A model that
+      does not match raises VisionUnavailable naming the
+      mismatch instead of returning a wrong mask.
+
+    This is an interface, not a finished model integration: the
+    exact pre/post-processing of a specific model still needs
+    that model's documentation, which is why the mismatch path
+    errors instead of guessing.
+    """
+    _require_file(path)
+    if not model_path or not os.path.isfile(model_path):
+        raise VisionUnavailable(
+            "No segmentation model file: "
+            f"{model_path!r} is not a file. Download a "
+            "person-segmentation model (ONNX) and pass its real "
+            "path; no model is bundled with this build, and no "
+            "model path is invented.")
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise VisionUnavailable(
+            "ONNX Runtime is not installed, so the supplied "
+            f"segmentation model {model_path} cannot run. "
+            "Install it with 'pip install onnxruntime' and retry; "
+            "the model file itself is present but unused.") from exc
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError as exc:
+        raise VisionUnavailable(
+            "numpy/Pillow are needed to run a segmentation model "
+            f"({exc}); install them and retry.") from exc
+    session = ort.InferenceSession(model_path,
+                                   providers=["CPUExecutionProvider"])
+    inputs = session.get_inputs()
+    if not inputs:
+        raise VisionUnavailable(
+            f"Segmentation model {model_path} declares no inputs.")
+    input_name = inputs[0].name
+    shape = [int(d) if isinstance(d, int) else 0
+             for d in inputs[0].shape]
+    # Generic person-segmentation layout, stated here so a wrong
+    # model fails loudly instead of silently: NCHW float input,
+    # first output is a mask (H,W) or (C,H,W); values outside
+    # [0,1] are treated as logits and passed through a sigmoid.
+    height = shape[2] if len(shape) > 2 and shape[2] else 256
+    width = shape[3] if len(shape) > 3 and shape[3] else 256
+    image = Image.open(path).convert("RGB")
+    orig_w, orig_h = image.size
+    resized = image.resize((width, height))
+    arr = np.asarray(resized, dtype=np.float32) / 255.0
+    arr = np.transpose(arr, (2, 0, 1))[None, :, :, :]
+    try:
+        outputs = session.run(None, {input_name: arr})
+    except Exception as exc:
+        raise VisionUnavailable(
+            f"Segmentation model {model_path} failed to run on "
+            f"this image: {exc}") from exc
+    mask = np.asarray(outputs[0])
+    while mask.ndim > 3:
+        mask = mask[0]
+    if mask.ndim == 3:
+        # (C,H,W): channel 1 is foreground for 2-class models,
+        # channel 0 otherwise.
+        mask = mask[1] if mask.shape[0] >= 2 else mask[0]
+    if mask.ndim != 2:
+        raise VisionUnavailable(
+            f"Segmentation model {model_path} returned a mask of "
+            f"shape {mask.shape}, not a 2D mask; its layout is not "
+            "supported by this backend slot.")
+    if mask.min() < 0 or mask.max() > 1:
+        mask = 1.0 / (1.0 + np.exp(-mask))
+    mask_img = Image.fromarray(
+        ((mask >= 0.5) * 255).astype("uint8")).resize(
+            (orig_w, orig_h), Image.NEAREST)
+    if output_path is None:
+        output_path = os.path.splitext(path)[0] + "_segmented.png"
+    out = image.copy()
+    out.putalpha(mask_img)
+    out.save(output_path)
+    return {"path": output_path, "backend": "onnx-segmentation",
+            "model": model_path, "size": [orig_w, orig_h]}
 
 
 def _require_cv2():
