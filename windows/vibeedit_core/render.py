@@ -1281,6 +1281,32 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 f"format=yuv420p[{out_label}]")
         vchain, vchain_dur = out_label, vchain_dur + dur_s - trans_s
 
+    def _crop_offset_expr(transform: dict) -> str:
+        """FFmpeg crop x/y expressions for a clip transform. The
+        original's ReframePreset pan/tilt are canvas pixels from
+        centre; the centred crop is the neutral position, so the
+        expressions are centre plus pan/tilt, clamped to the scaled
+        frame. Expressions (not static numbers) are used because the
+        scaled frame's true size depends on the source aspect, which
+        is only known at filter time. Empty when the transform
+        carries no pan/tilt, so clips without a framing preset keep
+        the exact centred crop they always had."""
+        if not isinstance(transform, dict):
+            return ""
+        try:
+            pan = float(transform.get("pan") or 0)
+        except (TypeError, ValueError):
+            pan = 0.0
+        try:
+            tilt = float(transform.get("tilt") or 0)
+        except (TypeError, ValueError):
+            tilt = 0.0
+        if pan == 0 and tilt == 0:
+            return ""
+        return (f":x='min(max((iw-ow)/2+{pan:g},0),iw-ow)'"
+                f":y='min(max((ih-oh)/2+{tilt:g},0),ih-oh)'")
+
+
     def _motion_filter(item: dict, frame_offset: float = 0.0) -> str | None:
         """zoompan filter for main-track x/y/scale keyframes.
 
@@ -1367,7 +1393,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 img_filters.append(_reframe)
             img_filters.extend([
                 f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase",
-                f"crop={out_w}:{out_h}",
+                f"crop={out_w}:{out_h}"
+                f"{_crop_offset_expr(item.get('transform') or {})}",
                 "setsar=1",
             ])
             motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
@@ -1406,7 +1433,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             # applied to a held frame; colour and fades still are.
             frame_dur = 1.0 / media_fps(medium)
             fscale = (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-                      f"crop={out_w}:{out_h}")
+                      f"crop={out_w}:{out_h}"
+                      f"{_crop_offset_expr(item.get('transform') or {})}")
             ffilters = [f"trim=start={src_s:.3f}:end={src_s + frame_dur:.3f}",
                         "setpts=PTS-STARTPTS",
                         "loop=loop=-1:size=1:start=0",
@@ -1435,10 +1463,12 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         if zoom != 1.0:
             zw, zh = int(out_w * zoom), int(out_h * zoom)
             scale = (f"scale={zw}:{zh}:force_original_aspect_ratio=increase,"
-                     f"crop={out_w}:{out_h}")
+                     f"crop={out_w}:{out_h}"
+                     f"{_crop_offset_expr(transform)}")
         else:
             scale = (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-                     f"crop={out_w}:{out_h}")
+                     f"crop={out_w}:{out_h}"
+                     f"{_crop_offset_expr(transform)}")
         vfilters = [f"trim=start={src_s:.3f}:end={src_s + src_dur_s:.3f}",
                     "setpts=PTS-STARTPTS"]
         if speed != 1.0:

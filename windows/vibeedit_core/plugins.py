@@ -128,6 +128,12 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
                 # dropped here (a bad schema must error on read,
                 # not vanish from the listing).
                 entry_info["manifest_options"] = manifest.get("options")
+            # Round 8: raw actions/views, validated on read by
+            # list_plugin_actions()/get_plugin_view().
+            if "actions" in manifest:
+                entry_info["manifest_actions"] = manifest.get("actions")
+            if "views" in manifest:
+                entry_info["manifest_views"] = manifest.get("views")
             entry = manifest.get("entry")
             if entry is not None:
                 _validate_manifest(manifest, source_label=name)
@@ -473,6 +479,19 @@ def apply_plugin(project, plugin_name: str, hook: str,
             f"Plugin {plugin_name!r} has no hook {hook!r}")
     _, item = project.item(item_id)
     result = fn(project, item_id)
+    # Round 8 proposal convention: a hook that wants its edit
+    # reviewed returns {"propose": [ops]} instead of mutating the
+    # project. The ops are stored as a pending proposal (see
+    # apply_plugin_proposal) and NOT applied here, so a reviewing
+    # caller can apply or discard them with plugins_proposal.
+    # Hooks that mutate and then return a proposal dict are a
+    # contract violation by the plugin, documented in PARITY.md.
+    if isinstance(result, dict) and isinstance(
+            result.get("propose"), list):
+        proposal = store_plugin_proposal(
+            project, plugin_name, hook, result["propose"])
+        return {"proposal": proposal["id"], "applied": False,
+                "plugin": plugin_name, "hook": hook}
     return result if isinstance(result, dict) else item
 
 
@@ -580,6 +599,57 @@ def _validate_manifest(data, *, source_label: str) -> dict:
                 f"plugin.json in {source_label!r} has an unsafe 'entry' "
                 f"{entry!r}: it must be a plain *.py file name inside "
                 "the plugin folder")
+    # Round 8: optional "actions" (editor actions the plugin adds)
+    # and "views" (JSON component models for the plugin's panels).
+    # Both are validated here so a bad declaration fails the
+    # install/validation, never silently half-registers.
+    actions = data.get("actions")
+    if actions is not None:
+        if not isinstance(actions, list):
+            raise ValueError(
+                f"plugin.json in {source_label!r} has non-list 'actions'")
+        for action in actions:
+            if not isinstance(action, dict) \
+                    or not isinstance(action.get("id"), str) \
+                    or not action["id"] \
+                    or not isinstance(action.get("hook"), str) \
+                    or not action["hook"]:
+                raise ValueError(
+                    f"plugin.json in {source_label!r} has an action "
+                    "without a string 'id' and 'hook'")
+            params = action.get("parameters")
+            if params is not None and not isinstance(params, dict):
+                raise ValueError(
+                    f"plugin.json in {source_label!r} has an action "
+                    "whose 'parameters' is not a JSON Schema object")
+    views = data.get("views")
+    if views is not None:
+        if not isinstance(views, list):
+            raise ValueError(
+                f"plugin.json in {source_label!r} has non-list 'views'")
+        for view in views:
+            if not isinstance(view, dict) \
+                    or not isinstance(view.get("id"), str) \
+                    or not view["id"]:
+                raise ValueError(
+                    f"plugin.json in {source_label!r} has a view "
+                    "without a string 'id'")
+            components = view.get("components")
+            if components is not None:
+                if not isinstance(components, list):
+                    raise ValueError(
+                        f"plugin.json in {source_label!r} has a view "
+                        "whose 'components' is not a list")
+                for comp in components:
+                    if not isinstance(comp, dict) \
+                            or not isinstance(comp.get("id"), str) \
+                            or not comp["id"] \
+                            or comp.get("kind") not in (
+                                "text", "input", "button", "list"):
+                        raise ValueError(
+                            f"plugin.json in {source_label!r} has a "
+                            "view component without a string 'id' and "
+                            "a kind of text/input/button/list")
     return data
 
 
@@ -1185,3 +1255,337 @@ def download_plugin_bundle(url: str, dest,
         raise
     os.replace(tmp_path, dest_path)
     return {"path": dest_path, "size": total, "url": url}
+
+
+# ---------------------------------------------------------------------------
+# Round 8: plugin overlays, actions, views, proposals, replacement.
+#
+# Original specs: CommandCatalog+PluginViews.swift (plugins.overlays
+# / set-overlays / view / view-event / show-view) and
+# CommandCatalog+Plugins.swift (plugins.actions / proposal / replace
+# / setup). The original's views are SwiftUI; the Windows host is
+# headless, so a view here is a JSON component model declared in
+# the manifest (kinds text/input/button/list) with session state
+# for input values. plugins.show-view stays honest: there is no
+# viewer to show a view in. plugins.setup stays honest: pure .py
+# plugins declare no dependency recipe to run.
+# ---------------------------------------------------------------------------
+
+#: Session-only overlays: {scope: {plugin: [overlay, ...]}}. The
+#: original says overlays are NOT saved with the project, so they
+#: live only in this process and are lost on restart, by design.
+_OVERLAYS: dict = {}
+
+#: Session-only plugin view state: {(scope, plugin, view):
+#: {component_id: value}} for input components.
+_VIEW_STATE: dict = {}
+
+
+def _overlay_scope(plugins_dir) -> str:
+    return os.path.abspath(_plugins_folder(plugins_dir))
+
+
+def _validate_overlay(entry: dict) -> dict:
+    if not isinstance(entry, dict):
+        raise ValueError("Plugin overlays must be objects")
+    oid = entry.get("id")
+    kind = entry.get("kind")
+    if not isinstance(oid, str) or not oid:
+        raise ValueError("Plugin overlay needs a string 'id'")
+    if kind not in ("range", "marker", "region"):
+        raise ValueError(
+            "Plugin overlay kind must be range, marker or region")
+    for key in ("start", "end"):
+        if key in entry and not isinstance(entry[key], (int, float)):
+            raise ValueError(
+                f"Plugin overlay {key!r} must be a number")
+    rect = entry.get("rect")
+    if rect is not None:
+        if not isinstance(rect, dict):
+            raise ValueError("Plugin overlay rect must be an object")
+        for key in ("x", "y", "width", "height"):
+            value = rect.get(key)
+            if not isinstance(value, (int, float)) \
+                    or not 0 <= value <= 1:
+                raise ValueError(
+                    "Plugin overlay rect values must be 0..1 shares")
+    return dict(entry)
+
+
+def set_plugin_overlays(plugin: str, overlays,
+                        plugins_dir=None) -> dict:
+    """Replace a plugin's overlays (an empty list clears them).
+    Session-only: never saved with the project, per the spec."""
+    if not isinstance(overlays, list):
+        raise ValueError("plugins.set-overlays needs a JSON array")
+    cleaned = [_validate_overlay(e) for e in overlays]
+    scope = _overlay_scope(plugins_dir)
+    _OVERLAYS.setdefault(scope, {})[plugin] = cleaned
+    return {"plugin": plugin, "overlays": cleaned}
+
+
+def list_plugin_overlays(plugin=None, plugins_dir=None) -> dict:
+    """List the overlays plugins draw on the timeline and viewer,
+    by plugin (or one plugin)."""
+    scope = _overlay_scope(plugins_dir)
+    by_plugin = _OVERLAYS.get(scope, {})
+    if plugin is not None:
+        return {"plugin": plugin,
+                "overlays": list(by_plugin.get(plugin, []))}
+    return {"overlays": {name: list(entries)
+                         for name, entries in by_plugin.items()}}
+
+
+def list_plugin_actions(query=None, plugin=None,
+                        plugins_dir=None) -> dict:
+    """List actions plugins add to the editor, from manifest
+    'actions' declarations. An action is available when its plugin
+    is enabled and its hook is runnable (declared + provided by
+    the entry module, or a top-level module hook). lastRun is
+    null: run history is not tracked in this build."""
+    plugins = load_plugins(plugins_dir)
+    disabled = _disabled_ids(plugins_dir)
+    out = []
+    for name, info in sorted(plugins.items()):
+        if name.startswith("_"):
+            continue
+        if plugin is not None and name != plugin:
+            continue
+        actions = []
+        if info.get("manifest"):
+            actions = info.get("manifest_actions") or []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            hook = action.get("hook")
+            runnable = False
+            if info.get("manifest"):
+                runnable = hook in (info.get("manifest_hooks") or []) \
+                    and callable(info.get(hook))
+            else:
+                runnable = callable(info.get(hook))
+            entry = {
+                "plugin": name,
+                "id": action.get("id"),
+                "title": action.get("title", action.get("id")),
+                "description": action.get("description", ""),
+                "parameters": action.get("parameters") or {},
+                "hook": hook,
+                "available": name not in disabled and runnable,
+                "lastRun": None}
+            if query and query.lower() not in (
+                    str(entry["id"]) + str(entry["title"])
+                    + name).lower():
+                continue
+            out.append(entry)
+    return {"actions": out}
+
+
+def _manifest_view(info: dict, view_id: str) -> dict:
+    views = info.get("manifest_views") or []
+    for view in views:
+        if isinstance(view, dict) and view.get("id") == view_id:
+            return view
+    raise KeyError(
+        f"Plugin has no view {view_id!r} "
+        f"(declared: {[v.get('id') for v in views if isinstance(v, dict)]})")
+
+
+def get_plugin_view(plugin: str, view_id: str,
+                    plugins_dir=None) -> dict:
+    """Render a plugin view and return its components as JSON
+    (text, lists, inputs with their current values, buttons by
+    id). The view model comes from the manifest; there is no
+    SwiftUI host headless, so 'open' is not honoured here."""
+    plugins = load_plugins(plugins_dir)
+    if plugin not in plugins or plugins[plugin].get("_errors"):
+        raise KeyError(f"Unknown plugin: {plugin!r}")
+    info = plugins[plugin]
+    if not info.get("manifest"):
+        raise ValueError(
+            f"Plugin {plugin!r} is not a manifest plugin and "
+            "declares no views")
+    view = _manifest_view(info, view_id)
+    scope = _overlay_scope(plugins_dir)
+    state = _VIEW_STATE.get((scope, plugin, view_id), {})
+    components = []
+    for comp in view.get("components") or []:
+        entry = dict(comp)
+        if comp.get("kind") == "input":
+            entry["value"] = state.get(
+                comp["id"], comp.get("value", ""))
+        components.append(entry)
+    return {"plugin": plugin, "view": view_id,
+            "title": view.get("title", view_id),
+            "placement": view.get("placement", "panel"),
+            "components": components}
+
+
+def plugin_view_event(plugin: str, view_id: str, node: str,
+                      event_type: str = "click", value=None,
+                      project=None, plugins_dir=None) -> dict:
+    """Do what a user does in a plugin view: click a button,
+    change an input, submit a text field, select a list row or
+    press a row button. Returns the view's new components. A
+    button with an 'action' hook runs that hook (via
+    apply_plugin, which enforces the disabled gate); other
+    events only update session view state."""
+    view = get_plugin_view(plugin, view_id, plugins_dir)
+    components = view["components"]
+    comp = next((c for c in components if c["id"] == node), None)
+    if comp is None:
+        raise KeyError(
+            f"View {view_id!r} has no component {node!r}")
+    scope = _overlay_scope(plugins_dir)
+    if event_type in ("change", "submit", "select"):
+        state = _VIEW_STATE.setdefault((scope, plugin, view_id), {})
+        state[node] = value
+    elif event_type in ("click", "row-button"):
+        action = comp.get("action")
+        if action:
+            if project is None:
+                raise ValueError(
+                    "Button action needs an open project")
+            item_id = comp.get("item")
+            if item_id is None:
+                raise ValueError(
+                    "Button action needs the view component to "
+                    "carry an 'item' id")
+            apply_plugin(project, plugin, action, item_id,
+                         plugins_dir=plugins_dir)
+    elif event_type not in ("click",):
+        raise ValueError(f"Unknown view event type: {event_type!r}")
+    return get_plugin_view(plugin, view_id, plugins_dir)
+
+
+def store_plugin_proposal(project, plugin: str, hook: str,
+                          ops) -> dict:
+    """Store a hook-proposed edit as pending (see apply_plugin's
+    proposal convention). Ops are validated on apply, not here,
+    so a proposal can be inspected before anything runs."""
+    if not isinstance(ops, list) or not ops:
+        raise ValueError("Plugin proposal needs a non-empty ops list")
+    proposals = project.data.setdefault("plugin_proposals", [])
+    pid = f"prop-{len(proposals) + 1:04d}"
+    record = {"id": pid, "plugin": plugin, "hook": hook,
+              "ops": ops, "status": "pending"}
+    proposals.append(record)
+    project._bump()
+    return record
+
+
+def apply_plugin_proposal(project, proposal_id: str,
+                          decision: str) -> dict:
+    """Apply or discard an edit a plugin hook proposed. Apply
+    validates every op before applying any of them (atomic):
+    set_clip_field (volume/muted/fadeIn/fadeOut via the item
+    dict), set_text, and add_text on a text track. Unknown ops
+    refuse the whole proposal."""
+    if decision not in ("apply", "discard"):
+        raise ValueError(
+            "plugins.proposal decision must be 'apply' or 'discard'")
+    proposals = project.data.get("plugin_proposals") or []
+    record = next((p for p in proposals if p["id"] == proposal_id),
+                  None)
+    if record is None:
+        raise KeyError(f"Unknown proposal: {proposal_id!r}")
+    if record.get("status") != "pending":
+        raise ValueError(
+            f"Proposal {proposal_id!r} is already "
+            f"{record.get('status')}")
+    if decision == "discard":
+        record["status"] = "discarded"
+        project._bump()
+        return {"id": proposal_id, "status": "discarded",
+                "rev": project.rev}
+    # Validate everything first.
+    for op in record["ops"]:
+        if not isinstance(op, dict) or "op" not in op:
+            raise ValueError("Proposal op must be an object with 'op'")
+        if op["op"] == "set_clip_field":
+            _, item = project.item(op["item"])
+            if op.get("field") not in ("volume", "muted", "fadeIn",
+                                       "fadeOut"):
+                raise ValueError(
+                    "Proposal set_clip_field field must be volume, "
+                    "muted, fadeIn or fadeOut")
+        elif op["op"] == "set_text":
+            _, item = project.item(op["item"])
+            if "text" not in item:
+                raise ValueError(
+                    "Proposal set_text target has no text field")
+        elif op["op"] == "add_text":
+            track = project.track(op["track"])
+            if track["kind"] != "text":
+                raise ValueError(
+                    "Proposal add_text target must be a text track")
+        else:
+            raise ValueError(
+                f"Unknown proposal op: {op['op']!r}")
+    applied = []
+    for op in record["ops"]:
+        if op["op"] == "set_clip_field":
+            _, item = project.item(op["item"])
+            item[op["field"]] = op["value"]
+            applied.append(op["op"])
+        elif op["op"] == "set_text":
+            project.set_text(op["item"], op["text"])
+            applied.append(op["op"])
+        elif op["op"] == "add_text":
+            project.add_text(op["track"], op["text"],
+                             int(op["at"]), int(op["dur"]))
+            applied.append(op["op"])
+    record["status"] = "applied"
+    project._bump()
+    return {"id": proposal_id, "status": "applied",
+            "applied": applied, "rev": project.rev}
+
+
+def replace_plugin(plugin_id: str, source,
+                   plugins_dir: str | None = None) -> dict:
+    """Replace an installed plugin with a new version from a
+    folder, its plugin.json or a .zip bundle, in the same scope.
+    The new files must carry the same plugin ID (checked before
+    anything is copied); like install overwrite, the installed
+    plugin must already be disabled — only the user enables it
+    again after reviewing the new files. Reuses install_plugin's
+    validation and copy paths, so a failed replacement never
+    leaves a half-installed plugin."""
+    _validate_id(plugin_id)
+    installed = _load_installed_manifest(plugin_id, plugins_dir)
+    _ = installed
+    if plugin_id not in _disabled_ids(plugins_dir) and \
+            _existing_folder_id(plugin_id, plugins_dir) is not None:
+        raise ValueError(
+            f"Plugin {plugin_id!r} is enabled; disable it first "
+            "before replacing it")
+    if isinstance(source, str) and _URL_RE.match(source.strip()):
+        raise ValueError(
+            "replace_plugin never downloads: download the bundle "
+            "first with download_plugin_bundle(), then replace "
+            "from the downloaded file")
+    src = os.fspath(source)
+    if not os.path.exists(src):
+        raise FileNotFoundError(f"Plugin source not found: {src!r}")
+    if os.path.isdir(src):
+        manifest_path = os.path.join(src, "plugin.json")
+        if not os.path.isfile(manifest_path):
+            raise ValueError(
+                f"folder source has no plugin.json at its root: {src!r}")
+        with open(manifest_path, "rb") as fh:
+            candidate = _parse_manifest_bytes(fh.read(),
+                                              source_label=src)
+    elif os.path.isfile(src) and src.lower().endswith(".zip"):
+        candidate, _entries = _scan_zip_source(src)
+    else:
+        raise ValueError(
+            "Plugin source must be a folder containing plugin.json "
+            f"or a .zip bundle, not: {src!r}")
+    if candidate.get("id") != plugin_id:
+        raise ValueError(
+            f"Replacement plugin id {candidate.get('id')!r} does not "
+            f"match installed plugin {plugin_id!r}")
+    result = install_plugin(src, plugins_dir=plugins_dir,
+                            overwrite=True)
+    result["replaced"] = True
+    return result

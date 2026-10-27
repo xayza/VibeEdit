@@ -481,8 +481,8 @@ TOOLS.extend([
     {"name": "vibeedit_agent_terminals", "description": "Not available in this Windows build: no terminal list exists in this headless server; terminals live outside it."},
     {"name": "vibeedit_agent_toggle_dock", "description": "Not available in this Windows build: no dock UI exists in this headless server; the web UI Agent dock is a separate browser view."},
     {"name": "vibeedit_agent_ask", "description": "Not available in this Windows build: in-app LLM chat is not present (parity-by-design: the original removed its model-API panel); use an external agent via MCP."},
-    {"name": "vibeedit_agent_kit_check", "description": "Not available in this Windows build: no agent-kit/skills store module exists in vibeedit_core to check against."},
-    {"name": "vibeedit_agent_kit_install", "description": "Not available in this Windows build: agent-kit install is tied to the skills store, which does not exist in vibeedit_core."},
+    {"name": "vibeedit_agent_kit_check", "description": "Local agent-kit status: kit folder and skills from the skills store. No releases channel is configured, so no newer-release check runs (newer is null)."},
+    {"name": "vibeedit_agent_kit_install", "description": "Install agent-kit skills from a folder of .md files (or one .md file) into the kit folder; unsafe ids and existing skills are refused."},
     {"name": "vibeedit_agent_kit_update", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
     {"name": "vibeedit_agent_kit_later", "description": "Not available in this Windows build: agent-kit update is tied to the skills store, which does not exist in vibeedit_core."},
     {"name": "vibeedit_agent_status", "description": "Not available in this Windows build: no agent terminal session is managed by this headless server."},
@@ -552,21 +552,21 @@ TOOLS.extend([
     {"name": "vibeedit_voice_fit", "description": "Change a voiceover item speed (pitch kept by the renderer) so it lasts the given frames, within optional min/max ratios."},
     {"name": "vibeedit_voice_place", "description": "Place a generated audio media item on the Voiceover track (creating the track when the project has none)."},
     {"name": "vibeedit_image_generate", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
-    {"name": "vibeedit_image_generate_list", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
-    {"name": "vibeedit_image_style", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
-    {"name": "vibeedit_image_disclose", "description": "Not available in this Windows build: no image-generation provider/model is wired in this build."},
+    {"name": "vibeedit_image_generate_list", "description": "List the project's generated pictures (media entries flagged generated)."},
+    {"name": "vibeedit_image_style", "description": "Read or set the project's image style lock (style prompt, reference pictures, seed, disclosure label); clear removes it. The lock itself is state; generation still needs a provider."},
+    {"name": "vibeedit_image_disclose", "description": "Put the disclosure label over generated pictures on the timeline (one small top-left text item per run); nothing is added when no label is configured anywhere."},
     {"name": "vibeedit_image_cutout", "description": "Cut out the foreground of an image with OpenCV grabCut (raises a clear error naming the missing backend when OpenCV is absent)."},
     {"name": "vibeedit_library_search", "description": "Search the project's saved library items by name, text or media id (local project data only; no provider)."},
     {"name": "vibeedit_library_generate", "description": "Not available in this Windows build: no library generation provider is wired in this build."},
-    {"name": "vibeedit_library_brand_pose", "description": "Not available in this Windows build: no brand-pose engine is wired in this build."},
-    {"name": "vibeedit_library_export_pack", "description": "Not available in this Windows build: no library pack exporter is wired in this build."},
-    {"name": "vibeedit_library_import_pack", "description": "Not available in this Windows build: no library pack importer is wired in this build."},
-    {"name": "vibeedit_library_analyze", "description": "Not available in this Windows build: no library analyzer is wired in this build."},
+    {"name": "vibeedit_library_brand_pose", "description": "Add a mascot pose to a brand kit from a photo (vision cutout sticker). The generate path needs an image.generate provider and is refused."},
+    {"name": "vibeedit_library_export_pack", "description": "Write library items as a pack folder (pack.json and files); licence redistribute:false items are refused and named, licence-silent items are listed as unknownLicenses."},
+    {"name": "vibeedit_library_import_pack", "description": "Add a pack (a folder with pack.json, or a .zip of one) to the project library; existing IDs are refused unless replace saves them as new versions."},
+    {"name": "vibeedit_library_analyze", "description": "Measure an audio library item's file (duration, FFmpeg loudnorm/true peak, RMS landmarks, beat tempo, energy) and save as a new version; unmeasurable values stay null with a note."},
     {"name": "vibeedit_media_ocr", "description": "Recognise text in a project media entry or image file with Tesseract (alias of vision_text; clear error when Tesseract is absent)."},
     {"name": "vibeedit_media_subjects", "description": "Detect faces in a project media entry or image file with OpenCV Haar cascades (alias of vision_faces; clear error when OpenCV is absent)."},
-    {"name": "vibeedit_media_describe", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
-    {"name": "vibeedit_media_description", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
-    {"name": "vibeedit_media_digest", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
+    {"name": "vibeedit_media_describe", "description": "Store caller-supplied shot-by-shot facts for a source media (shots may not overlap; each needs at least one fact field)."},
+    {"name": "vibeedit_media_description", "description": "Read media descriptions with coverage against measured shots (a measured shot counts as covered when half or more of it is described)."},
+    {"name": "vibeedit_media_digest", "description": "Footage facts in one read: header (seconds, size, speech share, counts), described shots in time order, measured facts from the analysis record."},
     {"name": "vibeedit_media_cuts", "description": "Detect scene cuts in a project media with the FFmpeg scene filter (threshold, default 0.4) and correct the stored cut list: add cuts or remove candidates at source seconds, clear drops earlier corrections, remeasure measures again and drops corrections. Corrections live in the media record."},
     {"name": "vibeedit_media_sync", "description": "Find the time offset between two recordings of the same moment from their sound: mono 8 kHz envelopes cross-correlated (coarse 10/s, fine 100/s around the best lag), halves matched again for drift; time in 'to' = time in 'media' + offsetSeconds, correlation below 0.4 means no shared sound; with item, also the matching source frame of 'to' for that clip's in-point."},
     {"name": "vibeedit_media_speech_map", "description": "Map where an analysed media has sound that may be speech, and the gaps, with the calibration used: 0.1 s RMS level windows split into quiet/loud by Otsu unless thresholdDb is given; separation clear/weak/none/given, spans/gaps null with a reason when the classes do not separate; transcript section when a stored transcript exists. Spans are sound, not proof of speech."},
@@ -606,40 +606,40 @@ TOOLS.extend([
     {"name": "vibeedit_plugins_install", "description": "Install a plugin from a local folder or .zip bundle (manifest validated before copying; URL sources must be downloaded first with plugins_download)."},
     {"name": "vibeedit_plugins_updates", "description": "Check a plugin for update metadata (no network; unknown unless the installed manifest carries update metadata)."},
     {"name": "vibeedit_plugins_search", "description": "Search locally discovered plugins by name, description or hook (local plugins folder only; no registry)."},
-    {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: plugin setup is not supported in this build."},
+    {"name": "vibeedit_plugins_setup", "description": "Not available in this Windows build: pure .py plugins declare no dependency recipe for plugins.setup to run; manifest actions/views/overlays/proposals/replacement are real tools."},
     {"name": "vibeedit_plugins_set", "description": "Turn a plugin on or off (same switches as plugin_enable/plugin_disable). Per-hook switches are not supported in this build."},
-    {"name": "vibeedit_plugins_set_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
-    {"name": "vibeedit_plugins_overlays", "description": "Not available in this Windows build: plugin overlays are not supported in this build."},
-    {"name": "vibeedit_plugins_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
-    {"name": "vibeedit_plugins_view_event", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
-    {"name": "vibeedit_plugins_proposal", "description": "Not available in this Windows build: no plugin proposal workflow exists in this build."},
-    {"name": "vibeedit_plugins_replace", "description": "Not available in this Windows build: plugin replacement is not supported in this build."},
+    {"name": "vibeedit_plugins_set_overlays", "description": "Replace a plugin's overlays (empty list clears them); session-only, never saved with the project."},
+    {"name": "vibeedit_plugins_overlays", "description": "List the overlays plugins draw on the timeline and viewer, by plugin (session-only, never saved with the project)."},
+    {"name": "vibeedit_plugins_view", "description": "Render a plugin view from its manifest component model and return its components as JSON (text, lists, inputs with current values, buttons by id)."},
+    {"name": "vibeedit_plugins_view_event", "description": "Do what a user does in a plugin view: click a button (runs its declared action hook when one exists), change an input, submit, select a row."},
+    {"name": "vibeedit_plugins_proposal", "description": "Apply or discard an edit a plugin hook proposed (hooks return propose ops, stored pending until this decision)."},
+    {"name": "vibeedit_plugins_replace", "description": "Replace an installed plugin with a new version from a folder, plugin.json or .zip; same plugin ID required, plugin must be disabled first."},
     {"name": "vibeedit_plugins_remove", "description": "Remove an installed plugin folder (refuses while the plugin is enabled; disable first)."},
     {"name": "vibeedit_plugins_run", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
     {"name": "vibeedit_plugins_invoke", "description": "Run one declared hook of an enabled plugin on a timeline item via apply_plugin (only declared hooks of enabled plugins run; disabled plugins are refused)."},
-    {"name": "vibeedit_plugins_actions", "description": "Not available in this Windows build: no plugin action host exists in this headless server."},
+    {"name": "vibeedit_plugins_actions", "description": "List actions plugins add to the editor, from manifest action declarations, with parameters, placements and availability."},
     {"name": "vibeedit_plugins_option", "description": "Set one plugin option (omit value to reset it to its default). Values are validated against the plugin's declared schema; project-scope values are a project edit, user-scope values are saved in plugins.json."},
     {"name": "vibeedit_plugins_options", "description": "Read a plugin's options: declared schema, scope (user/project) and current values (user-scope from plugins.json, project-scope from the open project; without an open project, project-scope options report their defaults)."},
-    {"name": "vibeedit_plugins_show_view", "description": "Not available in this Windows build: no plugin view host exists in this headless server."},
-    {"name": "vibeedit_clip_motion", "description": "Not available in this Windows build: motion editing is another agent's job; no motion state exists on clips in this build."},
-    {"name": "vibeedit_clip_backdrop", "description": "Not available in this Windows build: backdrop editing is another agent's job; no backdrop state exists on clips in this build."},
-    {"name": "vibeedit_clip_change_framing", "description": "Not available in this Windows build: reframing is another agent's job; no framing state exists on clips in this build."},
+    {"name": "vibeedit_plugins_show_view", "description": "Not available in this Windows build: no viewer exists in this headless server to show a plugin view in; the view's components are available via plugins_view."},
+    {"name": "vibeedit_clip_motion", "description": "Animate a clip with a MotionPreset (zoom-in/out, pan-left/right/up/down, fade-in-out, pop-in, slide-up, zoom-punch) or custom keyframes JSON; stored as keyframes and rendered by the zoompan/tilt/opacity paths. Focus framing is refused (needs a viewer band)."},
+    {"name": "vibeedit_clip_backdrop", "description": "Not available in this Windows build: the render chain is fill-scale/crop only, so there are no fitted-picture bars to fill; a backdrop needs fit-mode plus background-layer rendering that is not in the chain."},
+    {"name": "vibeedit_clip_change_framing", "description": "Cycle a video clip through Wide/Medium/Close-up/Left/Right framing presets (ReframePreset); zoom renders as fill scale and pan/tilt as crop offsets."},
     {"name": "vibeedit_clip_reframe", "description": "Set (or clear with null) a media clip's reframe window; rendered as a crop before scaling, never stretched."},
     {"name": "vibeedit_clip_send_to_agent", "description": "Not available in this Windows build: no agent session exists in this headless server to send a clip to."},
     {"name": "vibeedit_clip_unlink_audio", "description": "Unlink a clip's linked audio: clear linked_audio on the video item and linked_video on each audio partner (errors when the item has no linked audio)."},
-    {"name": "vibeedit_music_replace", "description": "Not available in this Windows build: no music-replacement workflow exists in this build; replace music clips with timeline move/delete/add ops."},
-    {"name": "vibeedit_narration_windows", "description": "Not available in this Windows build: no narration-window workflow exists in this build."},
-    {"name": "vibeedit_outcomes_import", "description": "Not available in this Windows build: no outcomes store exists in this build."},
-    {"name": "vibeedit_outcomes_map", "description": "Not available in this Windows build: no outcomes store exists in this build."},
-    {"name": "vibeedit_run_append", "description": "Not available in this Windows build: no workflow runner exists in this build to append a run to."},
-    {"name": "vibeedit_run_checklist", "description": "Not available in this Windows build: no workflow runner exists in this build; use review_run for the review checklist data."},
-    {"name": "vibeedit_run_dismiss", "description": "Not available in this Windows build: no workflow runner exists in this build."},
-    {"name": "vibeedit_run_fix_issues", "description": "Not available in this Windows build: no workflow runner exists in this build; fix issues with timeline ops, then review_verify."},
-    {"name": "vibeedit_run_follow", "description": "Not available in this Windows build: no workflow runner exists in this build."},
-    {"name": "vibeedit_run_toggle", "description": "Not available in this Windows build: no workflow runner exists in this build."},
-    {"name": "vibeedit_run_another_recipe", "description": "Not available in this Windows build: no workflow runner exists in this build."},
-    {"name": "vibeedit_acme_voice_fast", "description": "Not available in this Windows build: no voice provider is wired in this build."},
-    {"name": "vibeedit_speech_rate", "description": "Not available in this Windows build: no voice provider is wired in this build, so no speech rate can be set."},
+    {"name": "vibeedit_music_replace", "description": "Swap the music bed for a new sound covering the old Music clips' span, keeping level/muted/fades; repeats unless loop=false."},
+    {"name": "vibeedit_narration_windows", "description": "List timeline stretches with no spoken word and no voiceover item, with anchors (afterWord, firstCut, firstBeat, section), covered music/footage shares and a word budget when rate is given."},
+    {"name": "vibeedit_outcomes_import", "description": "Import an export's retention curve and totals (JSON {curve, totals}, a point list, or CSV), stored per export in the project; re-import replaces."},
+    {"name": "vibeedit_outcomes_map", "description": "Map an imported export's outcomes onto its sections (markers, else the whole video): retention, change, drop/lift points, replay peak, views at start, largest drops with nearby caption words."},
+    {"name": "vibeedit_run_append", "description": "Append an entry to the run log stored in the project; stage gates enforced (done needs evidence or is unverified, skipped needs a reason, review-done with open required stages returns stage_pending)."},
+    {"name": "vibeedit_run_checklist", "description": "The run's checklist derived from the plan and the run log: stage statuses, skill reads, audits, recipe and open items."},
+    {"name": "vibeedit_run_dismiss", "description": "Not available in this Windows build: run.dismiss is a UIAction that dismisses the run panel, and this headless server has no run panel."},
+    {"name": "vibeedit_run_fix_issues", "description": "Not available in this Windows build: run.fix-issues is a UIAction on the run panel, and this headless server has no run panel; fix issues with timeline ops, then review_verify."},
+    {"name": "vibeedit_run_follow", "description": "Not available in this Windows build: run.follow is a UIAction toggling follow-agent scrolling in the live viewer, and this headless server has no viewer."},
+    {"name": "vibeedit_run_toggle", "description": "Not available in this Windows build: run.toggle is a UIAction toggling the run panel, and this headless server has no run panel."},
+    {"name": "vibeedit_run_another_recipe", "description": "Not available in this Windows build: run.another-recipe is a UIAction on the run panel, and this headless server has no run panel."},
+    {"name": "vibeedit_acme_voice_fast", "description": "Not available in this Windows build: acme.voice.fast is a provider capability string from the original's agent instructions and no acme provider is wired here; voice generation via Edge/Piper is the separate voice_synthesize tool."},
+    {"name": "vibeedit_speech_rate", "description": "Measure speaking rate from transcript words (analysis-record words, or caption words for the timeline): syllables for Vietnamese, characters for CJK, else words; per-phrase p10/p50/p90, overall and articulation. Voice takes carry no text, so no voice rate is fabricated."},
     {"name": "vibeedit_app_vibeedit", "description": "Not available in this Windows build: no app-level automation client exists in this headless server."},
     {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Not available in this Windows build: no app-level automation clients exist in this headless server."},
     {"name": "vibeedit_app_vibeedit_debug_log", "description": "Not available in this Windows build: no app debug log is kept by this headless server."},
@@ -846,28 +846,35 @@ class MCPServer:
             from .plugins import list_plugins
             available = [p["name"] for p in list_plugins()
                          if p["name"] != "_errors"]
-            raise self._na(name, "plugin setup/view/overlay/proposal/"
-                           "replacement workflows are not supported in "
-                           "this build; the local plugin system holds: "
-                           f"{available or 'none'}. "
+            raise self._na(name, "plugin setup and show-view "
+                           "are not supported in this headless build "
+                           "(no dependency recipe to run, no viewer "
+                           "to show a view in); the local plugin "
+                           f"system holds: {available or 'none'}. "
                            "Plugin install, search, hook execution, "
-                           "option read/set and the on/off switch are "
-                           "real (plugins_install/plugins_search/"
+                           "option read/set, overlays, actions, views, "
+                           "proposals and replacement are real "
+                           "(plugins_install/plugins_search/"
                            "plugins_run/plugins_options/plugins_option/"
-                           "plugins_set); no untrusted code is copied "
-                           "or executed outside those paths")
+                           "plugins_set/plugins_overlays/"
+                           "plugins_set_overlays/plugins_actions/"
+                           "plugins_view/plugins_view_event/"
+                           "plugins_proposal/plugins_replace); no "
+                           "untrusted code is copied or executed "
+                           "outside those paths")
         if name.startswith("vibeedit_voice_") or name in (
-                "vibeedit_acme_voice_fast", "vibeedit_speech_rate"):
+                "vibeedit_acme_voice_fast",):
             found = importlib.util.find_spec("vibeedit_core.voice")
             raise self._na(name, "no voice cloning provider is "
                            "wired in this build (generation via Edge/Piper "
                            "is wired separately); nothing is cloned")
         if name.startswith("vibeedit_agent_kit"):
-            raise self._na(name, "agent-kit install/update is a "
-                           "separate original workflow with no "
-                           "equivalent in this build; the skills store "
-                           "(vibeedit_core.skills) exists separately "
-                           "and is covered by the real skills_* tools")
+            raise self._na(name, "agent-kit update needs the signed "
+                           "releases channel, which is not configured "
+                           "in this build, and kit-later dismisses a "
+                           "UI prompt this headless server has no "
+                           "view of; kit_check (local kit status) and "
+                           "kit_install (skill-pack install) are real")
         # Every other honest tool: its description (in TOOLS) already
         # states the exact blocker; the raised error repeats it.
         desc = next((t["description"] for t in TOOLS
@@ -885,7 +892,9 @@ class MCPServer:
         "vibeedit_close_gaps", "vibeedit_project_format_set",
         "vibeedit_timeline_delete", "vibeedit_timeline_cut_range",
         "vibeedit_timeline_lift", "vibeedit_timeline_move_items",
-        "vibeedit_layer_delete", "vibeedit_captions_replace"})
+        "vibeedit_layer_delete", "vibeedit_captions_replace",
+        "vibeedit_music_replace", "vibeedit_outcomes_import",
+        "vibeedit_library_import_pack", "vibeedit_image_disclose"})
 
     # Round 3 aliases: original spec names that map to an existing
     # real handler (see the TOOLS entries above). Applied before
@@ -3781,6 +3790,223 @@ class MCPServer:
             result = proj.set_reframe(args["item"], args.get("window"))
             self._save()
             return result
+        # Round 8: state/workflow + local-data tools (see
+        # vibeedit_core/round8.py and plugins.py for the logic).
+        if name in ("vibeedit_clip_motion",
+                    "vibeedit_clip_change_framing",
+                    "vibeedit_music_replace", "vibeedit_narration_windows",
+                    "vibeedit_outcomes_import", "vibeedit_outcomes_map",
+                    "vibeedit_run_append", "vibeedit_run_checklist",
+                    "vibeedit_media_describe", "vibeedit_media_description",
+                    "vibeedit_media_digest", "vibeedit_speech_rate",
+                    "vibeedit_image_style", "vibeedit_image_disclose",
+                    "vibeedit_image_generate_list",
+                    "vibeedit_library_export_pack",
+                    "vibeedit_library_import_pack",
+                    "vibeedit_library_analyze",
+                    "vibeedit_library_brand_pose",
+                    "vibeedit_agent_kit_check",
+                    "vibeedit_agent_kit_install",
+                    "vibeedit_plugins_overlays",
+                    "vibeedit_plugins_set_overlays",
+                    "vibeedit_plugins_actions", "vibeedit_plugins_view",
+                    "vibeedit_plugins_view_event",
+                    "vibeedit_plugins_proposal",
+                    "vibeedit_plugins_replace"):
+            from . import round8 as _r8
+            from .plugins import (
+                apply_plugin_proposal, get_plugin_view,
+                list_plugin_actions, list_plugin_overlays,
+                plugin_view_event, replace_plugin,
+                set_plugin_overlays)
+            pdir = args.get("plugins_dir")
+
+            def _bool(value, default=False):
+                if isinstance(value, bool):
+                    return value
+                if value is None:
+                    return default
+                return str(value).lower() in ("true", "1", "yes")
+
+            def _json_arg(value):
+                if isinstance(value, str):
+                    return json.loads(value)
+                return value
+            if name == "vibeedit_clip_motion":
+                proj = self._require()
+                result = _r8.apply_motion(
+                    proj, args["item"], preset=args.get("preset"),
+                    keyframes=args.get("keyframes"),
+                    focus=args.get("focus"), within=args.get("within"))
+                self._save()
+                return result
+            if name == "vibeedit_clip_change_framing":
+                proj = self._require()
+                result = _r8.change_framing(proj, args["item"])
+                self._save()
+                return result
+            if name == "vibeedit_music_replace":
+                proj = self._require()
+                result = _r8.music_replace(
+                    proj, media_id=args.get("media"),
+                    library_id=args.get("library"),
+                    loop=_bool(args.get("loop"), True))
+                self._save()
+                return result
+            if name == "vibeedit_narration_windows":
+                proj = self._require()
+                return _r8.narration_windows(
+                    proj,
+                    min_seconds=float(args.get("minSeconds",
+                                             args.get("min_seconds", 1.0))),
+                    rate=(float(args["rate"])
+                          if args.get("rate") is not None else None))
+            if name == "vibeedit_outcomes_import":
+                proj = self._require()
+                payload = args.get("payload", args.get("data"))
+                if payload is None and args.get("path"):
+                    with open(args["path"], encoding="utf-8") as fh:
+                        payload = fh.read()
+                    if args["path"].lower().endswith(".json"):
+                        payload = json.loads(payload)
+                result = _r8.import_outcomes(
+                    proj, args["export"], payload)
+                self._save()
+                return result
+            if name == "vibeedit_outcomes_map":
+                proj = self._require()
+                return _r8.map_outcomes(
+                    proj, args["export"],
+                    window_seconds=float(args.get("window", 5.0)))
+            if name == "vibeedit_run_append":
+                proj = self._require()
+                fields = {}
+                for key in ("stage", "status", "evidence", "reason",
+                            "name", "origin", "verifiedBy", "point",
+                            "verdict", "findings", "by", "text",
+                            "progress", "eta", "round", "fixed", "left",
+                            "measured", "notMeasured"):
+                    if args.get(key) is not None:
+                        fields[key] = args[key]
+                if args.get("data") is not None:
+                    data = _json_arg(args["data"])
+                    if isinstance(data, dict):
+                        fields.update(data)
+                result = _r8.append_run_entry(proj, args["kind"],
+                                              fields)
+                self._save()
+                return result
+            if name == "vibeedit_run_checklist":
+                return _r8.run_checklist(self._require())
+            if name == "vibeedit_media_describe":
+                proj = self._require()
+                result = _r8.describe_media(
+                    proj, args["media"], _json_arg(args["shots"]),
+                    append=_bool(args.get("append")))
+                self._save()
+                return result
+            if name == "vibeedit_media_description":
+                return _r8.media_description(
+                    self._require(), args.get("media"))
+            if name == "vibeedit_media_digest":
+                return _r8.media_digest(self._require(),
+                                        args["media"])
+            if name == "vibeedit_speech_rate":
+                return _r8.speech_rate(self._require(),
+                                       args.get("media"),
+                                       args.get("unit"))
+            if name == "vibeedit_image_style":
+                proj = self._require()
+                result = _r8.image_style(
+                    proj, style=args.get("style"),
+                    references=args.get("references"),
+                    seed=args.get("seed"),
+                    disclosure=args.get("disclosure"),
+                    clear=_bool(args.get("clear")))
+                self._save()
+                return result
+            if name == "vibeedit_image_disclose":
+                proj = self._require()
+                result = _r8.image_disclose(proj, args.get("text"))
+                self._save()
+                return result
+            if name == "vibeedit_image_generate_list":
+                return _r8.image_generate_list(self._require())
+            if name == "vibeedit_library_export_pack":
+                proj = self._require()
+                return _r8.export_pack(
+                    proj, args["output"], pack=args.get("pack"),
+                    kind=args.get("kind"))
+            if name == "vibeedit_library_import_pack":
+                proj = self._require()
+                result = _r8.import_pack(
+                    proj, args["path"],
+                    replace=_bool(args.get("replace")))
+                self._save()
+                return result
+            if name == "vibeedit_library_analyze":
+                proj = self._require()
+                result = _r8.analyze_library_item(
+                    proj, args.get("item", args.get("entry")),
+                    media_path=args.get("media_path"))
+                self._save()
+                return result
+            if name == "vibeedit_library_brand_pose":
+                proj = self._require()
+                if args.get("generate") is not None:
+                    raise ValueError(
+                        "library.brand-pose generate needs an "
+                        "image.generate provider, which is not "
+                        "wired in this build; pass image or media "
+                        "for the cutout path")
+                result = _r8.brand_pose_image(
+                    proj, args["brand"], args["pose"],
+                    image=args.get("image"),
+                    media_id=args.get("media"))
+                self._save()
+                return result
+            if name == "vibeedit_agent_kit_check":
+                return _r8.kit_check(args.get("kit_dir"))
+            if name == "vibeedit_agent_kit_install":
+                return _r8.kit_install_skills(args["path"],
+                                              args.get("kit_dir"))
+            if name == "vibeedit_plugins_overlays":
+                return list_plugin_overlays(args.get("plugin"), pdir)
+            if name == "vibeedit_plugins_set_overlays":
+                return set_plugin_overlays(
+                    args["plugin"], _json_arg(args["overlays"]), pdir)
+            if name == "vibeedit_plugins_actions":
+                return list_plugin_actions(args.get("query"),
+                                           args.get("plugin"), pdir)
+            if name == "vibeedit_plugins_view":
+                return get_plugin_view(args["plugin"], args["view"],
+                                       pdir)
+            if name == "vibeedit_plugins_view_event":
+                view = get_plugin_view(args["plugin"], args["view"],
+                                       pdir)
+                comp = next((c for c in view["components"]
+                             if c["id"] == args["node"]), None)
+                project = None
+                if comp is not None and comp.get("action") \
+                        and args.get("type", "click") in (
+                            "click", "row-button"):
+                    project = self._require()
+                result = plugin_view_event(
+                    args["plugin"], args["view"], args["node"],
+                    args.get("type", "click"), args.get("value"),
+                    project=project, plugins_dir=pdir)
+                if project is not None:
+                    self._save()
+                return result
+            if name == "vibeedit_plugins_proposal":
+                proj = self._require()
+                result = apply_plugin_proposal(
+                    proj, args["id"], args["decision"])
+                self._save()
+                return result
+            if name == "vibeedit_plugins_replace":
+                return replace_plugin(args["plugin"], args["path"],
+                                      pdir)
         if name == "vibeedit_transitions_renderability":
             from .render import list_transition_renderability
             return {"transitions": list_transition_renderability()}

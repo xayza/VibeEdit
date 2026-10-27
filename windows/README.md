@@ -63,8 +63,8 @@ không chủ động bỏ tính năng nào của bản gốc. Bảng parity đ�
 missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
 chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
 
-Trạng thái hiện tại (sau đợt full-parity vòng 5): **MCP 479 công cụ
-(359 thao tác thật, 120 kiểm tra-và-báo-lỗi)** — số live đọc từ
+Trạng thái hiện tại (sau đợt full-parity vòng 8): **MCP 479 công cụ
+(394 thao tác thật, 85 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
 linked audio + reorder, cài plugin, skills (đọc + ghi), knowledge
@@ -72,17 +72,27 @@ store, vision (khi máy có backend), motion transitions, reframe,
 caption transcribe/generate/align (khi máy có faster-whisper), font
 import, hoãn/bỏ qua cập nhật, tìm library/plugin, chạy plugin qua hook
 đã khai báo, phân tích media bằng ffprobe, proxy media, desktop
-single-instance + fallback trình duyệt khi thiếu pywebview/WebView2.
+single-instance + fallback trình duyệt khi thiếu pywebview/WebView2,
+pipeline media.analyze thật (tech/picture/sound, speech map, strip,
+sync), motion clip từ preset gốc + xoay framing (render bằng crop
+expression), thay nhạc giữ volume/fade, cửa sổ lời dẫn, kho outcomes,
+run log + checklist, mô tả media, đo tốc độ nói, khóa style ảnh +
+disclose, đóng/gỡ gói library, phân tích item library, brand pose từ
+ảnh, plugin overlays/actions/views/proposal/replace, kit check/install.
 Hoạt động một phần: Compare chưa khóa khung hình, export
-preset ProRes/4K mới assert mapping chưa render đầy đủ; desktop tắt
+preset ProRes/4K mới render trên Linux VM từ clip giả lập chưa kiểm
+chứng trên footage 4K gốc; desktop tắt
 sạch, HiDPI, phím tắt Ctrl và test chạy trên Windows đã làm xong về
 code ở Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên
 Windows thật. Còn thiếu và sẽ port tiếp (không bỏ): bộ cài/.exe cho
 máy Windows sạch, Windows CI, voice provider (tạo/clone giọng nói),
-app updater (chỉ mới có update-check dạng trạng thái), model
-segmentation học sâu cho cutout, panel giao diện cho các tính năng
-mới (knowledge/skills/vision/plugin install/reframe/link/magnetic),
-và một số tên gốc lẻ — xem `PARITY.md` để có danh sách thật.
+app updater tự thay app đang chạy (chỉ mới có handoff + hoãn/bỏ qua),
+model
+segmentation học sâu cho cutout, `clip_backdrop`, `clip_send_to_agent`,
+panel chạy `run_*`, `plugins_setup`, `plugins_show_view`,
+`agent_kit_update`/`agent_kit_later`, `image_generate`,
+`library_generate`, và hợp nhất vào `VibeEdit/` — xem `PARITY.md`
+để có danh sách thật.
 
 An toàn dữ liệu (Phase 0):
 - Upload trùng tên không còn ghi đè: file thứ hai lưu thành `tên-2.ext`,
@@ -110,7 +120,86 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
-## Full-parity vòng 7 — pipeline media.analyze thật, speech map, strip, sync (mới nhất)
+## Full-parity vòng 8 — state/workflow + provider-local thật, 28 công cụ từ honest thành thật (mới nhất)
+
+- **Nhóm state/workflow (đọc spec gốc trước khi code):**
+  `clip_motion` (10 preset MotionPreset chép nguyên từ
+  `Keyframes.swift` của gốc: zoom-in/out, pan 4 hướng, fade-in-out,
+  pop-in, slide-up, zoom-punch; map zoom→scale, pan share→x, tilt
+  share→y — tilt gốc là pan dọc, KHÔNG phải xoay; custom keyframes
+  JSON với thời gian `t`/`s`/`frame`; lưu qua `set_keyframes` nên
+  render bằng zoompan/tilt/opacity; framing focus bị từ chối kèm
+  hướng tới `clip_reframe`), `clip_change_framing` (xoay preset
+  ReframePreset gốc wide/medium/close/left/right, transform
+  zoom/pan/tilt chép nguyên từ `Project.swift`, render bằng crop
+  expression `(iw-ow)/2+pan` có clamp — không phải số tĩnh, vì kích
+  thước scale thật phụ thuộc tỉ lệ nguồn), `music_replace` (thay
+  đoạn Music giữ volume/muted/fade của clip đầu, lặp trừ khi
+  loop=false), `narration_windows` (khoảng trống giữa từ caption và
+  item voiceover, anchor afterWord/firstCut/firstBeat/section,
+  budget từ chỉ khi có rate; từ transcript của analysis record là
+  thời gian nguồn, KHÔNG phải thời gian timeline nên cố tình không
+  dùng), `outcomes_import`/`outcomes_map` (JSON/CSV, curve giữ đơn
+  vị `t` giây hoặc `position` phần trăm, map lên marker section rồi
+  mới toàn video, percent→fraction), `run_append`/`run_checklist`
+  (run log trong project data đi cùng save/backup/undo; cổng:
+  done không evidence → unverified, skipped không reason → lỗi,
+  review-done khi stage bắt buộc còn mở → `stage_pending`).
+- **Nhóm provider/model — phân biệt phần local làm được:**
+  `media_describe`/`media_description`/`media_digest` (tóm tắt từ
+  shot facts do người gọi cung cấp + analysis record, không bịa mô
+  tả; coverage tính shot đo được mô tả ≥ một nửa), `speech_rate`
+  (ĐO từ từ transcript: tiếng Việt đếm âm tiết, CJK đếm ký tự, còn
+  lại đếm từ; p10/p50/p90 theo cụm ngắt >0,5 s — không phải cài đặt
+  TTS), `image_style`/`image_disclose`/`image_generate_list` (khóa
+  style là state thuần của project; disclose gắn một text item nhỏ
+  góc trên-trái mỗi run clip đã generate trên track captions, không
+  có label cấu hình thì không thêm gì), `library_export_pack`/
+  `library_import_pack` (đóng gói `pack.json` + file có kiểm tra
+  licence: `redistribute: false` bị từ chối và nêu tên, thiếu
+  licence liệt kê `unknownLicenses`; import chống traversal, ID
+  trùng → lưu version mới `id-v{n}`, cap 50 MiB),
+  `library_analyze` (ffprobe tech + loudnorm/true peak + landmark
+  envelope + tempo, lưu version mới), `library_brand_pose` (chỉ
+  đường ảnh: OpenCV grabCut → sticker PNG dưới `brand/`; đường
+  generate bị từ chối kèm tên provider thiếu), `agent_kit_check`
+  (kit local + skills; channel/newer null kèm ghi chú chưa cấu hình
+  kênh releases nên không kiểm tra bản mới hơn) và
+  `agent_kit_install` (copy skill pack .md, id an toàn, trùng/không
+  an toàn bị từ chối).
+- **Plugin (đọc spec gốc trước khi code):** manifest nhận thêm
+  `actions`/`views` (ghi raw như `options`); hook trả `{"propose":
+  [ops]}` chỉ lưu proposal chờ duyệt, không áp dụng ngay; overlay
+  chỉ trong session, không lưu vào project; `plugins_view`/
+  `plugins_view_event` (mô hình component JSON, state input trong
+  session, nút có action chạy qua `apply_plugin` kèm cổng disabled);
+  `plugins_proposal` (kiểm tra nguyên tử trước khi áp dụng; op cho
+  phép: set_clip_field volume/muted/fade, set_text, add_text);
+  `plugins_replace` (kiểm tra ID ứng viên == ID đã cài TRƯỚC khi
+  copy, plugin đã cài phải disabled như install overwrite).
+- **Giữ honest có bằng chứng (không code nửa vời):** `clip_backdrop`
+  (render chain chỉ fill-scale/crop, chưa có nền fitted-picture),
+  `clip_send_to_agent` (không có session agent trong server
+  headless), `run_dismiss`/`run_toggle`/`run_follow`/`run_fix_issues`/
+  `run_another_recipe` (UIAction của panel chạy, headless không có
+  panel), `plugins_setup` (plugin .py thuần không khai báo recipe
+  phụ thuộc), `plugins_show_view` (headless không có viewer; dữ liệu
+  view lấy qua `plugins_view`), `agent_kit_update` (cần kênh
+  releases đã ký, chưa cấu hình) / `agent_kit_later` (chỉ đóng
+  prompt UI), `image_generate` / `library_generate` (cần provider
+  sinh), clone giọng (cần model clone), `acme_voice_fast` (chuỗi
+  capability của provider acme, không phải spec lệnh; không có
+  provider acme nào được nối).
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **394 thật / 85 honest**; **531 tests OK** trên Linux VM
+  (506 + 25 test vòng tám mới). `vibeedit.spec` nay liệt kê 19
+  hidden import (`round8` mới — test spec bắt mọi module core phải
+  có mặt). Cây Swift không động, không hợp nhất,
+  chưa đẩy. Smoke server trên project tạm riêng: `GET /` 200,
+  `/api/mcp-tools` 479 công cụ, `clip_motion` và `run_append` có
+  mặt.
+
+## Full-parity vòng 7 — pipeline media.analyze thật, speech map, strip, sync
 
 - **Pipeline `media.analyze` thật (`vibeedit_core/analysis.py`,
   FFmpeg + Python thuần, không thêm dependency):** `media_analyze`
@@ -174,7 +263,7 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   hidden import (`analysis` mới). Cây Swift không động, không
   hợp nhất, chưa đẩy.
 
-## Full-parity vòng 6 — GPLv3 cho FFmpeg bundle, media_cuts thật, options plugin (mới nhất)
+## Full-parity vòng 6 — GPLv3 cho FFmpeg bundle, media_cuts thật, options plugin
 
 - **Đóng gói giấy phép GPLv3 cho FFmpeg bundle (kết luận vòng 5 nay
   làm thật):** toàn văn GPLv3 lấy từ trang chính thức của GNU
@@ -225,7 +314,7 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   hidden import (`cuts` mới). Cây Swift không động, không hợp
   nhất, chưa đẩy.
 
-## Full-parity vòng 5 — rà soát 132 công cụ honest, nút chết giao diện, desktop, bộ cài (mới nhất)
+## Full-parity vòng 5 — rà soát 132 công cụ honest, nút chết giao diện, desktop, bộ cài
 
 - **Rà soát toàn bộ 132 công cụ kiểm tra-và-báo-lỗi:** quét thực nghiệm
   cho thấy chỉ `vision_cutout` là sai mô tả (handler đã thật từ trước,

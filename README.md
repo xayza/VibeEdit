@@ -55,16 +55,16 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 7)
+## Current status (honest, full-parity round 8)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **366
-  real-operation tools and 113 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **394
+  real-operation tools and 85 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design), and round 7 re-ran that check with the
+  shared-handler design), and round 8 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
@@ -92,8 +92,17 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   desktop handoff with browser fallback, scene-cut detection and
   cut-list correction (`media_cuts`), plugin option read/set
   (`plugins_options`/`plugins_option`) and the plugin on/off switch
-  (`plugins_set`), and
-  506 tests OK on the Linux VM.
+  (`plugins_set`), clip motion from the original MotionPresets and
+  ReframePreset cycling (render-side crop expressions), music
+  replacement keeping volume/fades, narration windows, outcomes
+  store + mapping, run log + checklist with stage gates, media
+  description/digest from shot facts + analysis records, speaking
+  rate measured from transcript words, image style lock + disclose
+  labels, library pack export/import with licence checks, library
+  item analysis, image-path brand pose, plugin overlays/actions/
+  views/proposals/replacement, agent-kit local check + skill-pack
+  install, and
+  531 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K

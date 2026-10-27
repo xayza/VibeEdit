@@ -421,8 +421,8 @@ class TestSelectsVariantsPlanWorkflowCheckpointRunLibrary(B1Case):
 HONEST_SAMPLE = [
     "vibeedit_agent_open", "vibeedit_agent_open_chat", "vibeedit_agent_open_claude",
     "vibeedit_agent_open_codex", "vibeedit_agent_open_shell", "vibeedit_agent_terminals",
-    "vibeedit_agent_toggle_dock", "vibeedit_agent_ask", "vibeedit_agent_kit_check",
-    "vibeedit_agent_kit_install", "vibeedit_agent_kit_update", "vibeedit_agent_kit_later",
+    "vibeedit_agent_toggle_dock", "vibeedit_agent_ask", 
+     "vibeedit_agent_kit_update", "vibeedit_agent_kit_later",
     "vibeedit_agent_status", "vibeedit_agent_setup", "vibeedit_agent_setup_show",
     "vibeedit_agent_restart_tab", "vibeedit_agent_quick_edit", "vibeedit_agent_show_changes",
     "vibeedit_agent_dismiss_changes", "vibeedit_agent_undo_changes", "vibeedit_agent_detach",
@@ -445,13 +445,20 @@ HONEST_SAMPLE = [
     # Round 3: generation (synthesize/speak/lines/use/fit/place) is
     # real now, so those names left this honest-error sample; only
     # cloning (no provider model) stays honest.
-    "vibeedit_image_generate", "vibeedit_image_generate_list", "vibeedit_image_style",
-    "vibeedit_image_disclose",
+    "vibeedit_image_generate", 
+    
     "vibeedit_library_generate",  # Round 5: library_search left (now real)
-    "vibeedit_library_brand_pose",
-    "vibeedit_library_export_pack", "vibeedit_library_import_pack", "vibeedit_library_analyze",
-    "vibeedit_media_describe",  # Round 5: ocr/subjects/proxy/analysis left (now real)
-        "vibeedit_media_description", "vibeedit_media_digest",
+    
+    
+      # Round 5: ocr/subjects/proxy/analysis left (now real)
+        
+    # Round 8: kit_check/kit_install, image_style/disclose/
+    # generate_list, library packs/analyze/brand_pose,
+    # media describe/description/digest, plugin overlays/
+    # actions/views/proposal/replace, clip motion/change-
+    # framing, music_replace, narration_windows, outcomes,
+    # run_append/checklist and speech_rate left (now real);
+    # their real behaviour is covered by tests/test_round8.py.
     # Round 7: sync/speech_map/strip left (now real) -- removed
     # from the honest sample; their real behaviour is covered
     # by tests/test_round7_analysis.py.
@@ -459,18 +466,20 @@ HONEST_SAMPLE = [
     # Round 6: options/option/set left (now real); setup stays honest
     # (Windows plugins are plain .py modules with no dependency
     # recipes to re-run).
-    "vibeedit_plugins_set_overlays",
-    "vibeedit_plugins_overlays", "vibeedit_plugins_view", "vibeedit_plugins_view_event",
-    "vibeedit_plugins_proposal", "vibeedit_plugins_replace",     "vibeedit_plugins_actions",
+    
+    
+    
     "vibeedit_plugins_show_view",
-    "vibeedit_clip_motion", "vibeedit_clip_backdrop", "vibeedit_clip_change_framing",
+    
+    "vibeedit_clip_backdrop",
     "vibeedit_clip_send_to_agent",
-    "vibeedit_music_replace", "vibeedit_narration_windows", "vibeedit_outcomes_import",
-    "vibeedit_outcomes_map",
-    "vibeedit_run_append", "vibeedit_run_checklist", "vibeedit_run_dismiss",
+    
+    
+    
+    "vibeedit_run_dismiss",
     "vibeedit_run_fix_issues", "vibeedit_run_follow", "vibeedit_run_toggle",
     "vibeedit_run_another_recipe",
-    "vibeedit_acme_voice_fast", "vibeedit_speech_rate",
+    
     "vibeedit_app_vibeedit", "vibeedit_app_vibeedit_automation_clients",
     "vibeedit_app_vibeedit_debug_log", "vibeedit_platforms_get", "vibeedit_context_get",
     "vibeedit_source_toggle_playback", "vibeedit_timeline_header_compact",
@@ -510,7 +519,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 113)  # Round 7: 116 -> 113, media_sync + media_speech_map + media_strip became real
+        self.assertEqual(len(honest), 85)  # Round 8: 113 -> 85, 28 tools became real (see tests/test_round8.py)
 
 
 if __name__ == "__main__":
