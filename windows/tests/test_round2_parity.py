@@ -196,7 +196,7 @@ class TestRound2Tools(unittest.TestCase):
     def test_registry_counts(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
+        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real

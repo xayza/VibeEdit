@@ -12,14 +12,16 @@ an ``updater.json`` file next to this module with a
 VibeEdit releases location, there is no updater channel, and this
 module says so.
 
-What this is NOT: an installer. Downloading a release asset and
-verifying its SHA-256 is safe to do from a running app; replacing
-the running app with the download is not (the running exe cannot
-replace itself). So ``download_release`` only downloads + verifies
-and returns the file path; installing it is a user/launcher step
-(run the downloaded installer after quitting VibeEdit). The
-``app.update`` MCP tool therefore stays a check-and-error tool
-until an install step exists, and its description says so.
+What this is NOT: an installer, and it never replaces a running
+app. Round 4 adds the handoff step: after a verified download,
+``write_update_handoff`` writes a Windows ``.bat`` that waits for
+the app process to exit (tasklist loop over the app PID) and then
+starts the downloaded installer. The user still runs that script
+by hand after quitting VibeEdit — the app never executes the
+installer itself, and with no channel configured the behaviour
+stays status-only. The ``app.update`` MCP tool therefore stays a
+check-and-error tool for replacing the running app, while
+``app_update_prepare`` (download + verify + handoff) is real.
 """
 
 from __future__ import annotations
@@ -151,3 +153,80 @@ def download_release(url: str, dest: str,
             f"Download SHA-256 mismatch for {url}: expected "
             f"{sha256}, got {actual}; the file is not trusted")
     return {"path": dest, "bytes": total, "sha256": actual}
+
+
+def write_update_handoff(installer_path: str,
+                         app_pid: int | None = None,
+                         dest_dir: str | None = None) -> dict:
+    """Write the Windows handoff script for a verified download.
+
+    Writes ``vibeedit-update-run.bat`` next to the installer (or
+    into ``dest_dir``). The script waits for the VibeEdit app
+    process (``app_pid``, via a tasklist loop) to exit and then
+    starts the installer; with no PID it assumes VibeEdit has
+    already been quit and says so. It never runs anything by
+    itself, never replaces a running process, and is safe to
+    inspect before running: it is plain batch text. Returns
+    {"handoff", "installer", "app_pid", "instructions"}. The
+    script is only ever *written* here; running it on Windows is
+    a manual user step after quitting VibeEdit.
+    """
+    installer = os.path.abspath(installer_path)
+    out_dir = dest_dir or os.path.dirname(installer)
+    os.makedirs(out_dir, exist_ok=True)
+    handoff = os.path.join(out_dir, "vibeedit-update-run.bat")
+    lines = [
+        "@echo off",
+        "REM VibeEdit update handoff (round 4). This script is",
+        "REM written by the updater after a verified download.",
+        "REM It never runs by itself: quit VibeEdit, then",
+        "REM double-click this file. It waits for the app",
+        "REM process to exit and then starts the installer.",
+        "REM It never replaces a running process.",
+    ]
+    if app_pid is not None:
+        pid = int(app_pid)
+        lines += [
+            f"REM Waiting for app process {pid} to exit...",
+            ":waitloop",
+            f'tasklist /FI "PID eq {pid}" 2>nul | '
+            f'find /I "{pid}" >nul',
+            "if errorlevel 1 goto runit",
+            "timeout /t 2 /nobreak >nul",
+            "goto waitloop",
+            ":runit",
+        ]
+    else:
+        lines += [
+            "REM No app PID was given: this script assumes",
+            "REM VibeEdit has already been quit. If VibeEdit is",
+            "REM still running, close it first, then run this",
+            "REM script again.",
+        ]
+    lines += [
+        f'start "" "{installer}"',
+        "echo VibeEdit update installer started.",
+    ]
+    with open(handoff, "w", encoding="utf-8") as handle:
+        handle.write("\r\n".join(lines) + "\r\n")
+    return {"handoff": handoff, "installer": installer,
+            "app_pid": app_pid,
+            "instructions": "Quit VibeEdit, then double-click "
+                            "vibeedit-update-run.bat; it waits for "
+                            "the app process to exit and then starts "
+                            "the installer."}
+
+
+def prepare_update(url: str, dest: str,
+                   sha256: str | None = None,
+                   app_pid: int | None = None) -> dict:
+    """Download + SHA-256 verify + write the installer handoff.
+
+    Returns the download result plus the handoff dict. With no
+    channel configured, callers should not reach this (check
+    first); nothing here invents a releases URL — ``url`` is
+    caller-supplied, from the configured channel.
+    """
+    result = download_release(url, dest, sha256)
+    result.update(write_update_handoff(dest, app_pid=app_pid))
+    return result

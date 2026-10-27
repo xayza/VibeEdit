@@ -348,7 +348,7 @@ class TestNewTransitionsAndUi(unittest.TestCase):
 
     def test_mcp_count_is_472(self):
         names = [t["name"] for t in TOOLS]
-        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
+        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         self.assertEqual(len(names), len(set(names)))
         for name in ("vibeedit_timeline_redo", "vibeedit_adjustments_list",
                      "vibeedit_beats_list", "vibeedit_track_get",

@@ -661,12 +661,21 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-range input[type="number"] { width: 90px; }
 .source-range select { max-width: 220px; }
 
-/* Code-gap batch: Compare split view (original: second player masked
-   to one half + Before/After labels). Web equivalent: two players
-   side by side, source on the left, latest export on the right. */
-#compareWrap { display: flex; gap: 8px; }
-#compareWrap > div { flex: 1; min-width: 0; }
-#compareWrap video { width: 100%; }
+/* Round 4: Compare masked wipe (original: second player masked to
+   one half + Before/After labels). Before (source) is the base
+   layer; After (export) is clipped to the right of the divider.
+   The wipe container keeps the preview pane's height; both videos
+   fill it with object-fit: contain. */
+.compare-wipe { position: relative; width: 100%; height: 100%; min-height: 220px; background: #000; overflow: hidden; }
+.compare-wipe > video, .compare-wipe .compare-after video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.compare-wipe .compare-after { position: absolute; inset: 0; overflow: hidden; clip-path: inset(0 0 0 50%); }
+.compare-label { position: absolute; top: 8px; z-index: 3; background: rgba(0,0,0,0.65); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.compare-label-before { left: 8px; }
+.compare-label-after { right: 8px; }
+.compare-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; margin-left: -2px; background: var(--accent, #00c8d4); cursor: ew-resize; z-index: 4; touch-action: none; }
+.compare-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 0; font-size: 12px; }
+.compare-controls input[type="range"] { width: 220px; }
+.compare-note { color: var(--faint, #999); }
 
 /* Code-gap batch 2: welcome panel, library/plugin rows. */
 .welcome-panel { padding: 12px 16px; background: #1a1a1f; border-bottom: 1px solid #23232a; }
@@ -763,8 +772,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .preview-wrap .player-controls, .preview-wrap .source-range,
 .preview-wrap .preview-meta, .preview-wrap .player-note { flex-shrink: 0; }
-#compareWrap { flex: 1; min-height: 0; align-self: stretch; }
-#compareWrap video { height: 100%; object-fit: contain; }
+#compareWrap { flex: 1; min-height: 0; align-self: stretch; display: flex; flex-direction: column; }
+#compareWrap[hidden] { display: none; }
+#compareWrap .compare-wipe { flex: 1; min-height: 0; }
 /* Timeline: original metrics + ideal-height pane, internal scroll. */
 .ruler { height: 22px; }
 .track-row { margin-top: 6px; }

@@ -1198,6 +1198,51 @@ def make_handler(state: State):
                             state.project.data, state.project_dir,
                             body["transition"])
                         self._send_json({"ok": True, "preview": result})
+                    elif parsed.path == "/api/voiceover/record":
+                        # Round 4: a browser-recorded voiceover take.
+                        # The browser records microphone audio only
+                        # (MediaRecorder/getUserMedia; permission is
+                        # the browser's, and a denial surfaces as a
+                        # clear client-side error, never a fake
+                        # file). The uploaded blob is stored exactly
+                        # like any other media file (unique name,
+                        # never overwriting) and registered as audio
+                        # media, so the existing voiceover form can
+                        # place it on the Voiceover track. Only
+                        # audio is accepted here: a filename whose
+                        # extension is not an audio/container audio
+                        # type is rejected rather than stored as a
+                        # voiceover take.
+                        length = int(self.headers.get("Content-Length") or 0)
+                        body = self.rfile.read(length)
+                        ctype = self.headers.get("Content-Type", "")
+                        boundary = ctype.split("boundary=")[-1].encode()
+                        parts = _parse_multipart(body, boundary)
+                        filename, payload = parts["file"]
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext not in (".webm", ".mp4", ".m4a", ".ogg",
+                                       ".oga", ".wav", ".mp3", ".flac"):
+                            raise ValueError(
+                                f"Voiceover recording must be an audio "
+                                f"file, not {filename!r}")
+                        if len(payload) == 0:
+                            raise ValueError(
+                                "Voiceover recording is empty; hold the "
+                                "record button, speak, then stop")
+                        media_dir = os.path.join(state.project_dir,
+                                                 "media")
+                        os.makedirs(media_dir, exist_ok=True)
+                        safe = unique_media_name(media_dir, filename)
+                        dest = os.path.join(media_dir, safe)
+                        with open(dest, "wb") as fh:
+                            fh.write(payload)
+                        info = probe_media(dest)
+                        medium = state.project.add_media(
+                            f"media/{safe}", kind="audio",
+                            **{k: v for k, v in info.items() if k in
+                               ("duration", "hasAudio")})
+                        state.save()
+                        self._send_json({"ok": True, "media": medium})
                     elif parsed.path == "/api/media/upload":
                         length = int(self.headers.get("Content-Length") or 0)
                         body = self.rfile.read(length)

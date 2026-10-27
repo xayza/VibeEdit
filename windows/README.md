@@ -50,8 +50,8 @@ chưa làm dù đã port xong), rồi bổ sung tiếp những gì bổ sung đ�
   là công cụ MCP báo lỗi (không có chat session để dừng; Compare và
   Safe-area đã có sẵn dưới dạng điều khiển trong giao diện web, MCP
   headless không có viewer để bật/tắt).
-- **Kiểm chứng:** 384 tests OK trên Linux VM (369 trước vòng ba + 15
-  test vòng ba mới).
+- **Kiểm chứng:** 404 tests OK trên Linux VM (384 trước vòng bốn + 20
+  test vòng bốn mới: 11 ghi âm/plugin/Compare, 3 halftone, 6 updater).
 
 ## Phase 0 — bảng parity và an toàn dữ liệu
 
@@ -62,8 +62,8 @@ không chủ động bỏ tính năng nào của bản gốc. Bảng parity đ�
 missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
 chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
 
-Trạng thái hiện tại (sau đợt full-parity vòng 3): **MCP 478 công cụ
-(346 thao tác thật, 132 kiểm tra-và-báo-lỗi)** — số live đọc từ
+Trạng thái hiện tại (sau đợt full-parity vòng 4): **MCP 479 công cụ
+(347 thao tác thật, 132 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
 linked audio + reorder, cài plugin, skills (đọc + ghi), knowledge
@@ -106,7 +106,57 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
-## Full-parity batch — MCP, magnetic, plugin install, skills, vision, motion (mới nhất)
+## Full-parity vòng 4 — ghi âm voiceover, Compare wipe, plugin manifest, halftone, updater handoff (mới nhất)
+
+- **Ghi âm voiceover trong app:** panel Voice ghi âm bằng
+  MediaRecorder/getUserMedia của trình duyệt (quyền micro do trình
+  duyệt hỏi; bị từ chối thì báo rõ, không tạo file giả); bản ghi
+  tải lên endpoint thật `POST /api/voiceover/record` (chỉ nhận
+  audio, tên duy nhất không ghi đè, đăng ký thành media audio thật
+  rồi đặt lên track Voiceover bằng form sẵn có). Micro thật chưa
+  kiểm chứng được trên máy ảo Linux (không có micro) — cần thử
+  trên Windows thật.
+- **Compare wipe có mặt nạ:** thay dạng chia đôi 2 player bằng một
+  khung hình duy nhất — Before ở trái vạch chia, After ở phải vạch
+  chia, kéo vạch hoặc thanh trượt để so sánh; hai video đồng bộ
+  thời gian qua play/pause/seek/timeupdate (lệch >0,3s thì đồng bộ
+  lại), ghi rõ là đồng bộ thời gian chứ không khóa khung hình tuyệt
+  đối ở mức mẫu.
+- **Thực thi code plugin dạng manifest:** manifest khai báo
+  `"entry"` thì `load_plugins` nạp `register()` của entry và
+  `apply_plugin` chạy đúng hook đã khai báo; plugin tắt vẫn bị từ
+  chối, manifest hỏng hoặc entry thiếu file đều báo lỗi rõ. Mô hình
+  tin cậy ghi rõ trong code: code plugin chạy cùng quyền với app
+  (đúng mô hình plugin của bản gốc) nên chỉ chấp nhận được vì plugin
+  cài xong ở trạng thái tắt, người dùng phải xem file rồi bật tường
+  minh, và chỉ hook đã khai báo mới được chạy.
+- **Transition halftone:** render thật hai đường — timeline bằng mask
+  chấm động geq + `alphamerge`/`overlay` (chọn cứng, không pha; khung
+  giữa transition chứa cả pixel đỏ thuần và xanh thuần, loại trừ
+  dissolve/cut/pixelize giả mạo; `maskedmerge` đã thử và bị loại vì
+  cho khung pha tím ngay cả trong RGB) và segment độc lập bằng Pillow
+  + FFmpeg (`render_halftone_segment`). `add_transition` nay chấp
+  nhận halftone.
+- **Updater handoff:** `prepare_update` + công cụ MCP mới
+  `app_update_prepare` — download + verify SHA-256 + ghi script
+  `vibeedit-update-run.bat` (chờ PID của app thoát qua vòng lặp
+  tasklist rồi mới chạy installer; script chỉ được ghi ra, không
+  bao giờ tự chạy). App vẫn không tự thay chính nó; vị trí releases
+  thật vẫn cần người dùng chọn.
+- **Đối chiếu lại + tài liệu:** test vòng ba chạy lại vẫn đủ 249 tên
+  gốc; `PARITY.md` cập nhật trạng thái vòng bốn; mục cài đặt dưới
+  đây viết lại đầy đủ cho máy Windows sạch; `MERGE_PLAN.md` mới là
+  kế hoạch hợp nhất có cổng kiểm soát để người dùng thực hiện bằng
+  git thật sau khi kiểm thử xong (vòng này chỉ chuẩn bị, không hợp
+  nhất).
+- **Vẫn còn thật (không bịa):** clone giọng (cần model provider
+  clone), thực thi model segmentation học sâu cho cutout (cần model
+  ONNX + runtime do người dùng cung cấp), fetch cập nhật plugin từ
+  registry (không có registry nào tồn tại), bộ cài/.exe + CI Windows
+  (workflow vẫn phải do người dùng đẩy bằng git thật/web UI vì
+  GitHub App bị chặn 403), và mọi kiểm chứng trên Windows thật.
+
+## Full-parity batch — MCP, magnetic, plugin install, skills, vision, motion
 
 - **MCP 144 → 478 công cụ** (346 thao tác thật, 132 kiểm tra-và-báo-lỗi
   trung thực, 0 trùng tên): wrapper cho hầu hết tên gốc còn thiếu
@@ -184,7 +234,7 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   Windows thật, và toàn bộ test chạy bằng `py` trên Windows.
 
 ## Code-gap batch 2
-Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP lúc đó: 144 công cụ (đã tăng lên 478 ở các đợt full-parity sau). Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope). Tất cả các mục này đã được bổ sung ở các đợt full-parity sau đó, trừ model segmentation học sâu cho cutout — xem `PARITY.md` để biết trạng thái thật hiện tại.
+Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP lúc đó: 144 công cụ (đã tăng lên 479 ở các đợt full-parity sau). Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope). Tất cả các mục này đã được bổ sung ở các đợt full-parity sau đó, trừ model segmentation học sâu cho cutout — xem `PARITY.md` để biết trạng thái thật hiện tại.
 
 ## Cửa sổ desktop thật (không phải tab trình duyệt)
 
@@ -224,7 +274,7 @@ Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export prese
   buttons. The input runs real safe commands (list clips, export
   draft, review, stats, workspace, undo/redo); anything else gets an
   honest reply that no LLM is connected in-app, with the real MCP
-  command `python windows\vibeedit.py mcp <project-folder>` (478
+  command `python windows\vibeedit.py mcp <project-folder>` (479
   tools). No fake AI replies, no fake timeline edits, no fake
   voices. There is no terminal emulator in the web UI — use your
   own terminal for the MCP agent.
@@ -656,18 +706,122 @@ exists but has not run yet — it can only run on GitHub after
 the user pushes the workflow file, which the GitHub App
 connection cannot write), voice providers, additional
 transcription providers, or the remaining original MCP tool
-names (see `PARITY.md` for the honest list; MCP is now 478
-tools: 346 real-operation and 132 check-and-error). Still open: a visual UI check in a
+names (see `PARITY.md` for the honest list; MCP is now 479
+tools: 347 real-operation and 132 check-and-error). Still open: a visual UI check in a
 real browser on Windows. See the Phase 8 list in
 `VibeEdit/docs/windows-port.md` for what is left, all of which
 needs the user's Windows or macOS machine.
 
-## Requirements
+## Cài đặt trên máy Windows sạch — những gì còn phải cài tay
 
-- Python 3.10+ (stdlib only, no pip packages).
-- FFmpeg + FFprobe in `PATH` (rendering and media probing).
-  On Windows, download a build from gyan.dev or use
-  `winget install Gyan.FFmpeg`, then make sure `ffmpeg` is on PATH.
+> Nói thẳng: **chưa có bộ cài một lần bấm là xong**. Chưa có file
+> `.exe` nào được build (workflow `build-windows.yml` vẫn phải do
+> người dùng đẩy bằng git thật hoặc giao diện web GitHub vì GitHub
+> App bị chặn 403, và chưa kiểm tra điều khoản phân phối của
+> FFmpeg bundle). Danh sách dưới đây là toàn bộ những gì người
+> dùng cuối phải tự cài trên một máy Windows 10/11 sạch để chạy
+> được bản hiện tại. Mục nào ghi "tùy chọn" thì thiếu nó app vẫn
+> chạy, chỉ tính năng đó báo lỗi rõ và không hoạt động.
+
+### Bắt buộc
+
+1. **Git cho Windows** — để clone repo lần đầu và để cập nhật
+   bằng `git pull` (xem mục "Cập nhật" dưới đây).
+2. **Python 3.10 trở lên** (đã kiểm chứng trên Windows với Python
+   3.12.10). Khi cài đặt, tick chọn "Add python.exe to PATH".
+   App lõi chỉ cần Python chuẩn — không cần gói pip nào để mở app,
+   tạo project, edit timeline và export H.264.
+3. **FFmpeg + FFprobe** — bắt buộc cho mọi render, thumbnail và
+   dò media. Cài một trong ba cách, launcher sẽ tự tìm theo thứ tự
+   này:
+   - Đặt biến môi trường `VIBEEDIT_FFMPEG_DIR` trỏ tới thư mục
+     chứa `ffmpeg.exe`/`ffprobe.exe`; hoặc
+   - cho `ffmpeg` lên PATH (tải build từ gyan.dev, hoặc
+     `winget install Gyan.FFmpeg`); hoặc
+   - copy `ffmpeg.exe`/`ffprobe.exe` vào cạnh file app (cùng thư
+     mục với `vibeedit.py`).
+   - Nếu không tìm thấy FFmpeg, app báo rõ ba cách trên thay vì
+     lỗi khó hiểu.
+
+### Tùy chọn, theo tính năng muốn dùng
+
+- **Cửa sổ desktop** (thay cho mở trình duyệt): `pip install
+  pywebview` (cần WebView2 trên Windows — Windows 10/11 mới
+  thường đã có sẵn). Không có pywebview, launcher desktop tự rơi
+  về mở trình duyệt, app vẫn chạy bình thường.
+- **Cutout vision và segment halftone độc lập:** `pip install
+  pillow`. Core editor/export không cần Pillow; chỉ hai đường
+  trên import Pillow khi chạy.
+- **OCR (đọc chữ trong ảnh/video):** cài binary Tesseract cho
+  Windows và cho `tesseract` lên PATH. Thiếu Tesseract, công cụ
+  OCR báo rõ tên binary thiếu và cách cài, không trả chữ giả.
+- **Detect mặt / cutout grabCut:** `pip install
+  opencv-python-headless` (hoặc `opencv-python`). Thiếu OpenCV,
+  các công cụ đó báo rõ và không hoạt động.
+- **Phụ đề tự động (transcription):** `pip install faster-whisper`
+  (mặc định dùng model `tiny`, chạy offline sau khi tải model;
+  model lớn hơn tải theo nhu cầu). Thiếu faster-whisper, app báo
+  rõ và không bịa phụ đề.
+- **Tạo giọng nói Edge TTS:** `pip install edge-tts` (tổng hợp qua
+  mạng; giọng `vi-VN-HoaiMyNeural`/`vi-VN-NamMinhNeural` và các
+  giọng Edge khác).
+- **Tạo giọng nói Piper (offline):** tải binary `piper` cho lên
+  PATH và tự chuẩn bị file model `.onnx` rồi chỉ đường dẫn model
+  cho app — repo **không bundle** model Piper nào và không bịa
+  model mặc định.
+- **Cutout học sâu (learned segmentation):** tự chuẩn bị file
+  model ONNX + `pip install onnxruntime`, rồi chỉ đường dẫn model
+  cho app (khe cắm `cutout_segmented` — xem `PARITY.md`). Thiếu
+  model hoặc thiếu runtime đều báo rõ, không bao giờ trả kết quả
+  grabCut giả làm "learned".
+- **Không có, và không cài được từ repo:** model clone giọng (chưa
+  có provider clone nào), vị trí releases thật cho updater (người
+  dùng phải chọn thì updater mới có kênh), registry plugin (không
+  tồn tại — plugin chỉ cài từ folder/.zip/URL do người dùng chỉ
+  định).
+
+### Chạy bằng double-click (không cần gõ lệnh)
+
+Từ thư mục `windows/` (sau này là `VibeEdit/` sau khi hợp nhất):
+
+- `run_vibeedit.bat` — mở giao diện web (mặc định
+  `http://127.0.0.1:8000/`; nếu cổng bận, app báo và gợi ý cổng
+  kế tiếp).
+- `run_vibeedit_desktop.bat` — mở cửa sổ desktop (cần pywebview;
+  thiếu thì rơi về trình duyệt kèm hướng dẫn cài).
+- `update_and_run.bat` / `update_and_run.ps1` — cập nhật bằng
+  `git pull --ff-only` rồi chạy app (pull lỗi thì vẫn chạy bản
+  hiện có và báo rõ).
+- Mở bằng VS Code: nhấn F5 với file `windows/.vscode/launch.json`
+  có sẵn (chạy `serve --port 8000 --open-browser`).
+- Lưu ý cửa sổ terminal giữ prompt khi server đang chạy là bình
+  thường (server chạy thì terminal không trả prompt) — không phải
+  app bị treo.
+
+### Cập nhật
+
+```bat
+cd D:\VibeEdit
+git pull --ff-only
+```
+
+hoặc double-click `update_and_run.bat`. **Không tải file ZIP đè
+lên bản sao git** — ZIP đè lên sẽ làm mất lịch sử pull và gây
+xung đột với các sửa đổi đang có. Sau mỗi lần nhóm phát triển đẩy
+bản mới, pull trước rồi mới để VS Code AI sửa tiếp, để tránh hai
+bên sửa cùng file gây conflict.
+
+### Giới hạn còn lại trên máy Windows sạch (đọc trước khi dùng)
+
+- Chưa có `.exe`/installer: phải cài Python + FFmpeg tay như trên.
+- Chưa từng chạy toàn bộ test suite bằng `py` trên Windows thật;
+  chưa kiểm chứng cửa sổ desktop/pywebview, HiDPI, phím tắt Ctrl,
+  micro ghi âm, giọng Edge/Piper thật, OCR/cutout thật và footage
+  4K gốc trên Windows thật — tất cả mới chỉ kiểm chứng trên máy
+  ảo Linux (xem `PARITY.md` để biết từng mục).
+- Project và media của người dùng nằm trong `windows\projects\`
+  (không thuộc repo, không bị git ghi đè); backup project nằm
+  trong chính thư mục project (`project.json.bak` + `backups/`).
 
 ## Run the web UI (Windows)
 
@@ -735,7 +889,7 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-478 tools (346 real-operation tools and 132 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 4 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub.
+479 tools (347 real-operation tools and 132 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 4 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub.
 
 ## Tests
 

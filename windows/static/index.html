@@ -56,11 +56,11 @@
       <label>Speed <input id="addSpeed" type="number" step="0.25" value="1"></label>
       <button type="submit" class="primary">Add clip</button>
       <button type="button" id="btnAddClipQuick" class="secondary" title="Thêm file đang chọn vào timeline, tự chọn vị trí trống">Thêm vào timeline (tự chọn vị trí)</button>
-    </form><div id="mediaAddStatus" class="media-add-status"></div><div class="create-tools"><p class="create-tools-title">No media? Create with these tools</p><div class="create-cards"><button type="button" class="create-card" data-tab="ai">Generate</button><button type="button" class="create-card" data-tab="ai">AI avatars</button><button type="button" class="create-card" disabled title="Recording is not available in VibeEdit yet">Record</button></div></div>
+    </form><div id="mediaAddStatus" class="media-add-status"></div><div class="create-tools"><p class="create-tools-title">No media? Create with these tools</p><div class="create-cards"><button type="button" class="create-card" data-tab="ai">Generate</button><button type="button" class="create-card" data-tab="ai">AI avatars</button><button type="button" class="create-card" data-tab="voice">Record</button></div></div>
 </section>
 <section class="panel tool-panel" data-panel="voice" hidden>
 <h3>Voiceover</h3>
-<p class="voice-note">Voice generation works here when a backend is installed (Edge TTS via <code>pip install edge-tts</code>, or the Piper binary plus a <code>.onnx</code> model). Voice <b>cloning</b> is still not available — no cloning provider model exists in this build. Importing audio and placing it on the Voiceover track also works.</p>
+<p class="voice-note">Voice generation works here when a backend is installed (Edge TTS via <code>pip install edge-tts</code>, or the Piper binary plus a <code>.onnx</code> model). Voice <b>cloning</b> is still not available — no cloning provider model exists in this build. Importing audio and placing it on the Voiceover track also works. Recording with your microphone works too (the browser asks for microphone permission; if you deny it, recording stops with a clear error and nothing is faked).</p>
 <label>Provider <select id="voiceProvider"><option value="auto">Auto (Piper if present, else Edge TTS)</option><option value="edge">Edge TTS (online)</option><option value="piper">Piper (local binary + .onnx model)</option></select></label>
 <label>Voice <select id="voiceVoice"><option value="">Default for the provider</option><option value="vi-VN-HoaiMyNeural">vi-VN-HoaiMyNeural (Edge, female)</option><option value="vi-VN-NamMinhNeural">vi-VN-NamMinhNeural (Edge, male)</option><option value="en-US-AriaNeural">en-US-AriaNeural (Edge)</option></select></label>
 <label>Piper model path (.onnx, only for the Piper provider) <input id="voiceGenModel" placeholder="C:\voices\model.onnx"></label>
@@ -72,7 +72,10 @@
 <button type="button" id="btnVoiceClone" class="secondary">Use reference file as media</button>
 </div>
 <button type="button" id="btnVoiceGenerate" class="primary">Generate → takes</button>
-<button type="button" id="btnVoiceRecord" disabled title="Recording is not available in VibeEdit yet">● Record voiceover</button>
+<button type="button" id="btnVoiceRecord" class="secondary">● Record voiceover</button>
+<button type="button" id="btnVoiceRecordStop" class="secondary" hidden>■ Stop recording</button>
+<div id="voiceRecordStatus" class="media-add-status"></div>
+<audio id="voiceRecordPreview" controls hidden></audio>
 <form id="voiceoverForm">
 <label>Media <select id="voiceMedia" required></select></label>
 <label>Start (frames) <input id="voiceAt" type="number" value="0" min="0"></label>
@@ -274,7 +277,7 @@
     <div class="player-head"><div class="player-tabs"><button type="button" id="playerTabTimeline" class="player-tab active">Timeline</button><button type="button" id="playerTabSource" class="player-tab">Source</button></div><span class="player-sub">Preview: latest export</span><span class="player-view-controls"><button type="button" id="btnPreviewFit" class="secondary">Fit</button><button type="button" id="btnPreviewCompare" class="secondary">Compare</button><button type="button" id="btnPreviewSafe" class="secondary">Safe area</button></span></div>
 <section class="preview-wrap">
   <video id="preview" controls preload="metadata"></video><img id="previewImage" hidden alt="Xem trước ảnh">
-  <div id="compareWrap" hidden><div><span>Before (nguồn)</span><video id="previewCompareSource" controls preload="metadata"></video></div><div><span>After (bản xuất)</span><video id="previewCompareExport" controls preload="metadata"></video></div></div>
+  <div id="compareWrap" hidden><div id="compareWipe" class="compare-wipe"><span class="compare-label compare-label-before">Before (nguồn)</span><video id="previewCompareSource" preload="metadata"></video><div class="compare-after"><video id="previewCompareExport" controls preload="metadata"></video><span class="compare-label compare-label-after">After (bản xuất)</span></div><div id="compareDivider" class="compare-divider" title="Kéo để so sánh"></div></div><div class="compare-controls"><label>Wipe <input id="compareRange" type="range" min="0" max="100" value="50"></label><span id="compareSyncNote" class="compare-note"></span></div></div>
   <div id="safeAreaOverlay" class="safe-area" hidden></div>
 <div id="playerSourceNote" class="player-note" hidden>Source view is not available yet — the preview above shows the latest export. Export a draft to update it.</div>
   <div class="player-controls"><button type="button" id="btnPreviewBack" class="secondary">⏮ Start</button><button type="button" id="btnPreviewPlay" class="secondary">▶ Play / Pause</button><button type="button" id="btnPreviewExport" class="secondary">Xem bản xuất</button><button type="button" id="btnPreviewCompareMode" class="secondary">So sánh: nguồn / bản xuất</button></div>
@@ -376,7 +379,7 @@
   </div>
   <details class="timeline-capabilities"><summary>What this timeline can do — and what it cannot yet</summary>
   <p><b>Works here (real):</b> cut, trim, move, copy/paste, split at playhead, speed, keyframes (position, scale, opacity, volume, tilt), transitions, beat grid + snap to beat, Captions track with word-level karaoke chips, text presets with Vietnamese support, colour presets + LUT + adjustment layers, volume, fades, music ducking under voice, loudness normalisation, voiceover takes on the Voiceover track, H.264 export with burned-in subtitles, OTIO export/import, project saved as JSON next to footage, undo/redo, and an external AI agent via MCP (live tool count shown in the Agent dock) whose edits appear on the timeline and are undoable.</p>
-  <p><b>Not yet in this Windows port (honestly labelled, never faked):</b> in-app LLM chat generation, a real terminal for Claude Code / Codex inside the app (use your own terminal with <code>python windows\vibeedit.py mcp &lt;project-folder&gt;</code>), voice cloning, voiceover recording, VieNeu TTS, and silence cutting. Audio tracks show waveform strips decoded from the real file (FFmpeg RMS peaks); if a file cannot be decoded, no strip is drawn rather than a fake shape.</p>
+  <p><b>Not yet in this Windows port (honestly labelled, never faked):</b> in-app LLM chat generation, a real terminal for Claude Code / Codex inside the app (use your own terminal with <code>python windows\vibeedit.py mcp &lt;project-folder&gt;</code>), voice cloning, VieNeu TTS, and silence cutting. Audio tracks show waveform strips decoded from the real file (FFmpeg RMS peaks); if a file cannot be decoded, no strip is drawn rather than a fake shape.</p>
   </details>
   <div class="ruler" id="ruler"></div>
   <div id="tracks"></div>

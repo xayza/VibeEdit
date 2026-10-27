@@ -55,16 +55,17 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 2 — after Phase 2)
+## Current status (honest, full-parity round 4)
 
-- **MCP: 478 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **346
+- **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
+  endpoint; the number in docs goes stale as tools are added): **347
   real-operation tools and 132 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 4 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design); what remains genuinely unported is listed
+  shared-handler design), and round 4 re-ran that check with the
+  same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
   copy/paste, split, undo/redo, markers, close gaps), full magnetic
@@ -74,28 +75,35 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   per-parameter sliders, keyframes), speed curves, reverse/freeze,
   reframe (render-side, API/MCP), export presets, OTIO export/import,
   review workflow (run/accept/verify + data sub-tools), CLI + MCP,
-  plugins with enable/disable/install, desktop window with clean
-  shutdown, Ctrl shortcuts, magnetic reorder, knowledge store,
-  skills read + write, caption transcription/generation/alignment
-  (where faster-whisper is installed), font import, and 384 tests
-  OK on the Linux VM.
-- **Partial:** Compare view is not frame-locked; ProRes/4K export
-  presets are mapped but not fully rendered; plugin install works
-  (folder/zip, gated download, remove, metadata-only update check)
-  but executing manifest plugin code is remaining work; skills
-  read-side works (list/get/search) but the knowledge store and
-  skills write-side are missing; vision/OCR/cutout works only where
-  Tesseract/OpenCV are installed, otherwise it errors clearly;
-  motion transitions render except halftone (errors with its
-  pre-rendered-segment path); desktop/HiDPI/Ctrl shortcuts are
-  verified on Linux only, not yet in a real Windows window/browser.
+  plugins with enable/disable/install **and manifest entry
+  execution**, desktop window with clean shutdown, Ctrl shortcuts,
+  magnetic reorder, knowledge store, skills read + write, caption
+  transcription/generation/alignment (where faster-whisper is
+  installed), font import, in-app voiceover recording (browser
+  MediaRecorder + real upload endpoint; mic itself still needs a
+  real Windows check), Compare masked wipe with time-sync, voice
+  generation via Edge TTS / Piper (where the backend is installed),
+  motion transitions including halftone (geq dot mask +
+  alphamerge/overlay, plus the Pillow pre-rendered segment), and
+  404 tests OK on the Linux VM.
+- **Partial:** Compare view is a masked wipe with time-sync, not
+  sample-accurate frame lock; ProRes/4K export presets render on
+  the Linux VM from synthetic clips but not yet from native 4K
+  footage; plugin install works (folder/zip, gated download,
+  remove, metadata-only update check) but fetching updates from a
+  plugin registry is missing (no registry exists); vision/OCR/cutout
+  works only where Tesseract/OpenCV are installed, otherwise it
+  errors clearly; the updater can check/download/verify and write
+  an installer handoff script, but replacing a running app still
+  needs the user to quit and run that script by hand, and no real
+  releases location has been picked yet; desktop/HiDPI/Ctrl
+  shortcuts are verified on Linux only, not yet in a real Windows
+  window/browser.
 - **Still missing — planned to port (see `windows/PARITY.md` for the
-  full table with a port path per item):** voice provider
-  (generation/cloning; only a backend check exists), app updater
-  (only a status check exists), a learned segmentation model for
-  cutout, marker shifting on clip moves and close_gaps, web-UI
-  panels for the newer features (knowledge/skills/vision/plugin
-  install/reframe/link/magnetic), a clean-Windows installer/.exe,
+  full table with a port path per item):** voice cloning (needs a
+  cloning provider model — none exists in either tree), real
+  learned-segmentation execution (needs a user-supplied ONNX model
+  + runtime), plugin registry fetch, a clean-Windows installer/.exe,
   and Windows CI. `chat.stop`, `view.compare` and `view.safe-area`
   stay honest-error MCP tools by design (no chat session exists;
   Compare and Safe-area already exist as web-UI controls).

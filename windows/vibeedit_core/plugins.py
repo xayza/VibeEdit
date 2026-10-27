@@ -82,11 +82,14 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
         except Exception as exc:  # noqa: BLE001 - one bad plugin
             errors[name] = str(exc)
     # Manifest plugins (Phase B3 installs): a subfolder containing a
-    # plugin.json. These are listed and enable/disable-able, but their
-    # code is NOT imported here: manifest code execution is remaining
-    # work, so apply_plugin reports that clearly instead of running
-    # anything. Keyed by manifest id (the folder name), which is what
-    # install_plugin records in the disabled list.
+    # plugin.json. Round 4: when the manifest declares an "entry"
+    # module, its register() hooks are loaded here exactly like a
+    # top-level plugin module, so apply_plugin can run them. A
+    # manifest without an entry stays listed-but-not-executable, and
+    # a manifest whose entry fails to load is recorded in _errors
+    # and listed with its entry error, never as runnable. Keyed by
+    # manifest id (the folder name), which is what install_plugin
+    # records in the disabled list.
     import json as _json
     for name in sorted(os.listdir(folder)):
         if name.startswith("_") or name.startswith("."):
@@ -111,7 +114,7 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
             if not isinstance(hooks, list) or \
                     not all(isinstance(h, str) for h in hooks):
                 raise ValueError("manifest hooks must be a list of strings")
-            plugins[pid] = {
+            entry_info: dict = {
                 "name": pid,
                 "display_name": manifest.get("name", pid),
                 "description": manifest.get("description", ""),
@@ -119,6 +122,20 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
                 "manifest_hooks": sorted(hooks),
                 "path": sub,
             }
+            entry = manifest.get("entry")
+            if entry is not None:
+                _validate_manifest(manifest, source_label=name)
+                try:
+                    reg = _load_manifest_entry(pid, sub, entry)
+                except Exception as exc:  # noqa: BLE001 - one bad plugin
+                    entry_info["entry_error"] = str(exc)
+                    errors[name] = str(exc)
+                else:
+                    entry_info["manifest_entry"] = entry
+                    for key, value in reg.items():
+                        if callable(value):
+                            entry_info[key] = value
+            plugins[pid] = entry_info
         except Exception as exc:  # noqa: BLE001 - one bad plugin
             errors[name] = str(exc)
     plugins["_errors"] = errors
@@ -203,14 +220,27 @@ def apply_plugin(project, plugin_name: str, hook: str,
         raise ValueError(f"Plugin {plugin_name!r} is disabled; enable it first")
     info = plugins[plugin_name]
     if info.get("manifest"):
-        # Manifest plugins are listed/enabled, but their code is not
-        # executed in this build (remaining work); never pretend a
-        # hook ran.
-        raise ValueError(
-            f"Plugin {plugin_name!r} is a manifest plugin: its hooks "
-            f"({', '.join(info.get('manifest_hooks', [])) or 'none'}) are "
-            f"declared but not executable in this build; executing "
-            f"manifest plugin code is remaining work")
+        # Round 4 trust model: a manifest plugin's code runs
+        # in-process with the app's privileges, exactly like a
+        # top-level plugin module. That is only acceptable because
+        # (a) installs land disabled by default, (b) the user must
+        # review the plugin's files and explicitly enable it, and
+        # (c) only hooks declared in the manifest may run. A
+        # manifest without a runnable entry still refuses cleanly
+        # instead of pretending a hook ran.
+        if info.get("entry_error"):
+            raise ValueError(
+                f"Plugin {plugin_name!r} entry failed to load: "
+                f"{info['entry_error']}")
+        if hook not in (info.get("manifest_hooks") or []):
+            raise ValueError(
+                f"Plugin {plugin_name!r} does not declare hook "
+                f"{hook!r} in its manifest")
+        if not callable(info.get(hook)):
+            raise ValueError(
+                f"Plugin {plugin_name!r} declares hook {hook!r} but "
+                "its entry module does not provide it (manifest "
+                "plugins without an 'entry' are not executable)")
     fn = info.get(hook)
     if not callable(fn):
         raise ValueError(
@@ -224,14 +254,14 @@ def apply_plugin(project, plugin_name: str, hook: str,
 # Phase B3: install / remove / update-check for manifest plugins.
 #
 # A manifest plugin is a folder ``windows/plugins/<id>/`` containing a
-# ``plugin.json`` manifest plus its (inert, copied, never executed
-# here) files. This is deliberately separate from the Phase 3
-# ``*.py`` discovery above: ``load_plugins()`` only imports top-level
-# ``*.py`` modules, so a manifest plugin installed here is NOT
-# discovered or run by ``load_plugins()``/``apply_plugin()`` until
-# manifest discovery is wired in (parent work: server endpoint + MCP
-# tools). What this module does guarantee, with no network and no
-# code execution at any point:
+# ``plugin.json`` manifest plus its code files. The code files are
+# copied, never executed, during install. Since round 4, a manifest
+# that declares an "entry" module has that module's declared hooks
+# loaded by ``load_plugins()`` and executed by ``apply_plugin()``
+# in-process — but only after the user has reviewed the files and
+# explicitly enabled the plugin (installed plugins land disabled,
+# and ``apply_plugin()`` refuses disabled plugins). What this module
+# guarantees, with no network and no code execution at install time:
 #
 # - install_plugin() validates the manifest and every bundle entry
 #   BEFORE copying anything, then copies into
@@ -311,7 +341,51 @@ def _validate_manifest(data, *, source_label: str) -> dict:
             raise ValueError(
                 f"plugin.json in {source_label!r} has a non-string or "
                 "empty entry in 'hooks'")
+    # Round 4: an optional "entry" declares the code module that
+    # implements the hooks. It must be a plain file name inside the
+    # plugin folder (no directories, no traversal, *.py only) so a
+    # manifest can never point execution outside its own folder.
+    entry = data.get("entry")
+    if entry is not None:
+        if not isinstance(entry, str) or not entry.endswith(".py") \
+                or entry != os.path.basename(entry) \
+                or entry in (".", ".."):
+            raise ValueError(
+                f"plugin.json in {source_label!r} has an unsafe 'entry' "
+                f"{entry!r}: it must be a plain *.py file name inside "
+                "the plugin folder")
     return data
+
+
+def _load_manifest_entry(pid: str, folder: str, entry: str) -> dict:
+    """Import a manifest plugin's declared entry module.
+
+    Returns the dict from its ``register()`` (same contract as a
+    top-level plugin module). Any failure raises ValueError so the
+    caller can record it without listing a half-loaded plugin as
+    runnable. The module runs in-process with the app's privileges:
+    that is the trust model (see ``apply_plugin``) — a manifest
+    plugin only runs after the user has reviewed its files and
+    explicitly enabled it.
+    """
+    path = os.path.join(folder, entry)
+    if not os.path.isfile(path):
+        raise ValueError(
+            f"Manifest plugin {pid!r} declares entry {entry!r} but "
+            f"the file is missing from its folder")
+    mod_name = f"vibeedit_manifest_{pid}"
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load plugin entry module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = module
+    spec.loader.exec_module(module)
+    info = module.register()
+    if not isinstance(info, dict) or "name" not in info:
+        raise ValueError(
+            f"Manifest plugin {pid!r} entry register() must return a "
+            "dict with 'name'")
+    return info
 
 
 def _parse_manifest_bytes(raw: bytes, *, source_label: str) -> dict:
@@ -646,6 +720,21 @@ def install_plugin(source, plugins_dir: str | None = None,
         raise ValueError(
             "Plugin source must be a folder containing plugin.json "
             f"or a .zip bundle, not: {src!r}")
+
+    # Round 4: a declared entry must actually be in the bundle, or
+    # the install is rejected before anything is copied (a plugin
+    # whose entry is missing would otherwise install and then fail
+    # on first use).
+    if manifest.get("entry") is not None:
+        if bundle_kind == "folder":
+            bundle_names = {r.replace(os.sep, "/") for r in rel_files}
+        else:
+            bundle_names = {rel for rel, _ in entries}
+        if manifest["entry"] not in bundle_names:
+            raise ValueError(
+                f"Plugin manifest declares entry "
+                f"{manifest['entry']!r} but the bundle does not "
+                "contain that file")
 
     plugin_id = manifest["id"]
     dest = _dest_for(plugin_id, plugins_dir)

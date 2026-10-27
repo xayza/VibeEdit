@@ -1018,7 +1018,8 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     } catch (err) { $("voiceResult").textContent = "Tạo giọng thất bại: " + err.message; setStatus(err.message, true); }
   });
 
-  // Player view controls (real display controls; Compare is honestly unavailable)
+  // Player view controls (real display controls; Compare is a masked
+  // wipe with time-sync, not a sample-accurate frame lock — see below)
   const tabTl = $("playerTabTimeline"), tabSrc = $("playerTabSource"), note = $("playerSourceNote"), wrap = document.querySelector(".preview-wrap");
   if (tabTl) tabTl.addEventListener("click", () => {
     tabTl.classList.add("active"); if (tabSrc) tabSrc.classList.remove("active");
@@ -1033,12 +1034,76 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const safeBtn = $("btnPreviewSafe"), safe = $("safeAreaOverlay");
   if (safeBtn && safe) safeBtn.addEventListener("click", () => { safe.hidden = !safe.hidden; setStatus(safe.hidden ? "Safe-area guide hidden." : "Safe-area guide shown (display guide only, not a render setting)."); });
   const cmpBtn = $("btnPreviewCompare");
-  // Code-gap batch: REAL Compare split view. Original (EditorView+Viewer):
-  // a second player masked to one half + Before/After labels. Web
-  // equivalent: source player on the left, latest export on the right,
-  // side by side. It is NOT a frame-accurate masked wipe, and the two
-  // players are not frame-locked — stated honestly in the status line.
-  let lastSourceMediaId = null, compareOn = false;
+  // Round 4: REAL Compare masked wipe, following the original
+  // (EditorView+Viewer: a second player masked to one half +
+  // Before/After labels). Before (source) is the base layer; After
+  // (latest export) sits on top, clipped to the right of a draggable
+  // divider. Sync: the two <video> elements are NOT sample-accurate
+  // frame-locked — the browser cannot lock two decoders that way —
+  // so play/pause/seek/timeupdate events keep their times aligned
+  // (re-sync when they drift past 0.3s). That residual drift is
+  // stated honestly in the sync note, never claimed away.
+  let lastSourceMediaId = null, compareOn = false, compareSynced = false;
+  function compareWipeAt(pct) {
+    const after = document.querySelector("#compareWipe .compare-after");
+    const div = $("compareDivider");
+    const p = Math.max(0, Math.min(100, pct));
+    if (after) after.style.clipPath = `inset(0 0 0 ${p}%)`;
+    if (div) div.style.left = p + "%";
+    const range = $("compareRange"); if (range) range.value = String(p);
+  }
+  function compareWireSync() {
+    if (compareSynced) return; compareSynced = true;
+    const src = $("previewCompareSource"), exp = $("previewCompareExport");
+    if (!src || !exp) return;
+    let syncing = false, lastSync = 0;
+    exp.addEventListener("play", () => { src.play().catch(() => {}); });
+    exp.addEventListener("pause", () => { src.pause(); });
+    exp.addEventListener("seeked", () => {
+      if (Math.abs(src.currentTime - exp.currentTime) > 0.15) {
+        syncing = true; src.currentTime = exp.currentTime; syncing = false;
+      }
+    });
+    exp.addEventListener("timeupdate", () => {
+      if (syncing) return;
+      const now = Date.now();
+      if (now - lastSync < 250) return;
+      if (Math.abs(src.currentTime - exp.currentTime) > 0.3) {
+        lastSync = now; syncing = true;
+        src.currentTime = exp.currentTime; syncing = false;
+      }
+    });
+    const note = $("compareSyncNote");
+    const report = () => {
+      if (!note) return;
+      if (src.duration && exp.duration && Math.abs(src.duration - exp.duration) > 0.5) {
+        note.textContent = `Nguồn ${src.duration.toFixed(1)}s, bản xuất ${exp.duration.toFixed(1)}s — đồng bộ theo thời gian; hai video không khóa khung hình tuyệt đối, có thể lệch nhỏ khi tua.`;
+      } else {
+        note.textContent = "Đồng bộ theo thời gian (play/pause/seek); hai video không khóa khung hình tuyệt đối.";
+      }
+    };
+    src.addEventListener("loadedmetadata", report);
+    exp.addEventListener("loadedmetadata", report);
+    const range = $("compareRange");
+    if (range) range.addEventListener("input", () => compareWipeAt(Number(range.value)));
+    const divider = $("compareDivider");
+    const wipe = $("compareWipe");
+    if (divider && wipe) {
+      divider.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        const move = (ev) => {
+          const r = wipe.getBoundingClientRect();
+          compareWipeAt(((ev.clientX - r.left) / r.width) * 100);
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      });
+    }
+  }
   const _showSource = showSourcePreview;
   showSourcePreview = function (medium) { lastSourceMediaId = medium.id; return _showSource(medium); };
   function setCompare(on) {
@@ -1055,7 +1120,8 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     $("previewCompareSource").src = "/api/media/" + encodeURIComponent(src.id);
     $("previewCompareExport").src = "/api/preview?" + Date.now();
     wrap.hidden = false;
-    setStatus("So sánh: trái = file nguồn (Before), phải = bản xuất gần nhất (After). Hai trình phát không khóa khung hình với nhau.");
+    compareWireSync(); compareWipeAt(50);
+    setStatus("So sánh wipe: trái vạch chia = file nguồn (Before), phải vạch chia = bản xuất gần nhất (After). Kéo vạch chia hoặc thanh trượt để so sánh; hai video đồng bộ theo thời gian, không khóa khung hình tuyệt đối.");
   }
   const cmpModeBtn = $("btnPreviewCompareMode");
   if (cmpModeBtn) cmpModeBtn.addEventListener("click", () => setCompare(!compareOn));
@@ -1410,5 +1476,73 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (mg) mg.addEventListener("change", async () => {
     try { await post({ op: "magnetic_set", enabled: mg.checked }); setStatus(`Magnetic Main: ${mg.checked ? "on" : "off"}.`); }
     catch (err) { setStatus(err.message, true); }
+  });
+})();
+
+/* Round 4: in-app voiceover recording (browser MediaRecorder).
+   The browser owns microphone permission: getUserMedia prompts the
+   user, and a denial (or an insecure context, or no microphone)
+   surfaces as a clear status message — nothing is recorded or
+   faked. A finished take is uploaded to /api/voiceover/record,
+   stored as real project media, and selected in the voiceover form
+   so the existing form places it on the Voiceover track. No real
+   microphone exists on a headless VM, so mic recording itself can
+   only be verified in a real browser on Windows. */
+(function round4Recording() {
+  const recBtn = $("btnVoiceRecord"), stopBtn = $("btnVoiceRecordStop"),
+    status = $("voiceRecordStatus"), preview = $("voiceRecordPreview");
+  if (!recBtn) return;
+  const say = (text, isErr) => {
+    if (status) status.textContent = text;
+    if (isErr) setStatus(text, true); else setStatus(text);
+  };
+  let recorder = null, chunks = [], stream = null, mimeType = "";
+  recBtn.addEventListener("click", async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      say("Trình duyệt này không hỗ trợ ghi âm (cần getUserMedia, thường là Chrome/Edge qua localhost hoặc HTTPS).", true); return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      say("Trình duyệt này không hỗ trợ MediaRecorder.", true); return;
+    }
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", ""];
+    mimeType = candidates.find((m) => !m || (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m))) || "";
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      say("Không ghi được: trình duyệt đã từ chối quyền micro hoặc không tìm thấy micro (" + (err && err.name ? err.name : err) + "). Hãy cho phép quyền micro rồi bấm ghi lại.", true); return;
+    }
+    chunks = [];
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      say("Không khởi động được MediaRecorder: " + err.message, true); return;
+    }
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      if (!chunks.length) { say("Bản ghi trống — hãy giữ nút ghi, nói, rồi bấm dừng.", true); return; }
+      const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+      const fd = new FormData();
+      fd.append("file", blob, "voiceover-recording." + ext);
+      say("Đang tải bản ghi lên project…");
+      try {
+        const res = await fetch("/api/voiceover/record", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+        say(`Đã lưu bản ghi: ${data.media.path} (media ${data.media.id}). Chọn form bên dưới để đặt lên track Voiceover.`);
+        if (preview) { preview.src = "/api/media/" + encodeURIComponent(data.media.id); preview.hidden = false; }
+        await load();
+        const vm = $("voiceMedia"); if (vm) vm.value = data.media.id;
+      } catch (err) { say("Tải bản ghi thất bại: " + err.message, true); }
+    };
+    recorder.start();
+    recBtn.hidden = true; if (stopBtn) stopBtn.hidden = false;
+    say("Đang ghi… bấm ■ Stop recording để dừng.");
+  });
+  if (stopBtn) stopBtn.addEventListener("click", () => {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    recBtn.hidden = false; stopBtn.hidden = true;
   });
 })();

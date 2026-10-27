@@ -13,7 +13,11 @@ Renderability honesty (see vibeedit_core/render.py):
   it is named as such in render.py and here.
 - swing rotates about the centre (FFmpeg rotate has no left-edge
   perspective pivot), not a true left-edge swing.
-- halftone still cannot render and must raise, never fall back to
+- Round 4: halftone now renders (geq dot mask + maskedmerge in the
+  timeline render, plus the Pillow pre-rendered segment in
+  test_round4_halftone.py) and is no longer in the unrenderable
+  set; the unrenderable tests below now iterate whatever (if
+  anything) remains unrenderable, and must never fall back to
   dissolve/fade.
 
 Wiring note: Project.add_transition() in project.py does NOT yet

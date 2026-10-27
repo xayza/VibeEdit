@@ -108,16 +108,20 @@ TRANSITION_XFADE = {
 # Phase B6 motion kinds: rendered by render.py motion chains, not by
 # xfade. Defined literally here (NOT imported from render.py) to avoid
 # a circular import, since render.py imports from project.py. Keep in
-# sync with render.MOTION_TRANSITIONS. "halftone" is a known original
-# kind that no FFmpeg filter chain reproduces; it is accepted nowhere
-# as renderable and must error with its pre-rendered-segment path.
+# sync with render.MOTION_TRANSITIONS. Round 4: halftone now renders
+# (geq dot mask + maskedmerge in the timeline render, plus the
+# Pillow pre-rendered segment path), so it is no longer
+# unrenderable; it keeps its own set mirroring
+# render.HALFTONE_TRANSITIONS so the two registries stay comparable.
 MOTION_TRANSITION_KINDS = {
     "spin", "swing", "arc", "arc-right", "diamond", "crash-out",
     "infinite-out", "screen-in", "screen-out", "dip-black",
     "color-shift", "flicker", "kaleidoscope",
 }
-UNRENDERABLE_TRANSITION_KINDS = {"halftone"}
-TRANSITION_KINDS = sorted(set(TRANSITION_XFADE) | MOTION_TRANSITION_KINDS)
+HALFTONE_TRANSITION_KINDS = {"halftone"}
+UNRENDERABLE_TRANSITION_KINDS: set = set()
+TRANSITION_KINDS = sorted(set(TRANSITION_XFADE) | MOTION_TRANSITION_KINDS
+                          | HALFTONE_TRANSITION_KINDS)
 
 
 def validate_reframe(window) -> dict:
@@ -1061,7 +1065,8 @@ class Project:
                 f"Transition kind {kind!r} cannot be rendered: no FFmpeg "
                 f"filter chain reproduces it; path: pre-rendered segment")
         if kind not in TRANSITION_XFADE and \
-                kind not in MOTION_TRANSITION_KINDS:
+                kind not in MOTION_TRANSITION_KINDS and \
+                kind not in HALFTONE_TRANSITION_KINDS:
             raise ValueError(
                 f"Unknown transition kind: {kind!r} "
                 f"(choose one of {', '.join(TRANSITION_KINDS)})")
@@ -2561,7 +2566,8 @@ class Project:
                     f"Transition {trans.get('id')} kind "
                     f"{trans.get('kind')!r} cannot be rendered")
             elif trans.get("kind") not in TRANSITION_XFADE and \
-                    trans.get("kind") not in MOTION_TRANSITION_KINDS:
+                    trans.get("kind") not in MOTION_TRANSITION_KINDS and \
+                    trans.get("kind") not in HALFTONE_TRANSITION_KINDS:
                 errors.append(
                     f"Transition {trans.get('id')} has unknown kind "
                     f"{trans.get('kind')!r}")

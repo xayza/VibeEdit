@@ -549,18 +549,33 @@ MOTION_TRANSITIONS = {
                     "(no FFmpeg filter does that)",
 }
 
-# Phase B6: original kinds that still cannot render after a genuine
-# attempt. They raise a clear error naming the kind and the reason
-# (see _render_inner validation), never a silent dissolve/fade.
-# The suggested path is a pre-rendered segment: render the
-# transition externally and splice it in as a clip.
-UNRENDERABLE_TRANSITIONS = {
-    "halftone": "no FFmpeg filter reproduces an animated halftone "
-                "dot pattern (dot spacing growing, then the next "
-                "picture resolving out of dots); pixelize is the "
-                "glitch effect, not halftone, so it is not "
-                "substituted; path: pre-rendered segment",
+# Round 4: halftone renders two ways, and pixelize is still never
+# substituted for it (pixelize is the glitch effect, not halftone).
+#
+# 1. Timeline render: an animated halftone dot mask built with the
+#    FFmpeg geq filter (dot radius grows with transition progress)
+#    driving maskedmerge between the outgoing tail and incoming
+#    head. This keeps the real moving pictures on both sides,
+#    which a still-frame segment cannot do.
+# 2. Standalone pre-rendered segment: render_halftone_segment()
+#    below extracts the boundary frames, composites the same dot
+#    dissolve with Pillow frame by frame, and encodes a segment
+#    file — the path the original plan suggested, kept for preview
+#    and for use as a clip.
+HALFTONE_TRANSITIONS = {
+    "halftone": "animated halftone dot mask (geq) + alphamerge / "
+                "overlay; dots grow until the incoming picture "
+                "resolves out of dots (timeline), or the Pillow "
+                "pre-rendered segment of the same dissolve "
+                "(standalone)",
 }
+
+# Original kinds that still cannot render after a genuine attempt.
+# They raise a clear error naming the kind and the reason (see
+# _render_inner validation), never a silent dissolve/fade. Empty
+# since round 4 (halftone was the only entry); kept so validation
+# code that consults it keeps working and future kinds have a home.
+UNRENDERABLE_TRANSITIONS: dict[str, str] = {}
 
 
 def transition_renderability(kind: str) -> dict:
@@ -574,6 +589,9 @@ def transition_renderability(kind: str) -> dict:
     if kind in UNRENDERABLE_TRANSITIONS:
         return {"kind": kind, "renders": False, "method": None,
                 "reason": UNRENDERABLE_TRANSITIONS[kind]}
+    if kind in HALFTONE_TRANSITIONS:
+        return {"kind": kind, "renders": True,
+                "method": HALFTONE_TRANSITIONS[kind], "reason": None}
     if kind in MOTION_TRANSITIONS:
         return {"kind": kind, "renders": True,
                 "method": MOTION_TRANSITIONS[kind], "reason": None}
@@ -595,8 +613,96 @@ def list_transition_renderability() -> list[dict]:
     this list so the new kinds appear there with the same flag.
     """
     kinds = sorted(set(TRANSITION_XFADE) | set(MOTION_TRANSITIONS)
+                   | set(HALFTONE_TRANSITIONS)
                    | set(UNRENDERABLE_TRANSITIONS))
     return [transition_renderability(kind) for kind in kinds]
+
+
+def halftone_frame(a_image, b_image, progress: float, cell: int = 24):
+    """One frame of a halftone dissolve: dots of ``b_image`` grow
+    over ``a_image`` as ``progress`` goes 0 -> 1.
+
+    The mask is a grid of circles whose radius grows with progress;
+    at progress 1 the radius (0.72 * cell) exceeds the cell-corner
+    distance (0.707 * cell), so the frame is fully ``b_image``.
+    Pillow is imported here (lazy) so importing render.py never
+    fails when Pillow is absent.
+    """
+    from PIL import Image, ImageDraw
+    a = a_image.convert("RGB")
+    b = b_image.convert("RGB").resize(a.size)
+    p = max(0.0, min(1.0, float(progress)))
+    mask = Image.new("L", a.size, 0)
+    radius = p * cell * 0.72
+    if radius > 0:
+        draw = ImageDraw.Draw(mask)
+        step = max(2, int(cell))
+        for cy in range(step // 2, a.size[1] + step // 2, step):
+            for cx in range(step // 2, a.size[0] + step // 2, step):
+                draw.ellipse([cx - radius, cy - radius,
+                              cx + radius, cy + radius], fill=255)
+    return Image.composite(b, a, mask)
+
+
+def _extract_boundary_frame(src: str, out: str, last: bool) -> None:
+    """Extract the first (or near-last) frame of ``src`` to ``out``.
+
+    The last frame uses ``-sseof`` because the exact frame count
+    is not always known; 0.05s before the end is the boundary
+    frame for any transition-length purpose and is documented as
+    such. Raises on FFmpeg failure.
+    """
+    cmd = [find_tool("ffmpeg"), "-y", "-v", "error"]
+    if last:
+        cmd += ["-sseof", "-0.05"]
+    cmd += ["-i", src, "-frames:v", "1", out]
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+
+def render_halftone_segment(a_path: str, b_path: str, out_path: str,
+                            duration_s: float, fps: float,
+                            width: int, height: int,
+                            cell: int = 24) -> dict:
+    """Pre-render a halftone dissolve segment file (round 4).
+
+    Extracts the last frame of ``a_path`` and the first frame of
+    ``b_path``, composites ``n`` Pillow dot-dissolve frames, and
+    encodes them to ``out_path`` (H.264, yuv420p). Returns
+    {"path", "frames", "width", "height", "duration"}. This is the
+    standalone segment path: the timeline render itself uses the
+    geq maskedmerge variant (same dissolve, motion-preserving),
+    because a still-frame segment would freeze motion during the
+    transition window. Raises when Pillow or FFmpeg is absent, or
+    when either boundary frame cannot be extracted.
+    """
+    from PIL import Image
+    import tempfile
+    if duration_s <= 0 or fps <= 0 or width <= 0 or height <= 0:
+        raise ValueError(
+            "render_halftone_segment needs positive duration, fps, "
+            "width and height")
+    n_frames = max(1, int(round(float(fps) * float(duration_s))))
+    tmpdir = tempfile.mkdtemp(prefix="vibeedit-halftone-")
+    try:
+        a_png = os.path.join(tmpdir, "a.png")
+        b_png = os.path.join(tmpdir, "b.png")
+        _extract_boundary_frame(a_path, a_png, last=True)
+        _extract_boundary_frame(b_path, b_png, last=False)
+        a = Image.open(a_png).convert("RGB").resize((width, height))
+        b = Image.open(b_png).convert("RGB").resize((width, height))
+        for i in range(n_frames):
+            frame = halftone_frame(a, b, (i + 1) / n_frames, cell)
+            frame.save(os.path.join(tmpdir, f"f_{i:04d}.png"))
+        cmd = [find_tool("ffmpeg"), "-y", "-v", "error",
+               "-framerate", str(fps), "-i",
+               os.path.join(tmpdir, "f_%04d.png"),
+               "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-r", str(fps), out_path]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return {"path": out_path, "frames": n_frames, "width": width,
+            "height": height, "duration": float(duration_s)}
 
 
 def export_preset_info(name: str, project_width: int,
@@ -714,7 +820,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 f"Transition kind {kind!r} cannot be rendered: "
                 f"{UNRENDERABLE_TRANSITIONS[kind]}")
         if kind not in TRANSITION_XFADE \
-                and kind not in MOTION_TRANSITIONS:
+                and kind not in MOTION_TRANSITIONS \
+                and kind not in HALFTONE_TRANSITIONS:
             raise ValueError(f"Unknown transition kind: {kind!r}")
         trans_by_pair[(trans["from"], trans["to"])] = trans
     boundaries: list[tuple[float, float]] = []  # (incoming start s, dur s)
@@ -786,7 +893,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             vchain, vchain_dur = label, dur_s
             return
         if trans is not None:
-            if trans["kind"] in MOTION_TRANSITIONS:
+            if trans["kind"] in MOTION_TRANSITIONS or trans["kind"] in HALFTONE_TRANSITIONS:
                 chain_motion_video(label, dur_s, trans)
                 return
             if trans["kind"] in UNRENDERABLE_TRANSITIONS:
@@ -1029,6 +1136,42 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             a = _tiled_rotated(vtail, f"-6.283185*{p}")
             b = _tiled_rotated(vhead, f"6.283185*(1-{p})")
             return _dissolve(a, b)
+        if kind == "halftone":
+            # Round 4: animated halftone dot mask. A nullsrc stream
+            # is turned into a binary mask by geq: within each 24px
+            # cell a disc grows with frame progress (N+1)/total,
+            # reaching the cell-corner distance (0.707 * 24 = 17px)
+            # at the last frame, so the output ends fully on the
+            # incoming picture. The incoming head gets the mask as
+            # its alpha channel (alphamerge) and is composited over
+            # the outgoing tail (overlay): a hard dot pick, not a
+            # blend. Both real moving pictures are preserved
+            # (unlike a still-frame Pillow segment, which would
+            # freeze motion during the transition window). This is
+            # not pixelize: pixelize averages blocks; halftone
+            # resolves the picture out of dots.
+            # maskedmerge was tried first and rejected: even in
+            # RGB with a binary mask it produced blended magenta
+            # frames on FFmpeg 8.1.2 instead of a hard pick
+            # (verified with solid red/blue clips and solid
+            # white/black masks).
+            total = max(1, int(round(float(fps) * trans_s)))
+            cell = 24
+            mask_src = next_label("hmask")
+            filter_parts.append(
+                f"nullsrc=s={w}x{h}:r={fps_str}:d={trans_s:.3f}"
+                f"[{mask_src}]")
+            mask = next_label("hmask")
+            filter_parts.append(
+                f"[{mask_src}]geq=lum='if(lt(hypot(mod(X,{cell})-"
+                f"{cell // 2},mod(Y,{cell})-{cell // 2}),"
+                f"18*(N+1)/{total}),255,0)',format=gray[{mask}]")
+            over_a = next_label("hov")
+            filter_parts.append(f"[{vhead}][{mask}]alphamerge[{over_a}]")
+            out = next_label("hov")
+            filter_parts.append(
+                f"[{vtail}][{over_a}]overlay=0:0:format=yuv420[{out}]")
+            return _finish(out, "mfin")
         raise ValueError(
             f"Motion transition {kind!r} has no filter builder in "
             "render.py (registry/render mismatch)")

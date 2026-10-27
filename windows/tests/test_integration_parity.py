@@ -46,13 +46,18 @@ class TestMotionAndReframe(unittest.TestCase):
                 self.assertEqual(tr["kind"], kind)
                 self.assertEqual(proj.validate()["ok"], True)
 
-    def test_halftone_rejected_with_path(self):
+    def test_halftone_accepted_round4(self):
+        # Round 4: halftone renders (geq dot mask + alphamerge /
+        # overlay in the timeline render, Pillow segment standalone),
+        # so add_transition accepts it. The real render proof is in
+        # tests/test_round4_halftone.py; this test only asserts the
+        # registry no longer rejects the kind.
         with tempfile.TemporaryDirectory() as tmp:
             proj = _make_project(tmp)
             c1, c2 = _two_clips(proj)
-            with self.assertRaises(ValueError) as ctx:
-                proj.add_transition(c1["id"], c2["id"], "halftone", 0.5)
-            self.assertIn("pre-rendered", str(ctx.exception))
+            tr = proj.add_transition(c1["id"], c2["id"], "halftone", 0.5)
+            self.assertEqual(tr["kind"], "halftone")
+            self.assertEqual(proj.validate()["ok"], True)
 
     def test_renderability_list_covers_39_and_flags_halftone(self):
         rows = list_transition_renderability()
@@ -60,8 +65,9 @@ class TestMotionAndReframe(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         by_kind = {r["kind"]: r for r in rows}
         self.assertTrue(by_kind["spin"]["renders"])
-        self.assertFalse(by_kind["halftone"]["renders"])
-        self.assertIn("pre-rendered", by_kind["halftone"]["reason"])
+        # Round 4: halftone renders (was unrenderable before).
+        self.assertTrue(by_kind["halftone"]["renders"])
+        self.assertIn("geq", by_kind["halftone"]["method"])
 
     def test_reframe_via_add_clip_and_set_reframe(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -135,7 +141,7 @@ class TestMcpIntegrationTools(unittest.TestCase):
     def test_registry_counts(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(TOOLS), 478)  # Round 3: 472 -> 478
+        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(honest), 132)  # Round 3: 138 -> 132, 6 voice tools became real
@@ -200,7 +206,8 @@ class TestMcpIntegrationTools(unittest.TestCase):
         res = srv.call("vibeedit_transitions_renderability", {})
         by_kind = {r["kind"]: r for r in res["transitions"]}
         self.assertTrue(by_kind["spin"]["renders"])
-        self.assertFalse(by_kind["halftone"]["renders"])
+        # Round 4: halftone renders (was unrenderable before).
+        self.assertTrue(by_kind["halftone"]["renders"])
 
 
 if __name__ == "__main__":

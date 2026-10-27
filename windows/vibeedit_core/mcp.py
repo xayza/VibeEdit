@@ -534,7 +534,8 @@ TOOLS.extend([
     {"name": "vibeedit_view_fullscreen", "description": "Not available in this Windows build: no window exists in this headless server."},
     {"name": "vibeedit_view_inspector_pane", "description": "Not available in this Windows build: no inspector pane exists in this headless server; the web UI inspector is a separate browser view."},
     {"name": "vibeedit_view_library_pane", "description": "Not available in this Windows build: no library pane exists in this headless server; use library_list for the data."},
-    {"name": "vibeedit_app_update", "description": "Not available in this Windows build: the updater framework can check/download/verify a release (app_update_check/app_update_download) but cannot replace the running app; install the downloaded installer manually after quitting VibeEdit."},
+    {"name": "vibeedit_app_update", "description": "Not available in this Windows build: the updater framework can check/download/verify a release and write an installer handoff script (app_update_check/app_update_download/app_update_prepare) but cannot replace the running app by itself; quit VibeEdit, then run the handoff script to install."},
+    {"name": "vibeedit_app_update_prepare", "description": "Download a release asset, verify its SHA-256 when given, and write the Windows handoff script (vibeedit-update-run.bat) that waits for the app process to exit and then starts the installer; the script is never executed by the app itself."},
     {"name": "vibeedit_app_update_check", "description": "Report update status: current version and the fact that no updater channel is configured in this build."},
     {"name": "vibeedit_app_update_download", "description": "Download a release asset to a file and verify its SHA-256 when given (never executes it; install manually after quitting VibeEdit)."},
     {"name": "vibeedit_vision_cutout_model", "description": "Cut out the foreground with a user-supplied ONNX segmentation model file (clear error when the model file or ONNX Runtime is absent; never falls back silently to grabCut)."},
@@ -3286,6 +3287,13 @@ class MCPServer:
                 raise ValueError("app_update_download needs url and dest")
             return download_release(args["url"], args["dest"],
                                     args.get("sha256"))
+        if name == "vibeedit_app_update_prepare":
+            from .updater import prepare_update
+            if not args.get("url") or not args.get("dest"):
+                raise ValueError("app_update_prepare needs url and dest")
+            return prepare_update(args["url"], args["dest"],
+                                  args.get("sha256"),
+                                  args.get("app_pid"))
         if name in ("vibeedit_captions_transcribe",
                     "vibeedit_media_transcribe"):
             from .transcribe import transcribe_media
