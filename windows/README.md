@@ -17,7 +17,7 @@
   Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
   `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
 
-## Vòng rà soát thứ hai — knowledge, skills ghi, reorder, marker, font, caption MCP (mới nhất)
+## Vòng rà soát thứ hai — knowledge, skills ghi, reorder, marker, font, caption MCP
 
 Vòng hai đối chiếu lại toàn bộ source gốc với code Windows sau đợt
 full-parity đầu, sửa các dòng cũ còn sót trong README này (một số mục
@@ -66,7 +66,7 @@ Vòng 9 bổ sung: backdrop clip (blur/màu, render thật), state panel
 chạy (dismiss/toggle/follow), request follow-up fix-issues /
 another-recipe đúng wording gốc, và mở view plugin (show-view).
 
-Trạng thái hiện tại (sau đợt full-parity vòng 9): **MCP 479 công cụ
+Trạng thái hiện tại (sau đợt full-parity vòng 13): **MCP 479 công cụ
 (401 thao tác thật, 78 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
@@ -81,14 +81,20 @@ sync), motion clip từ preset gốc + xoay framing (render bằng crop
 expression), thay nhạc giữ volume/fade, cửa sổ lời dẫn, kho outcomes,
 run log + checklist, mô tả media, đo tốc độ nói, khóa style ảnh +
 disclose, đóng/gỡ gói library, phân tích item library, brand pose từ
-ảnh, plugin overlays/actions/views/proposal/replace, kit check/install.
+ảnh, plugin overlays/actions/views/proposal/replace, kit check/install,
+trim chính xác theo khung hình, cửa sổ enable overlay nửa mở
+[start, end), kiểm chứng tích hợp end-to-end (export tổng hợp khớp
+report, server smoke tắt sạch) và checklist test Windows
+(`WINDOWS_TEST_CHECKLIST.md`, chỉ là tài liệu chuẩn bị — chưa yêu cầu
+người dùng test).
 Hoạt động một phần: Compare chưa khóa khung hình, export
 preset ProRes/4K mới render trên Linux VM từ clip giả lập chưa kiểm
 chứng trên footage 4K gốc; desktop tắt
 sạch, HiDPI, phím tắt Ctrl và test chạy trên Windows đã làm xong về
 code ở Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên
 Windows thật. Còn thiếu và sẽ port tiếp (không bỏ): bộ cài/.exe cho
-máy Windows sạch, Windows CI, voice provider (tạo/clone giọng nói),
+máy Windows sạch, Windows CI, clone giọng nói (giọng Edge/Piper đã
+có, chỉ clone từ mẫu giọng là chưa có),
 app updater tự thay app đang chạy (chỉ mới có handoff + hoãn/bỏ qua),
 model
 segmentation học sâu cho cutout, `clip_send_to_agent`,
@@ -122,7 +128,7 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
-## Full-parity vòng 9 — backdrop clip, run-panel actions, plugins.show-view: 7 công cụ từ honest thành thật (mới nhất)
+## Full-parity vòng 9 — backdrop clip, run-panel actions, plugins.show-view: 7 công cụ từ honest thành thật
 
 - **Đọc spec gốc trước khi code:** `ClipBackdrop.swift` +
   `ProjectDocument+Backdrop.swift` + `ClipBackdropTests.swift`
@@ -188,6 +194,50 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   nhất, chưa đẩy. Smoke server trên project tạm riêng: `GET /`
   200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
   `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
+
+## Full-parity vòng 13 — kiểm chứng tích hợp end-to-end, rà soát docs, checklist test Windows
+
+- **Export tổng hợp (test `tests/test_round13.py`, dữ liệu giả lập
+  tạm, không dùng project/media mẫu của người dùng):** project
+  320×180 @ 30 fps gồm clip main hẹp có backdrop blur, clip main
+  thứ hai, dissolve 0,5 s giữa hai clip, freeze 30 khung sau clip
+  thứ hai, overlay video đã trim, overlay still, một caption, nhạc
+  sine và narration sine phủ toàn timeline. Kết quả đo được, khớp
+  nhau giữa report và file: report duration 4,5 s, transitions 1,
+  text_overlays 1, overlay_clips 2, skipped rỗng; file
+  103.766 byte, H.264 320×180, đúng 135 khung đọc được (60 + 60 +
+  30 − 15 khung chồng transition), duration format đúng 4,5 s,
+  audio AAC 48 kHz stereo; khung cuối (4,2 s) vẫn là màu xanh của
+  clip main bị freeze, không đen.
+- **Cắt/ghép giữ project hợp lệ:** split clip 90 khung tại khung 30
+  rồi trim nửa phải về khung 75, project vẫn validate OK, tổng
+  75 khung.
+- **Server smoke:** server thật chạy trong thread ở cổng tạm: `GET /`
+  200 (có `compareWipe`), `/api/mcp-tools` trả `count` 479,
+  `/api/info` 200 (có `python`); shutdown + server_close + join
+  thread xong, cổng bind lại được ngay — không sót process.
+- **Rà soát docs:** sửa các chỗ lệch số/trạng thái (tiêu đề trạng
+  thái hiện tại ở `PARITY.md` và `README.md` còn ghi "vòng 9", số
+  MCP 394/85 còn sót trong một dòng bảng `PARITY.md` trong khi
+  chính dòng đó kết luận 78 honest, hai nhãn "(mới nhất)" cũ ở
+  vòng 2 và vòng 9). Quét lại: không chỗ nào gọi FFmpeg bundle là
+  LGPL (mọi lần nhắc đều là "không phải LGPL, là GPLv3"); các mục
+  "còn thiếu" hiện tại chỉ còn những thứ thật sự chưa có (clone
+  giọng, segmentation học sâu, registry, .exe/CI, updater tự thay
+  app, hợp nhất). Các mục lịch sử theo vòng giữ nguyên như lúc
+  viết, không sửa ngược.
+- **Checklist test Windows (`WINDOWS_TEST_CHECKLIST.md`, chỉ viết
+  tài liệu, không yêu cầu người dùng làm ngay):** thứ tự git pull
+  đúng cách, launcher, UI fit ở 4 kích thước × scaling 100/125/150%,
+  import kể cả trùng tên, edit/split/copy-paste, text, transition,
+  backdrop, freeze, nhạc/voiceover ghi micro, export kể cả
+  youtube4k/proRes422HQ, desktop pywebview/HiDPI/phím tắt Ctrl,
+  chạy full suite bằng `py`, và mục "báo lại cho bimo cái gì"
+  (ảnh chụp + kích thước cửa sổ + scaling + lỗi nguyên văn).
+- **Số liệu:** MCP không đổi **479** (không thêm công cụ mới),
+  **401 thật / 78 honest**; **567 tests OK** trên Linux VM
+  (563 + 4 test vòng mười ba mới); test 249 tên gốc chạy lại
+  vẫn đủ. Cây Swift không động, không hợp nhất, chưa đẩy.
 
 ## Full-parity vòng 12 — cửa sổ enable của overlay chuyển sang nửa mở [start, end) theo đúng spec gốc
 
