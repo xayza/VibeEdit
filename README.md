@@ -55,7 +55,7 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 11)
+## Current status (honest, full-parity round 12)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
   endpoint; the number in docs goes stale as tools are added): **401
@@ -109,8 +109,12 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   trims on overlay video and motion-transition windows (round 11:
   exact source/project frame indices instead of millisecond-rounded
   trims, plus a final-mix audio pad so the export `-shortest` flag
-  can no longer eat the last video frame), and
-  556 tests OK on the Linux VM.
+  can no longer eat the last video frame), half-open [start, end)
+  overlay enable windows matching the original's CMTimeRange
+  semantics (round 12: no more repeated overlay frame at the exact
+  end time, on millisecond-exact and non-millisecond ends alike),
+  and
+  563 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K

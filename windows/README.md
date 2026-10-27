@@ -189,6 +189,44 @@ trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
   200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
   `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
 
+## Full-parity vòng 12 — cửa sổ enable của overlay chuyển sang nửa mở [start, end) theo đúng spec gốc
+
+- **Quyết định sau khi đọc spec gốc (không đoán):** bản gốc đặt
+  mọi item video (cả track chính lẫn overlay) bằng
+  `CMTimeRange(start: destination, duration: fps.time(duration))`
+  (CompositionBuilder.swift ~155 và ~215); CMTimeRange theo định
+  nghĩa là nửa mở; `item.end` là `at + duration`
+  (Project.swift:99); lane được tái dùng khi `prev.end <= start`
+  (VideoCompositionLanes.swift: `take`). Vì vậy khung ở `end`
+  thuộc về item kế tiếp, và hành vi `between()` bao hàm cũ của
+  bản Windows là sai so với gốc — vòng 12 sửa chứ không giữ.
+- **Sửa (render.py, helper `_enable_window`):**
+  `gte(t, start)*lt(t, end)` thay cho `between(t, start, end)` ở
+  cả 5 vị trí dùng cùng mẫu: overlay video đường thường, overlay
+  video chia theo opacity, overlay still, adjustment layer, text
+  drawtext. Cả hai biên đều cắt ngắn về 6 chữ số thập phân (không
+  làm tròn): làm tròn đầu cuối lên sẽ đưa khung biên trở lại
+  (29/30 s thành "0.967" đã vượt timestamp 0,9667 s của chính
+  khung đó), làm tròn đầu bắt đầu lên sẽ làm rớt khung đầu tiên.
+- **Tái hiện (test `tests/test_round12.py`, 7 test, fail trước
+  sửa, pass sau sửa):** overlay video 30 khung nay khung 30 chỉ
+  còn main; overlay 29 khung (kết thúc 0,9667 s không rơi đúng
+  mili-giây) nay khung 29 chỉ còn main; overlay chia opacity,
+  overlay still, adjustment mono trên nền đỏ và text đều hết
+  khung lặp ở đúng thời điểm kết thúc.
+- **Trường hợp bình thường không đổi:** hồi quy overlay chạy
+  riêng 107 test OK (vòng 9, 10, 11, 12, phase 4, phase 8, motion,
+  integration, halftone); khung đầu tiên của overlay không đổi
+  (đầu bắt đầu vẫn bao hàm, chỉ cắt ngắn xuống để không rớt
+  khung).
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **401 thật / 78 honest**; **563 tests OK** trên Linux VM
+  (556 + 7 test vòng mười hai mới); test 249 tên gốc chạy lại
+  vẫn đủ. Cây Swift không động, không hợp nhất, chưa đẩy.
+  Smoke server trên project tạm riêng: `GET /` 200,
+  `/api/mcp-tools` 479 công cụ, `/api/info` 200 (Python 3.12.3,
+  FFmpeg 8.1.2).
+
 ## Full-parity vòng 11 — trim chính xác theo khung hình cho overlay video + cửa sổ transition, sửa lỗi `-shortest` ăn khung cuối
 
 - **Overlay video + transition (tái hiện trước, sửa sau):**

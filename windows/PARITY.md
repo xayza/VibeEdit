@@ -57,9 +57,10 @@ vòng 5 thêm 2 alias thật nữa (`media.ocr` → `vision.text`,
 — các alias dùng chung handler, và các giới hạn thật còn lại vẫn liệt
 kê ở mục 8 bên dưới. Vòng 9 chuyển thêm 7 công cụ từ báo-lỗi thành
 thật mà không thêm công cụ mới nào nên tổng vẫn 479 (xem mục 8).
-Test: **552 tests OK** trên Linux VM (549 trước vòng mười + 3 test
-vòng mười mới: freeze 30 fps, freeze 30 fps có backdrop, clip chính
-bắt đầu ở khung không rơi đúng mốc mili-giây).
+Test: **563 tests OK** trên Linux VM (556 trước vòng mười hai + 7
+test vòng mười hai mới: overlay video 30 khung, overlay video 29
+khung, overlay chia opacity, overlay still, adjustment layer,
+text, và unit test cho helper `_enable_window`).
 
 ## Cách đọc cột Verification
 
@@ -287,14 +288,38 @@ chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
   `-shortest` chỉ cắt phần đuôi âm thanh ở cuối video thay vì
   ăn khung hình; thời lượng file vẫn bằng thời lượng video.
   Âm thanh atrim, xfade/acrossfade (offset theo timestamp, không
-  rớt khung) được giữ nguyên có chủ ý. Quan sát kề bên chưa sửa
-  (không phải lỗi trim): cửa sổ enable của overlay dùng
-  `between(t, start, end)` dạng bao hàm cả hai đầu nên overlay
-  còn hiện thêm một khung lặp ở đúng thời điểm kết thúc (kể cả
-  khi thời lượng rơi đúng mili-giây) — ngữ nghĩa enable này là
-  hành vi chung của mọi overlay từ trước, cần một vòng riêng
-  quyết định (giữ bao hàm hay chuyển sang đầu cuối loại trừ)
-  kèm kiểm tra hồi quy toàn bộ overlay trước khi đổi.
+  rớt khung) được giữ nguyên có chủ ý.
+- ĐÃ SỬA trong vòng 12 (quyết định sau khi đọc spec gốc, không
+  đoán): cửa sổ enable của overlay chuyển từ bao hàm cả hai đầu
+  sang nửa mở [start, end). Bằng chứng spec gốc: mọi item video
+  (cả track chính lẫn overlay) đều được đặt bằng
+  `CMTimeRange(start: destination, duration: fps.time(duration))`
+  (CompositionBuilder.swift ~155 và ~215); CMTimeRange theo định
+  nghĩa là nửa mở [start, start+duration); `item.end` được định
+  nghĩa là `at + duration` (Project.swift:99); và một lane được
+  tái dùng khi `prev.end <= start` (VideoCompositionLanes.swift:
+  `take`) — tức khung ở `end` thuộc về item kế tiếp, không bao
+  giờ thuộc về item này. Vì vậy hành vi bao hàm cũ là sai so với
+  gốc, không phải "đúng ý gốc" để giữ lại. Sửa trong render.py:
+  helper mới `_enable_window` dùng `gte(t, start)*lt(t, end)` thay
+  cho `between(t, start, end)` ở cả 5 vị trí dùng cùng mẫu
+  (overlay video đường thường, overlay video chia theo opacity,
+  overlay still, adjustment layer, text drawtext); cả hai biên
+  đều bị CẮT NGẮN (không làm tròn) về 6 chữ số thập phân, vì làm
+  tròn đầu cuối LÊN sẽ đưa khung biên trở lại (29/30 s thành
+  "0.967" theo `.3f` đã vượt quá timestamp 0,9667 s của chính
+  khung đó — cùng họ lỗi vòng 10/11), và làm tròn đầu bắt đầu
+  LÊN sẽ làm rớt khung đầu tiên. Sai số cắt ngắn (< 1 µs) nhỏ
+  hơn nhiều so với một khung hình (>= 16,7 ms) nên không khung
+  nào khác đổi phe. Test tái hiện `tests/test_round12.py`
+  (7 test, fail trước sửa, pass sau sửa): overlay video 30 khung
+  (kết thúc đúng mili-giây 1,000 s) nay khung 30 chỉ còn main;
+  overlay 29 khung (kết thúc 0,9667 s không rơi đúng mili-giây)
+  nay khung 29 chỉ còn main; overlay chia opacity, overlay
+  still, adjustment mono trên nền đỏ và text đều hết khung lặp
+  ở đúng thời điểm kết thúc. Hồi quy overlay chạy riêng 107
+  test OK (vòng 9, 10, 11, 12, phase 4, phase 8, motion,
+  integration, halftone), không vỡ đuôi overlay nào.
 
 ## Những gì KHÔNG phải là tính năng thiếu
 

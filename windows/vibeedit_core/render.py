@@ -279,6 +279,34 @@ def _num(value: float) -> str:
     return f"{value:.6g}"
 
 
+def _enable_window(start_s: float, end_s: float) -> str:
+    """Half-open enable window [start, end) as an FFmpeg expression.
+
+    Round 12: the original places every item as a half-open
+    CMTimeRange(start, duration) — item.end is at + duration
+    (Project.swift:99) and a composition lane is reused when
+    prev.end <= start (VideoCompositionLanes.swift: take) — so the
+    frame at `end` belongs to the next item, never to this one.
+    FFmpeg between(t, a, b) is inclusive on BOTH ends, and the
+    overlay filter repeats its last frame on EOF, so between()
+    showed one extra repeated frame at exactly t=end. Hence
+    gte(t, start) * lt(t, end) here.
+
+    Both bounds are TRUNCATED (never rounded) to 6 decimals:
+    rounding the end up would re-include the boundary frame
+    (29/30 s as .3f is "0.967", past frame 29's own timestamp
+    0.9667 s — the same .3f family round 10/11 fixed for trims),
+    and rounding the start up would drop the first frame. The
+    truncation error (< 1 us) is far below one frame (>= 16.7 ms),
+    so no frame can flip except the boundary frame itself, which
+    is exactly the one that must change sides.
+    """
+    import math
+    start_trunc = math.floor(max(start_s, 0.0) * 1e6) / 1e6
+    end_trunc = math.floor(max(end_s, 0.0) * 1e6) / 1e6
+    return f"gte(t,{start_trunc:.6f})*lt(t,{end_trunc:.6f})"
+
+
 def _piecewise_expr(points: list[tuple[float, float]], var: str = "t") -> str:
     """Nested if() expression for linear interpolation between points.
 
@@ -1883,8 +1911,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             if not filters:
                 skipped.append(f"adjustment {item['id']} (no colour set)")
                 continue
-            timed = [f"{f}:enable='between(t,{start_adj:.3f},"
-                     f"{end_adj:.3f})'" for f in filters]
+            timed = [f"{f}:enable='{_enable_window(start_adj, end_adj)}'"
+                     for f in filters]
             out_label = next_label("vadj")
             filter_parts.append(f"[{current}]{','.join(timed)}[{out_label}]")
             current = out_label
@@ -1979,8 +2007,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                              if y_expr else "0")
                     filter_parts.append(
                         f"[{current}][{olabel}]overlay={x_arg}:{y_arg}:"
-                        f"enable='between(t,{adjust(start_s + b0):.3f},"
-                        f"{adjust(start_s + b1):.3f})'[{out_label}]")
+                        f"enable='{_enable_window(adjust(start_s + b0), adjust(start_s + b1))}'"
+                        f"[{out_label}]")
                     current = out_label
                     overlay_count += 1
                 continue
@@ -2057,8 +2085,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                     y_arg = f"(main_h-overlay_h)*({y_expr})" if y_expr else "0"
                     filter_parts.append(
                         f"[{current}][{olabel}]overlay={x_arg}:{y_arg}:"
-                        f"enable='between(t,{adjust(start_s + b0):.3f},"
-                        f"{adjust(start_s + b1):.3f})'[{out_label}]")
+                        f"enable='{_enable_window(adjust(start_s + b0), adjust(start_s + b1))}'"
+                        f"[{out_label}]")
                     current = out_label
                     overlay_count += 1
             else:
@@ -2094,7 +2122,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 y_arg = f"(main_h-overlay_h)*({y_expr})" if y_expr else "0"
                 filter_parts.append(
                     f"[{current}][{olabel}]overlay={x_arg}:{y_arg}:"
-                    f"enable='between(t,{start_adj:.3f},{adjust(start_s + dur_s):.3f})'"
+                    f"enable='{_enable_window(start_adj, adjust(start_s + dur_s))}'"
                     f"[{out_label}]")
                 current = out_label
                 overlay_count += 1
@@ -2188,7 +2216,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                      f"x={x_arg}:y={y_arg}:")
             if alpha_arg is not None:
                 parts += f"alpha='{alpha_arg}':"
-            parts += (f"enable='between(t,{start_adj:.3f},{end_adj:.3f})'"
+            parts += (f"enable='{_enable_window(start_adj, end_adj)}'"
                       f"[{out_label}]")
             filter_parts.append(parts)
             current = out_label
