@@ -35,6 +35,8 @@ async function load() {
   const data = await api("/api/project");
   project = data.project;
   $("projectName").value = project.name || "";
+  const revEl = $("projectRev");
+  if (revEl) revEl.textContent = "Edited rev " + (project.rev ?? 0);
   $("durationLabel").textContent = data.duration_seconds.toFixed(2) + "s";
   $("playheadLabel").textContent = (playheadFrame / fps()).toFixed(2) + "s";
   $("timelineText").textContent = data.timeline;
@@ -44,7 +46,7 @@ async function load() {
     $("preview").src = "/api/preview?" + Date.now();
     $("previewLabel").textContent = "Preview: latest export.";
   }
-  renderMedia(); renderTracks(); renderInspector(); renderTransitions();
+  renderMedia(); renderTracks(); renderInspector(); renderTransitions(); renderVoiceover();
 }
 function renderTransitions() {
   const list = $("transitionList");
@@ -79,6 +81,9 @@ function renderMedia() {
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("beatMedia").innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
+  const vm = $("voiceMedia");
+  if (vm) vm.innerHTML = project.media.map((m) =>
+    `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("addTrack").innerHTML = project.tracks.filter((t) => t.kind === "video").map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
   $("inspTrack").innerHTML = project.tracks.map((t) =>
@@ -91,10 +96,25 @@ function renderTracks() {
   const widthPx = Math.max(totalS * pxPerSec, 400);
   const ruler = $("ruler");
   ruler.style.width = widthPx + "px";
-  ruler.innerHTML = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>` +
+  const totalSecs = Math.max(project.tracks.flatMap((t) => t.items.map((i) => (i.at + i.dur) / fps())), [1])[0] || 1;
+  let rulerHtml = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
+  for (let sec = 0; sec <= Math.ceil(totalSecs); sec++) {
+    const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
+    rulerHtml += `<div class="ruler-tick" style="left:${sec * pxPerSec}px">${mm}:${ss}</div>`;
+  }
+  ruler.innerHTML = rulerHtml +
     ((project.beatGrid && project.beatGrid.beats) || []).map((b) =>
       `<div class="beat-tick" title="beat ${b}s" style="left:${b * pxPerSec}px"></div>`).join("");
-  for (const track of project.tracks) {
+  // Original-app track order (display only — project data is unchanged):
+  // Captions, Overlay, Main, Adjustment, Background, Dialogue,
+  // Voiceover, Music, Sfx. Tracks the project does not have yet are
+  // shown as labelled empty rows, never as fake tracks.
+  const TRACK_ORDER = ["captions", "overlay", "main", "adjustment", "background", "dialogue", "voiceover", "music", "sfx"];
+  const ordered = [...project.tracks].sort((a, b) => {
+    const ia = TRACK_ORDER.indexOf(a.role), ib = TRACK_ORDER.indexOf(b.role);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  for (const track of ordered) {
     const row = document.createElement("div");
     row.className = "track-row";
     row.innerHTML = `<div class="track-label">${track.name}<br><small>${track.role} · ${track.kind}</small></div>`;
@@ -116,8 +136,47 @@ function renderTracks() {
       el.className = `clip ${track.kind} ${item.id === selectedId ? "selected" : ""}`;
       el.style.left = (item.at / fps()) * pxPerSec + "px";
       el.style.width = Math.max((item.dur / fps()) * pxPerSec - 2, 24) + "px";
-      el.textContent = item.text || item.media || item.id;
-      el.title = `${item.id} — ${item.at}..${item.at + item.dur} frames`;
+      const medium = item.media ? project.media.find((m) => m.id === item.media) : null;
+      const baseName = medium ? medium.path.split(/[\\/]/).pop() : "";
+      if (track.kind === "text" && item.karaoke && item.karaoke.words && item.karaoke.words.length) {
+        // Captions track: one chip per karaoke word (real timings).
+        el.innerHTML = "";
+        for (const w of item.karaoke.words) {
+          const chip = document.createElement("span");
+          chip.className = "word-chip";
+          chip.textContent = w.text;
+          chip.title = `${w.start}s–${w.end}s`;
+          el.appendChild(chip);
+        }
+      } else if (medium) {
+        el.textContent = `${baseName} · ${((item.dur / fps())).toFixed(1)}s`;
+      } else {
+        el.textContent = item.text || item.media || item.id;
+      }
+      el.title = `${item.id} — ${item.at}..${item.at + item.dur} frames` + (baseName ? ` — ${baseName}` : "");
+      if (track.kind === "audio" && item.media) {
+        // Real waveform strip: peaks decoded from the actual file.
+        // Cached per media id; a failed fetch leaves no strip rather
+        // than a fake shape.
+        if (!window.__waveCache) window.__waveCache = {};
+        const cacheKey = item.media;
+        const drawWave = (peaks) => {
+          const strip = document.createElement("div");
+          strip.className = "wave-strip";
+          for (const p of peaks) {
+            const bar = document.createElement("span");
+            bar.className = "wave-bar";
+            bar.style.height = Math.max(2, Math.round(p * 100)) + "%";
+            strip.appendChild(bar);
+          }
+          el.appendChild(strip);
+        };
+        if (window.__waveCache[cacheKey]) drawWave(window.__waveCache[cacheKey]);
+        else fetch(`/api/waveform?media=${encodeURIComponent(item.media)}&buckets=32`)
+          .then((r) => r.json()).then((d) => {
+            if (d.peaks) { window.__waveCache[cacheKey] = d.peaks; drawWave(d.peaks); }
+          }).catch(() => {});
+      }
       el.draggable = true;
       el.addEventListener("click", () => { selectedId = item.id; renderTracks(); renderInspector(); renderKeyframes(); });
       el.addEventListener("dragstart", () => { selectedId = item.id; });
@@ -139,6 +198,25 @@ function renderTracks() {
     row.appendChild(lane);
     wrap.appendChild(row);
   }
+  const presentRoles = new Set(project.tracks.map((t) => t.role));
+  const standard = [["captions", "Captions", "text"], ["overlay", "Overlay", "video"], ["main", "Main", "video"], ["background", "Background", "video"], ["dialogue", "Dialogue", "audio"], ["voiceover", "Voiceover", "audio"], ["music", "Music", "audio"], ["sfx", "Sfx", "audio"]];
+  for (const [role, name, kind] of standard) {
+    if (presentRoles.has(role)) continue;
+    const row = document.createElement("div");
+    row.className = "track-row track-row-empty";
+    row.innerHTML = `<div class="track-label">${name}<br><small>${role} · ${kind}</small></div><div class="track-lane empty-lane" style="width:${widthPx}px">Empty — use Add Layer, then move a clip here</div>`;
+    wrap.appendChild(row);
+  }
+}
+function renderVoiceover() {
+  const list = $("voiceList");
+  if (!list) return;
+  const takes = [];
+  for (const t of project.tracks) {
+    if (t.role !== "voiceover") continue;
+    for (const it of t.items) takes.push(`${it.id} — ${it.media || it.text || ""} at ${(it.at / fps()).toFixed(2)}s`);
+  }
+  list.innerHTML = takes.length ? takes.map((x) => `<li>${x}</li>`).join("") : "<li>No voiceover takes yet.</li>";
 }
 function renderInspector() {
   const found = selectedId ? findItem(selectedId) : null;
@@ -492,4 +570,178 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     });
   }
   activateTab("media");
+})();
+
+/* Original-app layout wiring: Voice panel, AGENT chat dock, player
+   view controls, and the full timeline toolbar. Every handler below
+   either calls a real project API or says plainly that the feature
+   is not available yet — nothing here fakes an AI reply, a voice
+   clone, a recording, or a waveform. Fenced: guarded lookups only. */
+(function originalAppWiring() {
+  function agentSay(text) {
+    const chat = $("agentChat");
+    if (!chat) return;
+    const div = document.createElement("div");
+    div.className = "msg-agent";
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+  function agentAsk(text) {
+    const chat = $("agentChat");
+    if (!chat) return;
+    const div = document.createElement("div");
+    div.className = "msg-user";
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+  function focusAgent(prefill) {
+    const dock = $("agentDock");
+    if (dock) {
+      dock.scrollIntoView({ behavior: "smooth", block: "start" });
+      dock.classList.add("agent-flash");
+      setTimeout(() => dock.classList.remove("agent-flash"), 1600);
+    }
+    const input = $("agentChatInput");
+    if (input) {
+      if (prefill) input.value = prefill;
+      input.focus();
+    }
+  }
+  const chatForm = $("agentChatForm");
+  if (chatForm) chatForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("agentChatInput");
+    const msg = (input.value || "").trim();
+    if (!msg) return;
+    agentAsk(msg);
+    input.value = "";
+    const lower = msg.toLowerCase();
+    try {
+      if (lower === "help" || lower.includes("help")) {
+        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (106 MCP tools). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
+      } else if (lower.includes("list clip")) {
+        const items = [];
+        for (const t of project.tracks) for (const it of t.items) items.push(`${t.name}: ${it.text || it.media || it.id} (${(it.at / fps()).toFixed(2)}s)`);
+        agentSay(items.length ? `Clips (${items.length}): ${items.join(" | ")}` : "No clips on the timeline yet.");
+      } else if (lower.includes("export")) {
+        agentSay("Exporting a draft (real export, via the same Export draft action)…");
+        doExport("draft");
+      } else if (lower.includes("review")) {
+        const r = $("btnReview"); if (r) r.click();
+        agentSay("Review refreshed — see the Review panel in the AI tab for validation, stats and skipped items.");
+      } else if (lower.includes("stats") || lower.includes("project context")) {
+        const data = await api("/api/project", { op: "project_stats" });
+        const st = data.result;
+        agentSay(`Project context: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
+      } else if (lower.includes("workspace")) {
+        agentSay(`Workspace: project "${project.name}", rev ${project.rev ?? 0}, ${project.format.width}x${project.format.height}, ${project.tracks.length} tracks. Open project folder via the server project path shown in the console.`);
+      } else if (lower === "undo") {
+        const b = $("btnUndo"); if (b) b.click();
+        agentSay("Undo requested.");
+      } else if (lower === "redo") {
+        const b = $("btnRedo"); if (b) b.click();
+        agentSay("Redo requested.");
+      } else {
+        agentSay("I cannot do that with an LLM in this app yet — no provider is connected here. Try: help, list clips, export, review, stats, undo, redo. For AI generation, connect an external agent: python windows\\vibeedit.py mcp <project-folder>.");
+      }
+    } catch (err) { agentSay("Command failed: " + err.message); }
+  });
+  const provider = $("agentProvider");
+  if (provider) provider.addEventListener("change", () => {
+    if (provider.value === "ollama") agentSay("Ollama is not connected in this app yet — no endpoint is configured, so I cannot generate with it. The External agent (MCP) option is the working route.");
+  });
+  function agentBtn(id, fn) {
+    const b = $(id); if (b) b.addEventListener("click", fn);
+  }
+  agentBtn("btnAgentWorkspace", () => agentSay(`Workspace: project "${project.name}", rev ${project.rev ?? 0}, ${project.format.width}x${project.format.height}, ${project.tracks.length} tracks.`));
+  agentBtn("btnAgentContext", async () => {
+    try {
+      const data = await api("/api/project", { op: "project_stats" });
+      const st = data.result;
+      agentSay(`Project context: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
+    } catch (err) { agentSay("Project context failed: " + err.message); }
+  });
+  agentBtn("btnAgentSurvey", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Survey = Review refreshed — see the Review panel in the AI tab."); });
+  agentBtn("btnAgentWriteVO", () => agentSay("Write VO (AI script writing) is not available in-app yet. Use the Voice panel to import voiceover audio, or an external agent via MCP to draft lines."));
+  agentBtn("btnAgentReview", () => { const r = $("btnReview"); if (r) r.click(); agentSay("Review refreshed — see the Review panel in the AI tab."); });
+  document.querySelectorAll('[data-action="focus-agent"]').forEach((b) => b.addEventListener("click", () => focusAgent("")));
+
+  // Voice panel (real import + place; generation/cloning/recording honest notes)
+  const vForm = $("voiceoverForm");
+  if (vForm) vForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      let track = project.tracks.find((t) => t.role === "voiceover");
+      if (!track) {
+        const d = await api("/api/project", { op: "add_track", kind: "audio", role: "voiceover", name: "Voiceover" });
+        track = d.result;
+      }
+      await api("/api/project", { op: "add_clip", media: $("voiceMedia").value, track: track.id, at: Number($("voiceAt").value), dur: null });
+      $("voiceResult").textContent = "Voiceover take added to the Voiceover track.";
+      setStatus("Voiceover take added."); await load();
+    } catch (err) { $("voiceResult").textContent = "Voiceover take failed: " + err.message; setStatus(err.message, true); }
+  });
+  const cloneBtn = $("btnVoiceClone");
+  if (cloneBtn) cloneBtn.addEventListener("click", async () => {
+    const file = $("voiceRefFile") && $("voiceRefFile").files[0];
+    if (!file) { $("voiceResult").textContent = "Choose a reference audio file first. Note: voice cloning is not available in this Windows port yet."; return; }
+    const fd = new FormData(); fd.append("file", file);
+    const res = await fetch("/api/media/upload", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) { $("voiceResult").textContent = "Upload failed: " + data.error; return; }
+    $("voiceResult").textContent = "Reference audio imported as media (" + data.media.path + "). Voice cloning is not available yet — place it on the Voiceover track with the form below.";
+    setStatus("Reference audio imported."); await load();
+  });
+  const genBtn = $("btnVoiceGenerate");
+  if (genBtn) genBtn.addEventListener("click", () => {
+    $("voiceResult").textContent = "Voice generation is not available in this Windows port yet — no voice provider is connected. Import audio and place it on the Voiceover track instead.";
+  });
+
+  // Player view controls (real display controls; Compare is honestly unavailable)
+  const tabTl = $("playerTabTimeline"), tabSrc = $("playerTabSource"), note = $("playerSourceNote"), wrap = document.querySelector(".preview-wrap");
+  if (tabTl) tabTl.addEventListener("click", () => {
+    tabTl.classList.add("active"); if (tabSrc) tabSrc.classList.remove("active");
+    if (wrap) wrap.hidden = false; if (note) note.hidden = true;
+  });
+  if (tabSrc) tabSrc.addEventListener("click", () => {
+    tabSrc.classList.add("active"); if (tabTl) tabTl.classList.remove("active");
+    if (wrap) wrap.hidden = true; if (note) note.hidden = false;
+  });
+  const fitBtn = $("btnPreviewFit");
+  if (fitBtn && wrap) fitBtn.addEventListener("click", () => { wrap.classList.toggle("fit-contain"); setStatus(wrap.classList.contains("fit-contain") ? "Preview fit: contain." : "Preview fit: default."); });
+  const safeBtn = $("btnPreviewSafe"), safe = $("safeAreaOverlay");
+  if (safeBtn && safe) safeBtn.addEventListener("click", () => { safe.hidden = !safe.hidden; setStatus(safe.hidden ? "Safe-area guide hidden." : "Safe-area guide shown (display guide only, not a render setting)."); });
+  const cmpBtn = $("btnPreviewCompare");
+  if (cmpBtn) cmpBtn.addEventListener("click", () => setStatus("Compare view is not available yet — the preview shows the latest export only.", true));
+  const playBtn = $("btnPreviewPlay"), backBtn = $("btnPreviewBack");
+  if (playBtn) playBtn.addEventListener("click", () => {
+    const v = $("preview"); if (!v || !v.src) { setStatus("No preview yet — export a draft first.", true); return; }
+    if (v.paused) v.play(); else v.pause();
+  });
+  if (backBtn) backBtn.addEventListener("click", () => {
+    const v = $("preview"); if (v) { v.currentTime = 0; playheadFrame = 0; renderTracks(); }
+  });
+
+  // Timeline toolbar: Add Layer, Sections, Ask agent, Export report
+  const layerBtn = $("tlAddLayer");
+  if (layerBtn) layerBtn.addEventListener("click", async () => {
+    const n = project.tracks.filter((t) => t.kind === "video").length + 1;
+    try { await api("/api/project", { op: "add_track", kind: "video", role: "overlay", name: "Layer " + n }); setStatus("Layer added."); await load(); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  const secBtn = $("tlSections");
+  if (secBtn) secBtn.addEventListener("click", () => {
+    const ms = project.markers || [];
+    setStatus(ms.length ? "Sections (markers): " + ms.map((m) => `${(m.at / fps()).toFixed(2)}s ${m.text}`).join(" | ") : "No sections (markers) yet — markers can be added via the MCP tools (vibeedit_markers_add).");
+  });
+  const askBtn = $("tlAskAgent");
+  if (askBtn) askBtn.addEventListener("click", () => focusAgent(selectedId ? "Help with the selected clip" : "Help with this project"));
+  const reportBtn = $("btnExportReport");
+  if (reportBtn) reportBtn.addEventListener("click", () => {
+    const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
+    const r = $("btnReview"); if (r) r.click();
+    setStatus("Export report refreshed (Review panel).");
+  });
 })();

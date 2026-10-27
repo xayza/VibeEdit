@@ -568,3 +568,35 @@ form { margin: 0; }
   .preview-wrap video { height: auto; max-height: 46vh; }
   .tool-rail { width: 60px; }
 }
+
+/* ---- Original-app layout (structure of the original editor) ---- */
+.rev-label { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.player-tabs { display: flex; gap: 4px; }
+.player-tab { padding: 5px 12px; border-radius: var(--radius-sm); background: transparent; }
+.player-tab.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.player-view-controls { display: flex; gap: 6px; margin-left: auto; }
+.player-note { background: var(--bg-panel2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; color: var(--muted); }
+.player-controls { display: flex; gap: 8px; margin-top: 10px; }
+.preview-wrap { position: relative; }
+.safe-area { position: absolute; inset: 12% 8%; border: 2px dashed var(--accent); border-radius: 4px; pointer-events: none; }
+.preview-wrap.fit-contain video { object-fit: contain; max-height: 420px; }
+.agent-chat { background: var(--bg-input); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.msg-user { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 10px; padding: 8px 10px; max-width: 90%; }
+.msg-agent { align-self: flex-start; background: var(--bg-panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-width: 90%; }
+.agent-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-note { color: var(--muted); }
+.agent-flash { outline: 2px solid var(--accent); outline-offset: 2px; }
+.voice-note { color: var(--muted); }
+.track-row-empty { opacity: 0.75; }
+.empty-lane { display: flex; align-items: center; color: var(--faint); font-size: 12px; padding-left: 10px; border: 1px dashed var(--line); border-radius: var(--radius-sm); }
+
+/* ---- Original-app timeline presentation ---- */
+.ruler { position: relative; }
+.ruler .playhead { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.9); }
+.ruler .playhead::after { border-top-color: #ef4444; }
+.ruler-tick { position: absolute; top: 2px; font-size: 10px; color: var(--muted); transform: translateX(2px); white-space: nowrap; }
+.word-chip { display: inline-block; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; padding: 1px 7px; margin: 1px 3px 1px 0; font-size: 11px; white-space: nowrap; }
+.wave-strip { display: flex; align-items: center; gap: 1px; height: 16px; margin-top: 2px; opacity: 0.9; }
+.wave-bar { flex: 1; background: rgba(255, 255, 255, 0.75); border-radius: 1px; min-width: 1px; }
+.timeline-capabilities { color: var(--muted); }
+.timeline-capabilities summary { cursor: pointer; font-weight: 700; color: var(--text); }
