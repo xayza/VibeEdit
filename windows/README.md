@@ -31,9 +31,10 @@ Trạng thái hiện tại: **MCP 144/249 công cụ gốc** (số live đọc t
 mới). Đã hoạt động: project/media/timeline/preview/audio/captions/
 effects/export cơ bản, CLI + MCP, plugin mẫu, cửa sổ desktop pywebview.
 Hoạt động một phần: Compare chưa khóa khung hình, export preset ProRes/
-4K mới assert mapping chưa render đầy đủ, desktop chưa kiểm tra tắt
-sạch/HiDPI trên Windows thật, phím tắt Ctrl chưa chuẩn hóa, test chưa
-chạy sạch trên Windows. Còn thiếu và sẽ port tiếp (không bỏ):
+4K mới assert mapping chưa render đầy đủ; desktop tắt sạch, HiDPI,
+phím tắt Ctrl và test chạy trên Windows đã làm xong về code ở
+Phase 2, chỉ còn chưa kiểm tra bằng mắt / bằng `py` trên Windows
+thật. Còn thiếu và sẽ port tiếp (không bỏ):
 vision/OCR/cutout, kho kiến thức/skill cho agent, magnetic đầy đủ +
 linked audio, cài plugin từ URL, ~105 tên công cụ MCP còn lại,
 transition motion-only, bộ cài/.exe cho máy Windows sạch và Windows CI.
@@ -63,6 +64,45 @@ còn nguyên, đối chiếu thay đổi riêng của cây Swift, tạo tag/bả
 trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — chưa làm
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
+
+## Phase 2 — desktop hoàn thiện, phím tắt Windows, test chạy trên Windows
+
+- **Desktop tắt sạch (`desktop_app.py`):** đóng cửa sổ pywebview
+  (hoặc Ctrl+C) sẽ gọi `shutdown()` + `server_close()` rồi join
+  thread server, nên không còn tiến trình nằm lại và cổng được giải
+  phóng ngay để chạy lại. `run_server` cũng đóng socket sau Ctrl+C.
+  Cửa sổ mặc định vẫn 1600x900, resizable; giao diện dùng panel co
+  giãn + cuộn nội bộ và media query nên vẫn dùng được ở 1280x720
+  và 1920x1080 (chưa kiểm tra bằng mắt trên Windows thật).
+- **Lỗi dễ hiểu, không traceback trần:** thiếu pywebview thì in
+  hướng dẫn `pip install pywebview` rồi mở trình duyệt thay thế;
+  thiếu ffmpeg/ffprobe thì in cảnh báo nêu đúng 3 cách khắc phục
+  (PATH, `VIBEEDIT_FFMPEG_DIR`, copy exe cạnh app) và vẫn mở app
+  để soạn thảo; cổng bị chiếm thì in cổng đang chiếm và gợi ý cổng
+  kế tiếp (ví dụ `--port 8001`), kèm mã thoát 2.
+- **HiDPI:** chỉ trên Windows, `ctypes` bật per-monitor DPI
+  awareness trước khi mở cửa sổ; ngoài Windows hàm này trả về
+  False và không làm gì cả, nên Linux không bị ảnh hưởng.
+- **Phím tắt Windows:** Ctrl+Z Undo, Ctrl+Shift+Z / Ctrl+Y Redo,
+  Ctrl+S lưu (endpoint mới `POST /api/save`; mọi thao tác thành
+  công vốn đã autosave, Ctrl+S chỉ ghi lại trạng thái hiện tại).
+  Phím chữ đơn (S tách tại playhead, I/O/E/Q nguồn) vẫn hoạt động
+  và tự bỏ qua khi kèm Ctrl, nên Ctrl+S không bị tách clip nhầm.
+  Gợi ý phím tắt trong giao diện ghi Ctrl, không ghi Command/Cmd.
+- **Test chạy trên Windows:** lời gọi subprocess dùng `python3`
+  duy nhất còn lại (trong `test_phase7.py`) đã đổi sang
+  `sys.executable`; tiêu đề các file test ghi cả hai lệnh chạy.
+  Chạy test:
+  - Windows: `py -m unittest discover -s tests -v`
+    (hoặc `python -m unittest discover -s tests -v`)
+  - Linux: `python3 -m unittest discover -s tests -v`
+  Test mới `tests/test_phase2_desktop.py` khẳng định: server tắt
+  sạch và cổng rebind được ngay, thông điệp lỗi FFmpeg/cổng,
+  endpoint `/api/save`, phím tắt Ctrl trong `app.js`/`index.html`,
+  và không còn lời gọi subprocess dùng `python3` trần trong test.
+  Chưa kiểm tra trên Windows thật: giao diện cửa sổ desktop ở
+  720p/900p/1080p, render HiDPI, phím Ctrl trong trình duyệt
+  Windows thật, và toàn bộ test chạy bằng `py` trên Windows.
 
 ## Code-gap batch 2 (mới nhất)
 Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP hiện tại: 144/249 công cụ gốc. Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope).

@@ -474,6 +474,35 @@ $("projectName").addEventListener("change", async (e) => {
 });
 $("btnUndo").addEventListener("click", async () => { try { await api("/api/undo", {}); await load(); } catch (e) { setStatus(e.message, true); } });
 $("btnRedo").addEventListener("click", async () => { try { await api("/api/redo", {}); await load(); } catch (e) { setStatus(e.message, true); } });
+/* Phase 2 Windows shortcuts: Ctrl (not Command) for a Windows
+   browser app. Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Ctrl+S
+   explicit save. preventDefault only where the browser would
+   otherwise hijack the shortcut (Ctrl+S opens the browser save
+   dialog; Ctrl+Z/Y are also claimed by editable fields, which is
+   why inputs are skipped below). The single-letter shortcuts
+   (S split, I/O/E/Q source) keep working unchanged. */
+document.addEventListener("keydown", async (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  const key = (e.key || "").toLowerCase();
+  try {
+    if (key === "s") {
+      e.preventDefault();
+      await api("/api/save", {});
+      setStatus("Đã lưu project.");
+      await load();
+    } else if (key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      await api("/api/undo", {});
+      await load();
+    } else if ((key === "z" && e.shiftKey) || key === "y") {
+      e.preventDefault();
+      await api("/api/redo", {});
+      await load();
+    }
+  } catch (err) { setStatus(err.message, true); }
+});
 async function doExport(preset) {
   setStatus("Exporting (" + preset + ")… this can take a while.");
   try {
@@ -608,6 +637,8 @@ $("btnDelete").addEventListener("click", async () => {
   catch (err) { setStatus(err.message, true); }
 });
 document.addEventListener("keydown", (e) => {
+  // Phase 2: Ctrl+S must reach the save handler above, not split.
+  if (e.ctrlKey || e.metaKey) return;
   if (e.key === "s" || e.key === "S") {
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
@@ -1045,6 +1076,9 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const srcOverwriteBtn = $("btnSourceOverwrite");
   if (srcOverwriteBtn) srcOverwriteBtn.addEventListener("click", () => placeSource(true));
   document.addEventListener("keydown", (e) => {
+    // Phase 2: Ctrl+letter must reach the Ctrl-shortcut handler,
+    // not the single-letter source shortcuts.
+    if (e.ctrlKey || e.metaKey) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
     // Original shortcuts, from UIAction.swift: I = Mark In, O = Mark Out,
