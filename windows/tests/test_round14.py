@@ -178,8 +178,10 @@ class TestRound14NeonLayout(unittest.TestCase):
         # screen readers (and for the marker tests) in .sr-only spans.
         self.assertIn("Export report", self.html)
         self.assertIn("Export draft", self.html)
-        # CTA: gradient cyan -> pink, rounded, pushed to the right.
-        self.assertIn("linear-gradient(90deg, #06b6d4, #ec4899)", self.css)
+        # CTA: softened dark gradient cyan -> pink (round 16
+        # harmony: still the strongest colour, but no longer harsh),
+        # rounded, pushed to the right.
+        self.assertIn("linear-gradient(90deg, #0e7490, #be185d)", self.css)
         self.assertIn("#btnExportFull { margin-left: auto; }", self.css)
         self.assertIn('class="primary cta"', self.html)
 
