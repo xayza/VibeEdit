@@ -110,6 +110,70 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
+## Full-parity vòng 7 — pipeline media.analyze thật, speech map, strip, sync (mới nhất)
+
+- **Pipeline `media.analyze` thật (`vibeedit_core/analysis.py`,
+  FFmpeg + Python thuần, không thêm dependency):** `media_analyze`
+  đo tech từ ffprobe (codec, kích thước, rotation, frame timing
+  cho VFR khi dưới 30000 khung hình, colour transfer/primaries/
+  bit depth, độ dài track), picture samples ở tốc độ cho trước
+  (mặc định 4/s, tham số `rate` 0,5–30): luma/spread/change/peak
+  trên thumbnail xám 24×24 đúng định nghĩa review.picture,
+  sharpness bằng Laplacian trên khung xám 256 px, colourfulness
+  Hasler–Süsstrunk trên thumbnail RGB 24×24, và mọi bước nhảy
+  từ 0,04 trở lên được thu hẹp tới đúng cặp khung hình bằng
+  cách giải mã khoảng đó ở tốc độ đầy đủ; sound RMS mỗi 0,1 s
+  trên mọi kênh (giải mã 48 kHz), peak, tương quan stereo.
+  Bản ghi sống trên media entry (`analysis_record`, key =
+  SHA-256 của kích thước + 1 MiB đầu/cuối file theo đúng hình
+  thức key của bản gốc), dùng lại khi chưa `force`, force đo
+  lại và bỏ corrections. Transcript chỉ đo khi faster-whisper
+  đã cài (tiny, word timestamps khi model cho); vắng backend
+  thì words rỗng kèm lý do nêu lệnh cài, các phần còn lại vẫn
+  thật. `media_analysis` nay đọc bản ghi đó (cuts theo
+  minScore + corrections, shots với motion = mean/peak change
+  trong shot đúng ReviewShots.motion, summary, histogram độ
+  dài shot, cuts mỗi 10 s, sound floor/median/loud/active
+  spans/curve) và chỉ rơi về metadata + ffprobe khi chưa có
+  bản ghi. Bản ghi analyze tách biệt với bản ghi `media_cuts`
+  vòng sáu (scene filter): hai danh sách cắt là hai phép đo
+  khác nhau, không gộp lặng.
+- **`media_speech_map` thật:** cổng đúng SpeechMap.swift
+  (Otsu bin 0,5 dB, bỏ cửa sổ lặng số, cần ít nhất 10 cửa sổ
+  âm thanh và dải ít nhất 0,5 dB; separation clear/weak/none/
+  given; spans/gaps null kèm lý do khi không tách được;
+  transcript khi bản ghi có từ). Kiểm chứng trên clip tổng
+  hợp tone/lặng/tone: spans đúng [0,1] và [2,3], gap đúng
+  [1,2]; clip quiet/loud cho spans đúng nửa sau; ép
+  minSeparationDb = 60 cho separation none đúng spec.
+- **`media_strip` thật:** khung hình ở giữa mỗi ô trên
+  from…to (mặc định 8, tối đa 24), thước thời gian, mức âm
+  -60…0 dBFS từ bản ghi hoặc đo ngay, gaps từ speech map tô
+  đậm, từ transcript ở đúng thời gian, vẽ thành một PNG bằng
+  Pillow (1600 px mặc định); vắng Pillow thì vẫn trả dữ liệu
+  strip với path null kèm lý do; audio không có hàng hình
+  nên frames rỗng và không có PNG.
+- **`media_sync` thật:** cổng đúng AudioSync.swift (envelope
+  log RMS 10 ms ở mono 8 kHz, coarse 10/s rồi fine 100/s
+  quanh lag tốt nhất ±0,3 s, halves khớp nhau trong 0,02 s
+  mới steady; correlation dưới 0,4 nghĩa là không có âm thanh
+  chung; kèm map in-point của clip qua `item`). Kiểm chứng
+  trên clip tổng hợp lệch đúng 0,5 s: đo đúng 0,5 s,
+  correlation 1,0, halves cùng 0,5 s, steady; hai tần số khác
+  nhau cho correlation 0,109 → sharedSound false.
+- **Độ lệch trung thực cần ghi:** thu hẹp cut candidate tới
+  đúng khung hình giả định CFR (giải mã khoảng rồi map theo
+  số thứ tự khung hình); file VFR mà khoảng giải mã không cho
+  cặp khung hình thì candidate giữ ở khung sample kèm ghi chú
+  trong bản ghi. Sync bằng Python thuần có prefix sums nên
+  file dài chạy chậm hơn đường Accelerate của bản gốc (ghi chú
+  hiệu năng, không phải lệch kết quả).
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **366 thật / 113 honest**; **506 tests OK** trên Linux VM
+  (486 + 20 test vòng bảy mới). `vibeedit.spec` nay liệt kê 18
+  hidden import (`analysis` mới). Cây Swift không động, không
+  hợp nhất, chưa đẩy.
+
 ## Full-parity vòng 6 — GPLv3 cho FFmpeg bundle, media_cuts thật, options plugin (mới nhất)
 
 - **Đóng gói giấy phép GPLv3 cho FFmpeg bundle (kết luận vòng 5 nay

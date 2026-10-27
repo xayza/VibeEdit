@@ -69,6 +69,7 @@ a = Analysis(
     # plugins.py), never a hidden import, and is covered by the
     # plugins data entry above.
     hiddenimports=[
+        "vibeedit_core.analysis",
         "vibeedit_core.beats",
         "vibeedit_core.cuts",
         "vibeedit_core.export_ops",

@@ -55,16 +55,16 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 6)
+## Current status (honest, full-parity round 7)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **363
-  real-operation tools and 116 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **366
+  real-operation tools and 113 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
-  shared-handler design), and round 6 re-ran that check with the
+  shared-handler design), and round 7 re-ran that check with the
   same result; what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
@@ -86,12 +86,14 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   motion transitions including halftone (geq dot mask +
   alphamerge/overlay, plus the Pillow pre-rendered segment), update
   defer/skip state, library/plugin search, declared-hook plugin
-  execution, ffprobe media analysis, media proxies, single-instance
+  execution, full media.analyze pipeline (tech/picture/sound
+  records keyed by file content, speech map, filmstrip,
+  audio sync), media proxies, single-instance
   desktop handoff with browser fallback, scene-cut detection and
   cut-list correction (`media_cuts`), plugin option read/set
   (`plugins_options`/`plugins_option`) and the plugin on/off switch
   (`plugins_set`), and
-  486 tests OK on the Linux VM.
+  506 tests OK on the Linux VM.
 - **Partial:** Compare view is a masked wipe with time-sync, not
   sample-accurate frame lock; ProRes/4K export presets render on
   the Linux VM from synthetic clips but not yet from native 4K

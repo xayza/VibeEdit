@@ -199,7 +199,7 @@ class TestRound2Tools(unittest.TestCase):
         self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 116)  # Round 6: 120 -> 116, media_cuts + plugins_options/option/set became real
+        self.assertEqual(len(honest), 113)  # Round 7: 116 -> 113, media_sync + media_speech_map + media_strip became real
         for new in ("vibeedit_knowledge_add_lesson",
                     "vibeedit_knowledge_verdicts",
                     "vibeedit_skills_save", "vibeedit_skills_propose",

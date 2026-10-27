@@ -568,12 +568,12 @@ TOOLS.extend([
     {"name": "vibeedit_media_description", "description": "Not available in this Windows build: no vision/provider description is wired in this build."},
     {"name": "vibeedit_media_digest", "description": "Not available in this Windows build: no media analysis provider is wired in this build."},
     {"name": "vibeedit_media_cuts", "description": "Detect scene cuts in a project media with the FFmpeg scene filter (threshold, default 0.4) and correct the stored cut list: add cuts or remove candidates at source seconds, clear drops earlier corrections, remeasure measures again and drops corrections. Corrections live in the media record."},
-    {"name": "vibeedit_media_sync", "description": "Not available in this Windows build: no audio-sync provider is wired in this build."},
-    {"name": "vibeedit_media_speech_map", "description": "Not available in this Windows build: no speech-mapping provider is wired in this build."},
-    {"name": "vibeedit_media_strip", "description": "Not available in this Windows build: no media-strip provider is wired in this build."},
+    {"name": "vibeedit_media_sync", "description": "Find the time offset between two recordings of the same moment from their sound: mono 8 kHz envelopes cross-correlated (coarse 10/s, fine 100/s around the best lag), halves matched again for drift; time in 'to' = time in 'media' + offsetSeconds, correlation below 0.4 means no shared sound; with item, also the matching source frame of 'to' for that clip's in-point."},
+    {"name": "vibeedit_media_speech_map", "description": "Map where an analysed media has sound that may be speech, and the gaps, with the calibration used: 0.1 s RMS level windows split into quiet/loud by Otsu unless thresholdDb is given; separation clear/weak/none/given, spans/gaps null with a reason when the classes do not separate; transcript section when a stored transcript exists. Spans are sound, not proof of speech."},
+    {"name": "vibeedit_media_strip", "description": "Draw a filmstrip of a source range as one PNG: count frames (default 8) along the top with their time, a time ruler, the sound level (-60..0 dBFS per 0.1 s, from the media.analyze record or measured now), the speech-map gaps shaded (left out when speech and floor do not separate), and the stored transcript's words at their times. Returns {path, width, height, from, to, frames, levels, gaps, words}."},
     {"name": "vibeedit_media_proxy", "description": "Generate a low-resolution proxy file for a project video entry with FFmpeg (H.264, scaled to the given width, default 540px; the proxy is a derived file, not a new timeline media entry)."},
-    {"name": "vibeedit_media_analysis", "description": "Media analysis for a project media entry: stored metadata enriched with a live ffprobe probe (streams, duration, resolution) when the file exists."},
-    {"name": "vibeedit_media_analyze", "description": "Media analysis for a project media entry: stored metadata enriched with a live ffprobe probe (streams, duration, resolution) when the file exists."},
+    {"name": "vibeedit_media_analysis", "description": "Read the media.analyze record of one media without measuring: tech, picture {cuts, shots, summary, histogram, cut curve}, sound {floor/median/loud, active spans, stereo correlation} and corrections; limits minScore/activityDb/bridgeSeconds are the reader's. Falls back to stored metadata enriched with a live ffprobe probe when no record exists."},
+    {"name": "vibeedit_media_analyze", "description": "Measure source media once and keep the record on the media entry (keyed by file content): file facts, picture samples with exact-frame cut candidates, and sound levels (RMS per 0.1 s, peak, stereo correlation); transcript words only when faster-whisper is installed. A record that exists is reused unless force. Read it with media_analysis."},
     {"name": "vibeedit_knowledge_add_lesson", "description": "Add a caller-supplied lesson to the project knowledge store (starts proposed)."},
     {"name": "vibeedit_knowledge_approve", "description": "Approve a lesson or proposal (args: lesson= or proposal=)."},
     {"name": "vibeedit_knowledge_claims", "description": "List claims in the project knowledge store."},
@@ -1253,12 +1253,84 @@ class MCPServer:
             from .export_ops import media_metadata
             proj = self._require()
             return media_metadata(proj.data, proj.folder, args["media"])
-        if name in ("vibeedit_media_analysis", "vibeedit_media_analyze"):
-            # Round 5: ffprobe-based analysis is the analysis the
-            # build can actually do — same data as media_metadata.
-            # Round 6: a stored media_cuts record rides along, so
-            # "shots and statistics in media.analysis follow" the
-            # corrections instead of hiding them.
+        if name == "vibeedit_media_analyze":
+            # Round 7: real measurement (see vibeedit_core/
+            # analysis.py for the original semantics). One record
+            # per media entry, keyed by file content, reused
+            # unless force (force drops the record's corrections
+            # with the record itself).
+            from .analysis import content_key, measure_media
+            from .project import fps_value as _fps_value
+            proj = self._require()
+            raw_media = args.get("media")
+            if raw_media:
+                ids = [part.strip() for part in str(raw_media)
+                       .split(",") if part.strip()]
+            else:
+                ids = [m["id"] for m in proj.data["media"]
+                       if m.get("kind") in ("video", "audio")]
+            if not ids:
+                raise ValueError("media_analyze needs media: no "
+                                 "video or audio media in this "
+                                 "project")
+            force = str(args.get("force", "")).lower() in (
+                "true", "1", "yes") if not isinstance(
+                args.get("force"), bool) else bool(args.get("force"))
+            try:
+                rate = float(args.get("rate", 4.0))
+            except (TypeError, ValueError):
+                raise ValueError("rate must be a number between "
+                                 "0.5 and 30")
+            if not 0.5 <= rate <= 30:
+                raise ValueError("rate must be between 0.5 and 30")
+            results = []
+            for media_id in ids:
+                medium = proj.media(media_id)
+                src = self._media_abs(proj, medium)
+                key = content_key(src)
+                existing = medium.get("analysis_record")
+                if isinstance(existing, dict) \
+                        and existing.get("key") == key and not force:
+                    results.append({"media": media_id, "key": key,
+                                    "reused": True, "measured": False,
+                                    "hasPicture": existing.get(
+                                        "picture") is not None,
+                                    "hasSound": existing.get(
+                                        "sound") is not None})
+                    continue
+                try:
+                    fps = _fps_value(medium["fps"]) \
+                        if medium.get("fps") else None
+                except Exception:
+                    fps = None
+                frames = medium.get("frames")
+                try:
+                    frames = int(frames) if frames else None
+                except (TypeError, ValueError):
+                    frames = None
+                record = measure_media(src, fps=fps,
+                                       total_frames=frames, rate=rate)
+                medium["analysis_record"] = record
+                transcript = record.get("transcript") or {}
+                results.append({"media": media_id,
+                                "key": record["key"],
+                                "reused": False, "measured": True,
+                                "hasPicture": record.get("picture")
+                                is not None,
+                                "hasSound": record.get("sound")
+                                is not None,
+                                "transcriptWords": len(
+                                    transcript.get("words", []) or []),
+                                "transcriptReason": transcript.get(
+                                    "reason")})
+            self._save()
+            return {"results": results}
+        if name == "vibeedit_media_analysis":
+            # Round 7: read the stored record when one exists
+            # (derived cuts/shots/sound per MediaAnalysis+Reading);
+            # otherwise the round 5 ffprobe behaviour, unchanged
+            # so existing callers keep working.
+            from .analysis import derive_analysis
             from .export_ops import media_metadata
             if not args.get("media"):
                 raise ValueError("media_analysis needs media")
@@ -1274,8 +1346,51 @@ class MCPServer:
                         record.get("cuts_detected")
                     result["analysis_cuts_threshold"] = \
                         record.get("threshold")
-            except Exception:
-                pass
+                stored = medium.get("analysis_record")
+                if isinstance(stored, dict):
+                    def _num(key, default):
+                        try:
+                            return float(args.get(key, default))
+                        except (TypeError, ValueError):
+                            raise ValueError(f"{key} must be a "
+                                             "number")
+                    min_score = _num("minScore", 0.1)
+                    activity_db = _num("activityDb", 10.0)
+                    bridge = _num("bridgeSeconds", 0.3)
+                    if not 0 <= min_score <= 1:
+                        raise ValueError("minScore must be "
+                                         "between 0 and 1")
+                    if not 0 <= activity_db <= 80:
+                        raise ValueError("activityDb must be "
+                                         "between 0 and 80")
+                    if not 0 <= bridge <= 10:
+                        raise ValueError("bridgeSeconds must be "
+                                         "between 0 and 10")
+                    samples = str(args.get("samples", "")).lower() \
+                        in ("true", "1", "yes") if not isinstance(
+                        args.get("samples"), bool) else bool(
+                        args.get("samples"))
+                    curve = str(args.get("curve", "")).lower() \
+                        in ("true", "1", "yes") if not isinstance(
+                        args.get("curve"), bool) else bool(
+                        args.get("curve"))
+                    result["analysis_record"] = derive_analysis(
+                        stored, min_score=min_score,
+                        activity_db=activity_db,
+                        bridge_seconds=bridge,
+                        include_samples=samples,
+                        include_curve=curve)
+                    # The derived reading above overwrites the raw
+                    # record that media_metadata echoed from the
+                    # entry, so the large raw levels/samples are
+                    # never returned; only the derived reading is.
+            except ValueError:
+                raise
+            except Exception as exc:
+                # A failed derivation must not leak the raw record
+                # through the metadata echo.
+                result.pop("analysis_record", None)
+                result["analysis_error"] = str(exc)
             return result
         if name == "vibeedit_media_cuts":
             # Round 6: original media.cuts semantics — correct the
@@ -1336,6 +1451,275 @@ class MCPServer:
                     "removed_unmatched": corrected["removed_unmatched"],
                     "threshold": threshold, "remeasured": measured_now,
                     "tolerance": round(tolerance, 4)}
+        if name == "vibeedit_media_speech_map":
+            # Round 7: SpeechMap.json, faithful port (see
+            # analysis.py). Sound from the stored record when
+            # one exists, else measured now; transcript words
+            # from the record when faster-whisper measured any.
+            from .analysis import (decode_sound_levels, speech_map)
+            if not args.get("media"):
+                raise ValueError("media_speech_map needs media")
+            proj = self._require()
+            medium = proj.media(args["media"])
+            src = self._media_abs(proj, medium)
+            stored = medium.get("analysis_record")
+            sound = None
+            level_source = None
+            if isinstance(stored, dict) and stored.get("sound"):
+                sound = stored["sound"]
+                level_source = "analysis"
+            if sound is None:
+                sound = decode_sound_levels(src)
+                level_source = "measured"
+            if sound is None or not sound.get("levels"):
+                raise ValueError(
+                    f"Media {medium['id']} has no audio levels to "
+                    "map: it has no audio track")
+            def _opt(key, default, low, high):
+                try:
+                    value = float(args.get(key, default))
+                except (TypeError, ValueError):
+                    raise ValueError(f"{key} must be a number")
+                if not low <= value <= high:
+                    raise ValueError(f"{key} must be between {low} "
+                                     f"and {high}")
+                return value
+            threshold = args.get("thresholdDb")
+            if threshold is not None:
+                try:
+                    threshold = float(threshold)
+                except (TypeError, ValueError):
+                    raise ValueError("thresholdDb must be a number")
+                if not -120 <= threshold <= 0:
+                    raise ValueError("thresholdDb must be between "
+                                     "-120 and 0")
+            bridge = _opt("bridgeSeconds", 0.3, 0, 10)
+            min_speech = _opt("minSpeechSeconds", 0.2, 0, 10)
+            min_sep = _opt("minSeparationDb", 6.0, 0, 60)
+            words = None
+            if isinstance(stored, dict):
+                transcript = stored.get("transcript") or {}
+                if transcript.get("words"):
+                    words = transcript["words"]
+            result = speech_map(sound, words=words,
+                                threshold_db=threshold,
+                                bridge_seconds=bridge,
+                                min_speech_seconds=min_speech,
+                                min_separation_db=min_sep)
+            result["media"] = medium["id"]
+            result["levels"] = level_source
+            return result
+        if name == "vibeedit_media_strip":
+            import os
+            # Round 7: MediaStills.strip, faithful shape. Frames
+            # at cell midpoints over from..to; levels from the
+            # record or measured now; gaps from the speech map;
+            # words from the stored transcript. The PNG needs
+            # Pillow; without it the strip data is still returned
+            # with path null and the reason stated.
+            from .analysis import (decode_sound_levels,
+                                   extract_frame_png, prune_strips,
+                                   render_strip_png, speech_map,
+                                   strip_frame_times)
+            if not args.get("media"):
+                raise ValueError("media_strip needs media")
+            proj = self._require()
+            medium = proj.media(args["media"])
+            if medium.get("kind") == "image":
+                raise ValueError("media_strip needs a video or "
+                                 "audio media, not a still image")
+            src = self._media_abs(proj, medium)
+            stored = medium.get("analysis_record")
+            duration = None
+            for candidate in (medium.get("duration"),
+                              (stored or {}).get("tech", {}).get(
+                                  "seconds")):
+                try:
+                    if candidate is not None and float(candidate) > 0:
+                        duration = float(candidate)
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if duration is None:
+                raise ValueError("media_strip needs a known media "
+                                 "duration")
+            def _range_num(key, default, low, high):
+                try:
+                    value = float(args.get(key, default))
+                except (TypeError, ValueError):
+                    raise ValueError(f"{key} must be a number")
+                if not low <= value <= high:
+                    raise ValueError(f"{key} must be between {low} "
+                                     f"and {high}")
+                return value
+            from_s = _range_num("from", 0.0, 0, 86400)
+            to_s = _range_num("to", duration, 0, 86400)
+            if not to_s > from_s:
+                raise ValueError("from must be before to, inside "
+                                 "a video or audio media")
+            to_s = min(to_s, duration)
+            try:
+                count = int(args.get("count", 8))
+            except (TypeError, ValueError):
+                raise ValueError("count must be an integer")
+            if not 1 <= count <= 24:
+                raise ValueError("count must be between 1 and 24")
+            try:
+                width = int(args.get("width", 1600))
+            except (TypeError, ValueError):
+                raise ValueError("width must be an integer")
+            if not 400 <= width <= 8192:
+                raise ValueError("width must be between 400 and "
+                                 "8192")
+            times = strip_frame_times(from_s, to_s, count)
+            fps = None
+            try:
+                from .project import fps_value as _fps_value
+                if medium.get("fps"):
+                    fps = _fps_value(medium["fps"])
+            except Exception:
+                fps = None
+            if fps is None and isinstance(stored, dict):
+                pic = stored.get("picture") or {}
+                fps = pic.get("fps")
+            frames = []
+            frame_pngs = []
+            cell_width = max(160, int(width / count) * 2)
+            stills_dir = os.path.join(proj.folder, "render",
+                                      "stills")
+            safe_id = "".join(c if c.isalnum() or c in "-_" else "_"
+                              for c in medium["id"])
+            for index, seconds in enumerate(times):
+                if medium.get("kind") == "audio":
+                    # The original's strip has no frame row for
+                    # sound alone, and its returned frames list
+                    # is empty for audio.
+                    continue
+                frame_no = int(seconds * fps) if fps else None
+                frames.append({"frame": frame_no,
+                               "seconds": round(seconds, 3)})
+                dest = os.path.join(
+                    stills_dir,
+                    f"strip-{safe_id}-{index}-{int(seconds * 10)}"
+                    ".png")
+                try:
+                    extract_frame_png(src, seconds, dest, cell_width)
+                    frame_pngs.append(dest)
+                except Exception:
+                    frame_pngs.append(None)
+            sound = None
+            level_source = None
+            if isinstance(stored, dict) and stored.get("sound"):
+                sound = stored["sound"]
+                level_source = "analysis"
+            if sound is None:
+                try:
+                    sound = decode_sound_levels(src)
+                    level_source = "measured"
+                except Exception:
+                    sound = None
+            gaps = []
+            gaps_json: dict = {"shown": False, "reason": None}
+            if sound is not None and sound.get("levels"):
+                mapped = speech_map(sound)
+                if mapped.get("gaps") is not None:
+                    shown = [g for g in mapped["gaps"]
+                             if g["end"] > from_s
+                             and g["start"] < to_s]
+                    gaps = [(g["start"], g["end"]) for g in shown]
+                    gaps_json = {"shown": True, "count": len(shown)}
+                else:
+                    gaps_json = {"shown": False,
+                                 "reason": mapped.get("reason")}
+            words = []
+            if isinstance(stored, dict):
+                transcript = stored.get("transcript") or {}
+                words = [w for w in transcript.get("words", []) or []
+                         if w["end"] > from_s and w["start"] < to_s]
+            path = None
+            png_reason = None
+            height = None
+            if medium.get("kind") != "audio":
+                try:
+                    canvas, width, height = render_strip_png(
+                        [p for p in frame_pngs],
+                        times,
+                        sound["levels"] if sound else None,
+                        sound["window"] if sound else 0.1, 0.0,
+                        gaps, words, from_s, to_s, width)
+                    import os as _os
+                    _os.makedirs(stills_dir, exist_ok=True)
+                    path = _os.path.join(
+                        stills_dir,
+                        f"strip-{safe_id}-{int(from_s * 10)}-"
+                        f"{int(to_s * 10)}-{width}.png")
+                    canvas.save(path)
+                    prune_strips(stills_dir)
+                except RuntimeError as exc:
+                    png_reason = str(exc)
+            else:
+                png_reason = ("Audio has no picture row; the "
+                               "strip data (levels, gaps, words) "
+                               "is returned without a PNG")
+            return {"path": path, "pngReason": png_reason,
+                    "media": medium["id"], "width": width,
+                    "height": height, "from": round(from_s, 3),
+                    "to": round(to_s, 3), "frames": frames,
+                    "levels": level_source, "gaps": gaps_json,
+                    "words": len(words)}
+        if name == "vibeedit_media_sync":
+            # Round 7: AudioSync, faithful port (see analysis.py).
+            # Offset: time in 'to' = time in 'media' + offset.
+            # Correlation below 0.4 means no shared sound, even
+            # when the halves happen to agree.
+            from .analysis import align_sound
+            if not args.get("media") or not args.get("to"):
+                raise ValueError("media_sync needs media and to")
+            proj = self._require()
+            first = proj.media(args["media"])
+            second = proj.media(args["to"])
+            result = align_sound(self._media_abs(proj, first),
+                                 self._media_abs(proj, second))
+            result["media"] = first["id"]
+            result["to"] = second["id"]
+            item_id = args.get("item")
+            if item_id:
+                found = None
+                for track in proj.data["tracks"]:
+                    for item in track["items"]:
+                        if item["id"] == item_id:
+                            found = item
+                            break
+                    if found is not None:
+                        break
+                if found is None:
+                    raise ValueError(f"Unknown timeline item: "
+                                     f"{item_id}")
+                if found.get("media") != first["id"]:
+                    raise ValueError("item is not a clip of the "
+                                     "media given")
+                from .project import fps_value as _fps_value
+                try:
+                    fps_first = _fps_value(first["fps"]) \
+                        if first.get("fps") else None
+                except Exception:
+                    fps_first = None
+                try:
+                    fps_second = _fps_value(second["fps"]) \
+                        if second.get("fps") else None
+                except Exception:
+                    fps_second = None
+                fps_first = fps_first or _fps_value(proj.fps)
+                fps_second = fps_second or _fps_value(proj.fps)
+                in_seconds = int(found.get("in", 0)) / fps_first
+                to_seconds = in_seconds + result["offsetSeconds"]
+                result["item"] = {
+                    "item": item_id,
+                    "mediaInFrame": int(found.get("in", 0)),
+                    "mediaInSeconds": round(in_seconds, 3),
+                    "toSeconds": round(to_seconds, 3),
+                    "toFrame": int(round(to_seconds * fps_second))}
+            return result
         if name == "vibeedit_media_proxy":
             from .render import generate_proxy
             if not args.get("media"):

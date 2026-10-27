@@ -147,7 +147,7 @@ class TestRound5McpTools(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         # Round 5: 132 -> 120 (12 tools became real, listed below).
-        self.assertEqual(len(honest), 116)  # Round 6: 120 -> 116, media_cuts + plugins_options/option/set became real
+        self.assertEqual(len(honest), 113)  # Round 7: 116 -> 113, media_sync + media_speech_map + media_strip became real
 
     def test_app_update_later_skip_via_mcp(self):
         with mock.patch.object(
@@ -256,10 +256,20 @@ class TestRound5McpTools(unittest.TestCase):
             self.server.call("vibeedit_media_proxy", {})
 
     def test_media_analysis_via_ffprobe(self):
-        for name in ("vibeedit_media_analysis", "vibeedit_media_analyze"):
-            res = self.server.call(name, {"media": self.medium["id"]})
-            self.assertTrue(res.get("probed"))
-            self.assertEqual(res.get("width"), 320)
+        # Round 7: media_analysis still reads stored metadata +
+        # live ffprobe; media_analyze now measures for real and
+        # returns the job shape (each media with its key and
+        # whether it was reused), not the metadata shape.
+        res = self.server.call("vibeedit_media_analysis",
+                               {"media": self.medium["id"]})
+        self.assertTrue(res.get("probed"))
+        self.assertEqual(res.get("width"), 320)
+        analyzed = self.server.call("vibeedit_media_analyze",
+                                    {"media": self.medium["id"]})
+        self.assertEqual(len(analyzed["results"]), 1)
+        self.assertEqual(analyzed["results"][0]["media"],
+                         self.medium["id"])
+        self.assertIn("key", analyzed["results"][0])
         with self.assertRaises(ValueError):
             self.server.call("vibeedit_media_analysis", {})
 

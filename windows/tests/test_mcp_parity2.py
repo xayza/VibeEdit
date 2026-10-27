@@ -452,7 +452,9 @@ HONEST_SAMPLE = [
     "vibeedit_library_export_pack", "vibeedit_library_import_pack", "vibeedit_library_analyze",
     "vibeedit_media_describe",  # Round 5: ocr/subjects/proxy/analysis left (now real)
         "vibeedit_media_description", "vibeedit_media_digest",
-    "vibeedit_media_sync", "vibeedit_media_speech_map", "vibeedit_media_strip",
+    # Round 7: sync/speech_map/strip left (now real) -- removed
+    # from the honest sample; their real behaviour is covered
+    # by tests/test_round7_analysis.py.
             "vibeedit_plugins_setup",  # Round 5: search/run/invoke left (now real)
     # Round 6: options/option/set left (now real); setup stays honest
     # (Windows plugins are plain .py modules with no dependency
@@ -508,7 +510,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 116)  # Round 6: 120 -> 116, media_cuts + plugins_options/option/set became real
+        self.assertEqual(len(honest), 113)  # Round 7: 116 -> 113, media_sync + media_speech_map + media_strip became real
 
 
 if __name__ == "__main__":
