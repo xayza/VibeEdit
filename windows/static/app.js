@@ -22,6 +22,18 @@ function setStatus(msg, isError) {
   clearTimeout(statusTimer);
   statusTimer = setTimeout(() => el.classList.remove("show"), 4000);
 }
+function setSaveState(state) {
+  // Round 19: the persistent save indicator next to Edited rev.
+  // "saving" blinks "Đang lưu…"; "saved" shows a green dot +
+  // "Đã lưu" ONLY after a real successful /api/save response;
+  // "error" clears it (the error status carries the message).
+  // Never shows "Đã lưu" without a success response.
+  const dot = $("saveDot"), label = $("saveLabel");
+  if (!dot || !label) return;
+  if (state === "saving") { dot.className = "save-dot saving"; label.textContent = "Đang lưu…"; }
+  else if (state === "saved") { dot.className = "save-dot saved"; label.textContent = "Đã lưu"; }
+  else { dot.className = "save-dot"; label.textContent = ""; }
+}
 async function api(path, body) {
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
@@ -31,6 +43,16 @@ async function api(path, body) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+// Round 19: THE project-op helper, top-level. Previously it lived
+// only inside the gapBatch2Wiring IIFE, so every Knowledge/Vision/
+// Plugin handler in round3Wiring threw "post is not defined" before
+// doing anything (14 dead buttons). One helper, one convention:
+// POST /api/project, then reload the project view.
+async function post(body) {
+  const d = await api("/api/project", body);
+  await load();
+  return d;
 }
 function findItem(id) {
   for (const t of project.tracks)
@@ -56,6 +78,9 @@ async function load() {
   const statusClips = project.tracks.reduce((n, t) => n + t.items.length, 0);
   $("timelineText").textContent =
     data.timeline.split("\n")[0] + ` · ${project.tracks.length} track · ${statusClips} clip`;
+  // Round 19: the footer hint is ellipsized (nowrap is test-locked),
+  // so the full text lives in the title tooltip.
+  $("timelineText").title = $("timelineText").textContent;
   $("btnUndo").disabled = !data.can_undo;
   $("btnRedo").disabled = !data.can_redo;
   syncFormatUI();
@@ -65,7 +90,32 @@ async function load() {
     $("previewImage").hidden = true;
     $("preview").hidden = false;
     $("previewLabel").textContent = "Đang xem: bản xuất gần nhất.";
+    $("previewLabel").hidden = false;
+  } else if (previewMode !== "source") {
+    // Round 19: no export yet — show the first main clip's first
+    // frame as a poster via the existing /api/media serving
+    // (preload="metadata" shows frame 0), instead of a black box.
+    // No new endpoint: /api/media/<id> already serves the file.
+    const mainTrack = project.tracks.find((t) => t.role === "main");
+    const firstClip = mainTrack && mainTrack.items.length ? mainTrack.items.slice().sort((a, b) => a.at - b.at)[0] : null;
+    const medium = firstClip ? project.media.find((m) => m.id === firstClip.media) : null;
+    if (medium) {
+      $("previewLabel").textContent = `Chưa có bản xuất — đang xem frame đầu của clip đầu tiên (${mediaBaseName(medium)}).`;
+      $("previewLabel").hidden = false;
+      if (medium.kind === "image" || /\.(png|jpe?g|gif|webp|bmp)$/i.test(medium.path)) {
+        $("previewImage").src = "/api/media/" + encodeURIComponent(medium.id);
+        $("previewImage").hidden = false; $("preview").hidden = true; $("preview").removeAttribute("src"); $("preview").load();
+      } else {
+        $("preview").src = "/api/media/" + encodeURIComponent(medium.id);
+        $("preview").hidden = false; $("previewImage").hidden = true;
+      }
+    } else {
+      // Round 19: nothing to show — keep only the one empty-state
+      // notice (previewEmpty) and hide the second label.
+      $("previewLabel").hidden = true;
+    }
   }
+  updatePreviewEmpty();
   fillSettingsInfo();
   renderMedia(); renderTracks(); renderInspector(); renderTransitions(); renderVoiceover();
   seekPreviewToPlayhead();
@@ -97,9 +147,22 @@ function renderKeyframes() {
   }));
 }
 function mediaBaseName(m) { return (m.path || "").split(/[\\/]/).pop() || m.id; }
+function mediaFps(m) {
+  // Round 19: a media record's OWN frame rate, or null when unknown
+  // (audio has none). Never defaults to the project fps here: that
+  // default is what made source frames read as project frames.
+  if (!m || !m.fps) return null;
+  if (Array.isArray(m.fps)) return m.fps[1] ? m.fps[0] / m.fps[1] : null;
+  const v = Number(m.fps);
+  return v > 0 ? v : null;
+}
 function mediaDurationS(m) {
   if (m.duration) return Number(m.duration);
-  if (m.frames) return Number(m.frames) / fps();
+  // Round 19: source frames divided by SOURCE fps, not project fps.
+  if (m.frames) {
+    const mf = mediaFps(m);
+    return mf ? Number(m.frames) / mf : Number(m.frames) / fps();
+  }
   return null;
 }
 function mediaDurationLabel(m) {
@@ -109,8 +172,17 @@ function mediaDurationLabel(m) {
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 function mediaDurFrames(m) {
-  if (m.frames) return Number(m.frames);
+  // Round 19: dur is PROJECT frames everywhere downstream, so a
+  // source-frame count must be converted (seconds-first). The old
+  // code returned source frames directly, doubling durations
+  // whenever media fps != project fps (6797 frames of 59.94fps
+  // footage in a 29.97fps project showed as 226.79s).
   if (m.duration) return Math.max(1, Math.round(Number(m.duration) * fps()));
+  if (m.frames) {
+    const mf = mediaFps(m);
+    if (mf) return Math.max(1, Math.round(Number(m.frames) / mf * fps()));
+    return Math.max(1, Math.round(Number(m.frames)));
+  }
   return null;
 }
 function mediaIsUsed(m) {
@@ -232,6 +304,67 @@ function rulerLabelStep(pxPerSec) {
   }
   return 600;
 }
+function visibleTickRange(scrollLeft, clientWidth, pxPerSec, totalSecs) {
+  // Round 19: pure helper (Node-testable) for ruler virtualization.
+  // Returns the second range whose ticks get DOM nodes, plus the
+  // minor-tick step: 500ms when ticks are >= 10px apart, else 1s.
+  const firstSec = Math.max(0, Math.floor(scrollLeft / pxPerSec));
+  const lastSec = Math.min(Math.ceil(totalSecs), Math.ceil((scrollLeft + clientWidth) / pxPerSec) + 1);
+  return { firstSec, lastSec, minorStep: pxPerSec >= 20 ? 0.5 : 1 };
+}
+function renderRuler() {
+  // Round 19: virtualized ruler — only ticks in the visible range
+  // get DOM nodes. The old loop created one node per second even
+  // when labels were sparse, so a 3600s project built ~3601 tick
+  // nodes (plus one beat node per beat). Scrolling re-renders only
+  // the ruler (rAF-throttled), never the whole track list.
+  const ruler = $("ruler");
+  if (!ruler) return;
+  const totalS = Math.max(1, ...project.tracks.flatMap((t) => t.items.map((i) => (i.at + i.dur) / fps())));
+  const widthPx = Math.max(totalS * pxPerSec, 400);
+  ruler.style.width = widthPx + "px";
+  const labelStep = rulerLabelStep(pxPerSec);
+  const stepPx = Math.max(1, labelStep * pxPerSec);
+  // Grid lines follow the label step, so the background never
+  // disagrees with the seconds at a zoom other than 60 px/s.
+  ruler.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0, transparent ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx}px)`;
+  const scroller = ruler.parentElement;
+  const viewLeft = scroller ? scroller.scrollLeft : 0;
+  const viewW = scroller ? scroller.clientWidth : widthPx;
+  const viewStartS = viewLeft / pxPerSec, viewEndS = (viewLeft + viewW) / pxPerSec;
+  const { firstSec, lastSec, minorStep } = visibleTickRange(viewLeft, viewW, pxPerSec, totalS);
+  let html = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
+  for (let sec = firstSec; sec <= lastSec; sec++) {
+    if (sec % labelStep === 0) {
+      const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
+      html += `<div class="ruler-tick" style="left:${sec * pxPerSec}px">${mm}:${ss}</div>`;
+    } else {
+      html += `<div class="ruler-tick-minor" style="left:${sec * pxPerSec}px"></div>`;
+    }
+  }
+  if (minorStep === 0.5) {
+    for (let t = Math.ceil(viewStartS * 2) / 2; t <= Math.min(totalS, viewEndS); t += 0.5) {
+      if (Number.isInteger(t)) continue; // whole seconds already have a tick
+      html += `<div class="ruler-tick-minor" style="left:${t * pxPerSec}px"></div>`;
+    }
+  }
+  html += ((project.beatGrid && project.beatGrid.beats) || []).filter((b) => b >= viewStartS && b <= viewEndS).map((b) =>
+    `<div class="beat-tick" title="beat ${b}s" style="left:${b * pxPerSec}px"></div>`).join("");
+  if (window.__showSections) {
+    html += (project.markers || []).filter((m) => { const s = m.at / fps(); return s >= viewStartS && s <= viewEndS; }).map((m) =>
+      `<div class="section-tick" title="${(m.text || "").replace(/"/g, "&quot;")}" style="left:${(m.at / fps()) * pxPerSec}px"></div>`).join("");
+  }
+  ruler.innerHTML = html;
+  if (scroller && !scroller.dataset.rulerScroll) {
+    scroller.dataset.rulerScroll = "1";
+    let queued = false;
+    scroller.addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; renderRuler(); });
+    }, { passive: true });
+  }
+}
 function renderTracks() {
   const wrap = $("tracks");
   wrap.innerHTML = "";
@@ -245,26 +378,7 @@ function renderTracks() {
   // none in CSS, and hidden here as soon as any clip exists).
   const hint = $("timelineEmptyHint");
   if (hint) hint.hidden = project.tracks.some((t) => t.items.length > 0);
-  const ruler = $("ruler");
-  ruler.style.width = widthPx + "px";
-  const totalSecs = totalS;
-  const labelStep = rulerLabelStep(pxPerSec);
-  const stepPx = Math.max(1, labelStep * pxPerSec);
-  // Grid lines follow the label step, so the background never
-  // disagrees with the seconds at a zoom other than 60 px/s.
-  ruler.style.backgroundImage = `repeating-linear-gradient(90deg, transparent 0, transparent ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx - 1}px, rgba(255, 255, 255, 0.06) ${stepPx}px)`;
-  let rulerHtml = `<div class="playhead" style="left:${(playheadFrame / fps()) * pxPerSec}px"></div>`;
-  for (let sec = 0; sec <= Math.ceil(totalSecs); sec++) {
-    if (sec % labelStep === 0) {
-      const mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, "0");
-      rulerHtml += `<div class="ruler-tick" style="left:${sec * pxPerSec}px">${mm}:${ss}</div>`;
-    } else {
-      rulerHtml += `<div class="ruler-tick-minor" style="left:${sec * pxPerSec}px"></div>`;
-    }
-  }
-  ruler.innerHTML = rulerHtml +
-    ((project.beatGrid && project.beatGrid.beats) || []).map((b) =>
-      `<div class="beat-tick" title="beat ${b}s" style="left:${b * pxPerSec}px"></div>`).join("");
+  renderRuler();
   // Original-app track order (display only — project data is unchanged):
   // Captions, Overlay, Main, Adjustment, Background, Dialogue,
   // Voiceover, Music, Sfx. Tracks the project does not have yet are
@@ -284,7 +398,9 @@ function renderTracks() {
     row.className = "track-row" + (track.role === "main" ? " track-row-main" : "");
     row.innerHTML = trackHeaderHtml(track.role, track.name, track.kind);
     const lane = document.createElement("div");
-    lane.className = "track-lane";
+    // Round 19: empty lanes get their own class (28px via CSS) so
+    // the locked .track-lane rule is never edited.
+    lane.className = "track-lane" + (track.items.length === 0 ? " is-empty" : "");
     lane.style.width = widthPx + "px";
     lane.dataset.track = track.id;
     lane.addEventListener("dragover", (e) => { e.preventDefault(); lane.classList.add("target"); });
@@ -510,6 +626,7 @@ function showSourcePreview(medium) {
   previewMode = "source"; previewMediaId = medium.id;
   const video = $("preview"), img = $("previewImage");
   $("previewLabel").textContent = `Đang xem: ${baseNameOf(medium)} — bấm ▶ để phát.`;
+  $("previewLabel").hidden = false;
   if (medium.kind === "image" || /\.(png|jpe?g|gif|webp|bmp)$/i.test(medium.path)) {
     img.src = "/api/media/" + encodeURIComponent(medium.id);
     img.hidden = false; video.hidden = true; video.removeAttribute("src"); video.load();
@@ -665,9 +782,22 @@ function applyAgentCollapsePref() {
   // The rail "AI Agent" toggle and the header toggle mirror the same
   // state — active + aria-expanded while the drawer is open.
   const toggle = $("btnAgentToggle");
-  if (toggle) { toggle.classList.toggle("active", !collapsed); toggle.setAttribute("aria-expanded", String(!collapsed)); }
+  if (toggle) { toggle.classList.toggle("active", !collapsed); toggle.setAttribute("aria-expanded", String(!collapsed)); toggle.setAttribute("aria-pressed", String(!collapsed)); }
   const top = $("btnAgentToggleTop");
-  if (top) { top.classList.toggle("active", !collapsed); top.setAttribute("aria-expanded", String(!collapsed)); }
+  if (top) { top.classList.toggle("active", !collapsed); top.setAttribute("aria-expanded", String(!collapsed)); top.setAttribute("aria-pressed", String(!collapsed)); }
+}
+function syncInspectorDrawer() {
+  // Round 19: at narrow widths the Details column is a slide-from-
+  // right drawer (.open), not a grid column. Keep .open in sync
+  // with the hidden state so the drawer never disagrees with the
+  // toggle button.
+  const wb = document.querySelector(".workbench");
+  const col = document.querySelector(".details-col");
+  if (!wb || !col) return;
+  const hidden = wb.classList.contains("details-hidden");
+  col.classList.toggle("open", !hidden);
+  const btn = $("btnInspectorToggle");
+  if (btn) btn.setAttribute("aria-pressed", String(!hidden));
 }
 function toggleInspectorColumn() {
   const wb = document.querySelector(".workbench");
@@ -675,6 +805,7 @@ function toggleInspectorColumn() {
   const hidden = wb.classList.toggle("details-hidden");
   const btn = $("btnInspectorToggle");
   if (btn) btn.setAttribute("aria-expanded", String(!hidden));
+  syncInspectorDrawer();
 }
 
 $("ruler").addEventListener("click", (e) => {
@@ -688,12 +819,27 @@ $("zoom").addEventListener("input", (e) => {
   $("zoomLabel").textContent = pxPerSec + " px/s";
   renderTracks();
 });
+function setZoom(v) {
+  // Round 19: the −/+ buttons step through the SAME zoom mechanism
+  // as the slider (pxPerSec, clamped to the slider range 10–200).
+  pxPerSec = Math.max(10, Math.min(200, Math.round(v)));
+  const z = $("zoom"); if (z) z.value = pxPerSec;
+  $("zoomLabel").textContent = pxPerSec + " px/s";
+  renderTracks();
+}
+const zOut = $("zoomOut"), zIn = $("zoomIn");
+if (zOut) zOut.addEventListener("click", () => setZoom(pxPerSec - 10));
+if (zIn) zIn.addEventListener("click", () => setZoom(pxPerSec + 10));
 $("projectName").addEventListener("change", async (e) => {
-  try { await api("/api/project", { op: "set_project", name: e.target.value }); setStatus("Đã đổi tên project."); await load(); }
+  try { await api("/api/project", { op: "set_project", name: e.target.value }); setStatus(`Đã đổi tên project thành “${e.target.value}”.`); await load(); }
   catch (err) { setStatus(err.message, true); }
 });
-$("btnUndo").addEventListener("click", async () => { try { await api("/api/undo", {}); await load(); } catch (e) { setStatus(e.message, true); } });
-$("btnRedo").addEventListener("click", async () => { try { await api("/api/redo", {}); await load(); } catch (e) { setStatus(e.message, true); } });
+// Round 19: Enter in the name field commits (blur fires change).
+// Without this, a user who types a name and hits Enter never fires
+// change, and the rename silently never happens.
+$("projectName").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+$("btnUndo").addEventListener("click", async () => { try { await api("/api/undo", {}); await load(); setStatus(`Đã hoàn tác. (Edited rev ${project.rev})`); } catch (e) { setStatus(e.message, true); } });
+$("btnRedo").addEventListener("click", async () => { try { await api("/api/redo", {}); await load(); setStatus(`Đã làm lại. (Edited rev ${project.rev})`); } catch (e) { setStatus(e.message, true); } });
 /* Phase 2 Windows shortcuts: Ctrl (not Command) for a Windows
    browser app. Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Ctrl+S
    explicit save. preventDefault only where the browser would
@@ -711,8 +857,9 @@ document.addEventListener("keydown", async (e) => {
   try {
     if (key === "s") {
       e.preventDefault();
-      await api("/api/save", {});
-      setStatus("Đã lưu project.");
+      setSaveState("saving");
+      try { await api("/api/save", {}); setSaveState("saved"); setStatus("Đã lưu project."); }
+      catch (err) { setSaveState("error"); setStatus(err.message, true); }
       await load();
     } else if (key === "z" && !e.shiftKey) {
       e.preventDefault();
@@ -911,7 +1058,7 @@ $("uploadForm").addEventListener("submit", async (e) => {
   const res = await fetch("/api/media/upload", { method: "POST", body: fd });
   const data = await res.json();
   if (!res.ok) setStatus(data.error, true);
-  else { await load(); loadMediaPreview(data.media.id); setStatus("Đã tải lên: " + data.media.path + " — đang xem file gốc, bấm ▶ để phát."); }
+  else { await load(); loadMediaPreview(data.media.id); setStatus(data.reused ? `File này đã có, dùng lại media ${data.media.id}.` : "Đã tải lên: " + data.media.path + " — đang xem file gốc, bấm ▶ để phát."); }
 });
 
 load().catch((err) => setStatus("Tải project thất bại: " + err.message, true));
@@ -990,12 +1137,13 @@ $("beatForm").addEventListener("submit", async (e) => {
   setStatus("Đang phát hiện nhịp…");
   try {
     const data = await api("/api/project", { op: "beat_detect", media: $("beatMedia").value });
-    setStatus(`Đã phát hiện nhịp: ${data.result.beats.length} nhịp.`); await load();
+    const n = (data.result.beats || []).length;
+    setStatus(n ? `Đã phát hiện nhịp: ${n} nhịp.` : "Đã chạy phân tích nhịp nhưng không tìm thấy nhịp nào trong file này (0 nhịp) — thử file nhạc có nhịp rõ hơn."); await load();
   } catch (err) { setStatus("Phát hiện nhịp thất bại: " + err.message, true); }
 });
 $("btnBeatsMarkers").addEventListener("click", async () => {
   try { await api("/api/project", { op: "beats_to_markers" }); setStatus("Đã chép nhịp thành marker."); await load(); }
-  catch (err) { setStatus(err.message, true); }
+  catch (err) { setStatus(err.message === "No beat grid detected yet" ? "Chưa có lưới nhịp — phát hiện nhịp trước (nếu đã chạy mà vẫn trống, file này không có nhịp rõ)." : err.message, true); }
 });
 $("btnSnap").addEventListener("click", async () => {
   const beats = (project.beatGrid && project.beatGrid.beats) || [];
@@ -1264,11 +1412,11 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const cloneBtn = $("btnVoiceClone");
   if (cloneBtn) cloneBtn.addEventListener("click", async () => {
     const file = $("voiceRefFile") && $("voiceRefFile").files[0];
-    if (!file) { $("voiceResult").textContent = "Choose a reference audio file first. Note: voice cloning is not available in this Windows port yet."; return; }
+    if (!file) { const msg = "Choose a reference audio file first. Note: voice cloning is not available in this Windows port yet."; $("voiceResult").textContent = msg; setStatus(msg, true); return; }
     const fd = new FormData(); fd.append("file", file);
     const res = await fetch("/api/media/upload", { method: "POST", body: fd });
     const data = await res.json();
-    if (!res.ok) { $("voiceResult").textContent = "Upload failed: " + data.error; return; }
+    if (!res.ok) { $("voiceResult").textContent = "Upload failed: " + data.error; setStatus("Upload thất bại: " + data.error, true); return; }
     $("voiceResult").textContent = "Reference audio imported as media (" + data.media.path + "). Voice cloning is not available yet — place it on the Voiceover track with the form below.";
     setStatus("Đã import audio mẫu."); await load();
   });
@@ -1281,6 +1429,14 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       const provider = $("voiceProvider") ? $("voiceProvider").value : "auto";
       const voice = $("voiceVoice") ? $("voiceVoice").value : "";
       const model = $("voiceGenModel") ? $("voiceGenModel").value : "";
+      // Round 19: never stay silent when no backend exists — check
+      // the real backends first and say so clearly.
+      const check = await api("/api/project", { op: "voice_check" });
+      const backs = check.backends || {};
+      if (!backs.piper && !backs.edge_tts) {
+        const msg = "Chưa có backend giọng nói: cài Piper (binary + model .onnx) hoặc edge-tts để tạo giọng.";
+        $("voiceResult").textContent = msg; setStatus(msg, true); return;
+      }
       const data = await api("/api/project", { op: "voice_generate", text, provider, voice: voice || undefined, model: model || undefined });
       $("voiceResult").textContent = `Đã tạo giọng bằng ${data.backend}: ${data.path} (media ${data.media}). Dùng form “Import a voiceover take…” bên dưới để đặt lên track Voiceover, hoặc đặt ngay bằng voice_place qua MCP.`;
       await load();
@@ -1506,10 +1662,11 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     if (v.paused) v.play(); else v.pause();
   });
   if (backBtn) backBtn.addEventListener("click", () => {
-    if (previewMode === "source" && previewItemId) {
-      const found = findItem(previewItemId);
-      if (found) playheadFrame = found.item.at;
-    } else playheadFrame = 0;
+    // Round 19: "Về đầu" always means timeline frame 0. The old
+    // code jumped to the selected source item's start in source
+    // mode, which read as "goes to 226.79s instead of 0" when the
+    // selected clip was the second one.
+    playheadFrame = 0;
     seekPreviewToPlayhead(); renderTracks();
   });
 
@@ -1522,8 +1679,18 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   });
   const secBtn = $("tlSections");
   if (secBtn) secBtn.addEventListener("click", () => {
+    // Round 19: Sections is now a real toggle (was status-only):
+    // it shows/hides the section markers on the ruler, flips
+    // aria-pressed + the active style, and always reports its state.
+    const on = secBtn.getAttribute("aria-pressed") !== "true";
+    secBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    secBtn.classList.toggle("active", on);
+    window.__showSections = on;
+    renderTracks();
     const ms = project.markers || [];
-    setStatus(ms.length ? "Sections (marker): " + ms.map((m) => `${(m.at / fps()).toFixed(2)}s ${m.text}`).join(" | ") : "Chưa có section (marker) nào — thêm marker bằng công cụ MCP (vibeedit_markers_add).");
+    setStatus(on
+      ? (ms.length ? "Đã bật Sections (marker): " + ms.map((m) => `${(m.at / fps()).toFixed(2)}s ${m.text}`).join(" | ") : "Đã bật Sections — chưa có marker nào.")
+      : "Đã tắt Sections.");
   });
   const askBtn = $("tlAskAgent");
   if (askBtn) askBtn.addEventListener("click", () => focusAgent(selectedId ? "Help with the selected clip" : "Help with this project"));
@@ -1592,7 +1759,15 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   });
   const inspToggle = $("btnInspectorToggle");
   if (inspToggle) inspToggle.addEventListener("click", toggleInspectorColumn);
+  const detailsClose = $("btnDetailsClose");
+  if (detailsClose) detailsClose.addEventListener("click", toggleInspectorColumn);
+  const agentClose = $("btnAgentClose");
+  if (agentClose) agentClose.addEventListener("click", () => {
+    localStorage.setItem("vibeedit_agent_collapsed", "1");
+    applyAgentCollapsePref();
+  });
   applyAgentCollapsePref();
+  syncInspectorDrawer();
   const expBtn = $("btnPreviewExport");
   if (expBtn) expBtn.addEventListener("click", async () => {
     previewMode = "export"; previewMediaId = null; previewItemId = null;
@@ -1606,7 +1781,6 @@ $("btnTransitionPreview").addEventListener("click", async () => {
    plugin list/enable/disable, welcome panel. */
 (function gapBatch2Wiring() {
   const needClip = () => { if (!selectedId) { setStatus("Hãy chọn một clip trên timeline trước.", true); return false; } return true; };
-  const post = async (body) => { const d = await api("/api/project", body); await load(); return d; };
   const sc = $("speedCurveForm");
   if (sc) sc.addEventListener("submit", async (e) => {
     e.preventDefault(); if (!needClip()) return;
@@ -1796,7 +1970,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   // the project about whether magnetic is on.
   if (mg) mg.addEventListener("click", async () => {
     const on = mg.getAttribute("aria-pressed") !== "true";
-    try { await post({ op: "magnetic_set", enabled: on }); mg.setAttribute("aria-pressed", on ? "true" : "false"); mg.classList.toggle("active", on); setStatus(`Magnetic Main: ${on ? "on" : "off"}.`); }
+    try { await post({ op: "magnetic_set", enabled: on }); mg.setAttribute("aria-pressed", on ? "true" : "false"); mg.classList.toggle("active", on); setStatus(on ? "Đã bật Magnetic Main." : "Đã tắt Magnetic Main."); }
     catch (err) { setStatus(err.message, true); }
   });
 })();
@@ -2064,3 +2238,198 @@ document.addEventListener("keydown", (e) => {
   }
 });
 /* End round 18 shortcuts. */
+
+/* Round 19: resizable panels, icon tooltip, single import control. */
+
+/* Pure helpers (top-level so tests can extract and check them). */
+function clampSize(v, min, max) {
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  if (v < min) return min;
+  if (v > max) return max;
+  return Math.round(v);
+}
+function validStored(v, min, max) {
+  if (typeof v !== "number" || !isFinite(v)) return null;
+  if (v < min || v > max) return null;
+  return v;
+}
+function panelTemplate(tool, details, detailsHidden) {
+  if (detailsHidden) {
+    if (tool === null) return "280px minmax(0, 1fr)";
+    return tool + "px minmax(0, 1fr)";
+  }
+  if (tool === null && details === null) return "";
+  if (tool === null) return "280px minmax(0, 1fr) " + details + "px";
+  if (details === null) return tool + "px minmax(0, 1fr) auto";
+  return tool + "px minmax(0, 1fr) " + details + "px";
+}
+function tooltipPosition(rect, tipW, tipH, vw, vh) {
+  let left = rect.left + rect.width / 2 - tipW / 2;
+  left = Math.max(8, Math.min(left, vw - tipW - 8));
+  let top = rect.bottom + 6;
+  let below = true;
+  if (top + tipH > vh - 8) { top = rect.top - tipH - 6; below = false; }
+  return { left: Math.round(left), top: Math.round(top), below: below };
+}
+
+/* Round 19: body-level tooltip for icon-only timeline buttons.
+   Root cause of the round-18 bug, read from the code: the toolbar
+   has overflow-x: auto, which forces overflow-y to auto, and the
+   ::after tooltip drops 6px below a 30px button inside a 40px bar —
+   1px past the toolbar's clip edge — so it is always clipped and
+   never shows (z-index cannot beat overflow clipping). This div
+   lives on <body> with position: fixed, so no ancestor overflow can
+   clip it. Text is the aria-label verbatim (== data-tip, locked by
+   tests); no title attributes are added, so the native delayed
+   tooltip never doubles up. The round-18 ::after rule is kept
+   verbatim because old tests lock its strings; it stays inert. */
+(function iconTooltip() {
+  const tip = document.createElement("div");
+  tip.id = "uiTooltip";
+  tip.className = "ui-tooltip";
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  function showFor(btn) {
+    const text = btn.getAttribute("aria-label") || btn.getAttribute("data-tip") || "";
+    if (!text) return;
+    tip.textContent = text;
+    tip.hidden = false;
+    const rect = btn.getBoundingClientRect();
+    const pos = tooltipPosition(rect, tip.offsetWidth, tip.offsetHeight, window.innerWidth, window.innerHeight);
+    tip.style.left = pos.left + "px";
+    tip.style.top = pos.top + "px";
+  }
+  function hide() { tip.hidden = true; }
+  function pick(e) {
+    if (!e.target || !e.target.closest) return null;
+    return e.target.closest(".tl-icon-btn[data-tip]");
+  }
+  document.addEventListener("mouseover", (e) => { const b = pick(e); if (b) showFor(b); });
+  document.addEventListener("mouseout", (e) => {
+    const b = pick(e);
+    if (b && !(e.relatedTarget && b.contains(e.relatedTarget))) hide();
+  });
+  document.addEventListener("focusin", (e) => { const b = pick(e); if (b) showFor(b); });
+  document.addEventListener("focusout", (e) => {
+    const b = pick(e);
+    if (b && !(e.relatedTarget && b.contains(e.relatedTarget))) hide();
+  });
+  document.addEventListener("pointerdown", (e) => { const b = pick(e); if (b) hide(); }, true);
+  window.addEventListener("scroll", hide, true);
+})();
+
+/* Round 19: resizable panels. Sizes live ONLY in inline styles set
+   here (workbench grid template, timeline flex-basis, drawer width)
+   — the locked CSS defaults are never edited. Dragging clamps at
+   the edges; sizes persist in localStorage (key below) with strict
+   validation on restore; double-click a handle resets that region. */
+(function panelResize() {
+  const KEY = "vibeedit_panel_sizes";
+  const LIMITS = { tool: [180, 480], details: [220, 520], agent: [280, 520] };
+  const state = { tool: null, details: null, timeline: null, agent: null };
+  function timelineMax() { return Math.round(window.innerHeight * 0.6); }
+  function load() {
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (err) { raw = null; }
+    if (!raw || typeof raw !== "object") return;
+    state.tool = validStored(raw.tool, LIMITS.tool[0], LIMITS.tool[1]);
+    state.details = validStored(raw.details, LIMITS.details[0], LIMITS.details[1]);
+    state.timeline = validStored(raw.timeline, 180, timelineMax());
+    state.agent = validStored(raw.agent, LIMITS.agent[0], LIMITS.agent[1]);
+  }
+  function save() {
+    const out = {};
+    if (state.tool !== null) out.tool = state.tool;
+    if (state.details !== null) out.details = state.details;
+    if (state.timeline !== null) out.timeline = state.timeline;
+    if (state.agent !== null) out.agent = state.agent;
+    try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (err) { /* private mode: sizes just don't persist */ }
+  }
+  function apply() {
+    const wb = document.querySelector(".workbench");
+    if (wb) {
+      const tpl = panelTemplate(state.tool, state.details, wb.classList.contains("details-hidden"));
+      wb.style.gridTemplateColumns = tpl;
+    }
+    const tw = document.querySelector(".timeline-wrap");
+    if (tw) tw.style.flexBasis = state.timeline === null ? "" : state.timeline + "px";
+    const ag = document.getElementById("agentCol");
+    if (ag) ag.style.width = state.agent === null ? "" : state.agent + "px";
+  }
+  function bind(handleId, opts) {
+    const handle = document.getElementById(handleId);
+    if (!handle) return;
+    let startPos = 0, startSize = 0;
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startPos = opts.axis === "x" ? e.clientX : e.clientY;
+      startSize = opts.get();
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* mouse fallback: moves still tracked on window */ }
+      document.body.classList.add("resizing");
+      const move = (ev) => {
+        const pos = opts.axis === "x" ? ev.clientX : ev.clientY;
+        const next = clampSize(startSize + (pos - startPos) * opts.sign, opts.min, opts.max());
+        if (next !== null) { opts.set(next); }
+      };
+      const up = () => {
+        document.body.classList.remove("resizing");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        save();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    });
+    handle.addEventListener("dblclick", () => { opts.reset(); apply(); save(); });
+  }
+  load();
+  apply();
+  const wbObs = document.querySelector(".workbench");
+  if (wbObs && window.MutationObserver) {
+    new MutationObserver(() => apply()).observe(wbObs, { attributes: true, attributeFilter: ["class"] });
+  }
+  bind("resizeTool", {
+    axis: "x", sign: 1, min: LIMITS.tool[0], max: () => LIMITS.tool[1],
+    get: () => document.querySelector(".tool-col").getBoundingClientRect().width,
+    set: (v) => { state.tool = v; apply(); },
+    reset: () => { state.tool = null; },
+  });
+  bind("resizeDetails", {
+    axis: "x", sign: -1, min: LIMITS.details[0], max: () => LIMITS.details[1],
+    get: () => document.querySelector(".details-col").getBoundingClientRect().width,
+    set: (v) => { state.details = v; apply(); },
+    reset: () => { state.details = null; },
+  });
+  bind("resizeTimeline", {
+    axis: "y", sign: 1, min: 180, max: () => timelineMax(),
+    get: () => document.querySelector(".timeline-wrap").getBoundingClientRect().height,
+    set: (v) => { state.timeline = v; apply(); },
+    reset: () => { state.timeline = null; },
+  });
+  bind("resizeAgent", {
+    axis: "x", sign: -1, min: LIMITS.agent[0], max: () => LIMITS.agent[1],
+    get: () => document.getElementById("agentCol").getBoundingClientRect().width,
+    set: (v) => { state.agent = v; apply(); },
+    reset: () => { state.agent = null; },
+  });
+})();
+
+/* Round 19: single import control. Clicking the dropzone (or Enter /
+   Space on it) opens the file picker; choosing a file auto-uploads.
+   The drop flow and the upload submit handler are untouched. */
+(function singleImportControl() {
+  const zone = document.getElementById("importDropzone");
+  const input = document.getElementById("uploadFile");
+  const form = document.getElementById("uploadForm");
+  if (!zone || !input || !form) return;
+  zone.addEventListener("click", () => input.click());
+  zone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+  });
+  input.addEventListener("change", () => {
+    if (input.files && input.files.length) form.requestSubmit();
+  });
+})();

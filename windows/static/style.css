@@ -1027,3 +1027,69 @@ label { font-size: 12px; }
 .timeline-empty[hidden] { display: none; }
 .ruler { position: sticky; top: 0; z-index: 5; }
 .track-lane { min-height: 32px; }
+
+/* Round 19: resizable panels, icon tooltip, single import control.
+   Locked defaults are NOT touched here (tool-col 280px, agent-col
+   340px, details-col 300/340px, timeline clamp, workbench grid
+   template) — JS applies sizes via inline styles only. */
+.tool-col { position: relative; }
+.details-col { position: relative; }
+.resize-handle { background: #27272a; z-index: 5; touch-action: none; }
+.resize-handle-v { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+#resizeTool { right: 0; }
+#resizeDetails { left: 0; }
+#resizeAgent { left: 0; }
+.resize-handle-h { flex: 0 0 6px; height: 6px; width: 100%; cursor: row-resize; }
+.resize-handle:hover { background: #52525b; }
+body.resizing, body.resizing * { user-select: none !important; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#importDropzone { cursor: pointer; }
+#importDropzone:focus-visible { outline: 2px solid #06b6d4; outline-offset: 2px; }
+/* Round 19: body-level icon tooltip. The round-18 ::after rule is
+   kept verbatim (old tests lock its strings) but it is clipped by
+   the toolbar's own scroll container and never shows; this fixed
+   div on <body> is the tooltip users actually see. */
+.ui-tooltip { position: fixed; z-index: 100; background: #18181b; color: #fafafa; border: 1px solid #3f3f46; padding: 3px 8px; border-radius: 6px; font-size: 11px; line-height: 1.4; white-space: nowrap; pointer-events: none; }
+.ui-tooltip[hidden] { display: none; }
+
+/* ---------- Round 19 (review batch + real-click batch) ----------
+   Appended overrides only. Locked rules are NOT edited: topbar
+   stays 48px, playhead stays #ef4444 (only its lower part fades),
+   .clip.selected keeps its #06b6d4 outline, .track-lane's own
+   min-height lines (34px/29px/32px) stay verbatim, and the logo
+   stays a data URI in index.html (the snapshot push pipeline is
+   text-only and would corrupt a binary PNG). */
+/* Save indicator next to Edited rev (Ctrl+S flow). */
+.save-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: transparent; margin-left: 8px; vertical-align: middle; }
+.save-dot.saved { background: #10b981; }
+.save-dot.saving { background: #f5a623; animation: saveblink 1s steps(2, start) infinite; }
+@keyframes saveblink { 50% { opacity: 0.25; } }
+.save-label { font-size: 11px; color: #a1a1aa; margin-left: 4px; vertical-align: middle; }
+/* Honest agent badge + drawer close buttons. */
+.agent-dock h3 { display: flex; align-items: center; gap: 8px; }
+.agent-badge { font-size: 11px; font-weight: 400; color: #a1a1aa; border: 1px solid #3f3f46; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.agent-close, .details-close { margin-left: auto; width: 22px; height: 22px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 6px; color: #a1a1aa; font-size: 16px; line-height: 1; cursor: pointer; flex: none; }
+.agent-close:hover, .details-close:hover { color: #fafafa; border-color: #3f3f46; background: #27272a; }
+/* Section label: INSPECTOR only, 11px, uppercase, spaced, muted. */
+.details-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8a8579; display: flex; align-items: center; }
+/* Details as a slide-from-right drawer at narrow widths (under the
+   agent drawer, z-index 30 vs 40). Wide widths are untouched: the
+   column stays a grid item and .open is a no-op there. */
+@media (max-width: 1100px) {
+  .details-col { position: fixed; right: 0; top: 98px; bottom: 0; width: 340px; max-width: 92vw; z-index: 30; transform: translateX(100%); transition: transform .2s ease; }
+  .details-col.open { transform: none; }
+}
+/* Track lanes: slightly lifted tones + empty lanes at 28px via
+   their own class (the .track-lane rule itself is never edited). */
+.track-lane { background: #14141a; border-color: #22222a; }
+.track-row:nth-child(odd) .track-lane { background: #17171e; }
+.track-lane.is-empty { min-height: 28px; }
+/* Clips: softer radius + hairline border; selected ring unchanged. */
+.clip { border-radius: 6px; border-color: rgba(255, 255, 255, .06); }
+/* Playhead: 2px #ef4444 kept; only the lower part fades to 40%. */
+.tl-playhead { background: linear-gradient(to bottom, #ef4444 0%, #ef4444 30%, rgba(239, 68, 68, .4) 100%); }
+/* Section markers on the ruler (Sections toggle). */
+.section-tick { position: absolute; top: 0; bottom: 0; width: 2px; background: #8b5cf6; pointer-events: none; }
+/* Footer hint: ellipsized (nowrap is test-locked) with a max width;
+   the full text lives in the title attribute set by load(). */
+#timelineText { max-width: 480px; }

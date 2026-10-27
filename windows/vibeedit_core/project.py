@@ -393,6 +393,101 @@ def seconds_to_frames(seconds: float, fps) -> int:
     return int(round(seconds * fps_value(fps)))
 
 
+def source_span_to_project_frames(span_source_frames, fps_src, fps_proj) -> int:
+    """Convert a source-frame span to project frames, seconds-first.
+
+    Round 19: the pre-fix code used source frames directly as project
+    frames, doubling durations whenever media fps != project fps
+    (e.g. 6797 frames of 59.94fps footage in a 29.97fps project showed
+    as 226.79s instead of 113.45s). When fps_src is missing (audio
+    has no frame rate) the span is returned unchanged: audio In/Out
+    are already in project frames by construction.
+    """
+    if not fps_src:
+        return int(span_source_frames)
+    return int(round(float(span_source_frames) / fps_value(fps_src)
+                     * fps_value(fps_proj)))
+
+
+def migrate_fps_units(data: dict) -> dict:
+    """One-time fps-unit migration for projects saved before round 19.
+
+    Pre-round-19 clips stored ``dur`` in SOURCE frames (add_clip's
+    default and source_insert passed source spans through), while
+    every consumer (timeline display, server duration, render) reads
+    ``dur`` as PROJECT frames. This converts each video clip's
+    ``dur`` from source frames to project frames and stamps
+    ``fps_units = "project"`` so it never runs twice. ``in`` stays in
+    source frames (render divides it by media fps). Clips whose media
+    lacks fps are left untouched and reported as skipped. New
+    projects carry the stamp from creation and skip this entirely.
+    Stacked ``at`` values get the same treatment: an item placed
+    exactly after a converted clip (at == prev at + prev dur, in
+    pre-migration units) inherited the previous clip's buggy units,
+    so its ``at`` is scaled by the previous clip's ratio. Any other
+    ``at`` (gaps, overlaps, user drags) was already stored in true
+    project frames and is left alone. Returns {"converted": n,
+    "skipped": [item ids], "at_fixed": m}.
+    """
+    if data.get("fps_units") == "project":
+        return {"converted": 0, "skipped": [], "at_fixed": 0}
+    media_by_id = {m.get("id"): m for m in data.get("media", [])}
+    fps_proj = fps_value(data["format"]["fps"])
+    converted = 0
+    skipped = []
+    # Snapshot pre-migration geometry before dur conversion mutates it.
+    old_geom = {}
+    for track in data.get("tracks", []):
+        for item in track.get("items", []):
+            old_geom[id(item)] = (item.get("at"), item.get("dur"))
+    converted_fps = {}
+    for track in data.get("tracks", []):
+        for item in track.get("items", []):
+            medium = media_by_id.get(item.get("media"))
+            if medium is None or medium.get("kind") != "video":
+                continue
+            fps_src = medium.get("fps")
+            if not fps_src:
+                skipped.append(item.get("id"))
+                continue
+            try:
+                src = fps_value(fps_src)
+            except (TypeError, ValueError):
+                skipped.append(item.get("id"))
+                continue
+            if not src or abs(src - fps_proj) < 1e-9:
+                continue
+            item["dur"] = source_span_to_project_frames(
+                int(item["dur"]), fps_src, data["format"]["fps"])
+            converted += 1
+            converted_fps[id(item)] = fps_src
+    # Reflow stacked `at` values (see docstring). Compare OLD geometry
+    # throughout so chained stacks use pre-migration positions.
+    at_fixed = 0
+    for track in data.get("tracks", []):
+        items = track.get("items", [])
+        ordered = sorted(
+            items,
+            key=lambda i: old_geom[id(i)][0]
+            if old_geom[id(i)][0] is not None else 0)
+        for prev, cur in zip(ordered, ordered[1:]):
+            if id(prev) not in converted_fps:
+                continue
+            prev_at_old, prev_dur_old = old_geom[id(prev)]
+            cur_at_old, _ = old_geom[id(cur)]
+            if prev_at_old is None or prev_dur_old is None \
+                    or cur_at_old is None:
+                continue
+            if int(cur_at_old) == int(prev_at_old) + int(prev_dur_old):
+                cur["at"] = source_span_to_project_frames(
+                    int(cur_at_old), converted_fps[id(prev)],
+                    data["format"]["fps"])
+                at_fixed += 1
+    data["fps_units"] = "project"
+    return {"converted": converted, "skipped": skipped,
+            "at_fixed": at_fixed}
+
+
 DEFAULT_TRACKS = [
     {"id": "v1", "kind": "video", "role": "main", "name": "Main", "items": []},
     {"id": "v2", "kind": "video", "role": "overlay", "name": "Overlay", "items": []},
@@ -418,6 +513,9 @@ def new_project(name: str, width: int = 1080, height: int = 1920,
         "markers": [],
         # Phase B2: magnetic Main is ON by default (see set_magnetic).
         "magnetic": True,
+        # Round 19: clip ``dur`` is in PROJECT frames (see
+        # migrate_fps_units); new projects never need migration.
+        "fps_units": "project",
     }
 
 
@@ -698,13 +796,22 @@ class Project:
         if track["kind"] == "text":
             raise ValueError("Cannot place a media clip on a text track")
         if dur is None:
-            # Some containers report no nb_frames even though ffprobe
-            # recorded a duration in seconds — derive frames from it
-            # instead of failing with "duration must be positive".
-            dur = int(medium.get("frames") or 0)
-            if not dur and medium.get("duration"):
+            # Round 19: ``dur`` is PROJECT frames everywhere
+            # downstream (timeline, server duration, render), so a
+            # media default must be converted from source time,
+            # seconds-first. The old code used source frames directly
+            # (``dur = frames``), doubling durations whenever media
+            # fps != project fps. The duration field, when present,
+            # is already in seconds and is the most reliable source.
+            proj_fps = self.data["format"]["fps"]
+            if medium.get("duration"):
                 dur = int(round(float(medium["duration"])
-                              * fps_value(self.data["format"]["fps"])))
+                              * fps_value(proj_fps)))
+            elif medium.get("frames"):
+                dur = source_span_to_project_frames(
+                    int(medium["frames"]), medium.get("fps"), proj_fps)
+            else:
+                dur = 0
         if dur <= 0:
             raise ValueError("Clip duration must be positive")
         if speed <= 0:
@@ -1339,8 +1446,27 @@ class Project:
                      if t["kind"] == want_kind),
                     self.data["tracks"][0]["id"])
         track = self.track(track_id)
-        dur = out_frame - in_frame
+        # Round 19: in/out are SOURCE frames, at/dur are PROJECT
+        # frames. Convert the inserted span once; all overlap math
+        # below (at/end) is in project frames.
+        dur = source_span_to_project_frames(
+            out_frame - in_frame, medium.get("fps"),
+            self.data["format"]["fps"])
         end = at + dur
+
+        def _span_to_item_source(item, span_proj):
+            # A project-frame span consumed from an existing clip,
+            # back to that clip's own source frames (for its ``in``
+            # shift when split/trimmed). Audio has no fps, so its
+            # span is unchanged (old behaviour).
+            try:
+                med = self.media(item["media"])
+            except (KeyError, ValueError):
+                return int(round(span_proj))
+            if not med.get("fps"):
+                return int(round(span_proj))
+            return int(round(float(span_proj) / fps_value(
+                self.data["format"]["fps"]) * fps_value(med["fps"])))
         # Phase B2: a touched clip's linked audio must follow the
         # same cut (trimmed, split, or deleted with its video), so
         # the link never silently desyncs. Overwriting a linked
@@ -1382,7 +1508,8 @@ class Project:
                 left["dur"] = at - istart
                 right = _copy.deepcopy(item)
                 right["id"] = _new_id("c")
-                right["in"] = item["in"] + int(round((end - istart) / speed))
+                right["in"] = item["in"] + _span_to_item_source(
+                    item, (end - istart) / speed)
                 right["dur"] = iend - end
                 right["at"] = end
                 kept.extend([left, right])
@@ -1393,8 +1520,9 @@ class Project:
                     left_p["dur"] = at - istart
                     right_p = _copy.deepcopy(partner)
                     right_p["id"] = _new_id("c")
-                    right_p["in"] = partner.get("in", 0) + int(round(
-                        (end - istart) / p_speed))
+                    right_p["in"] = partner.get("in", 0) + \
+                        _span_to_item_source(
+                            partner, (end - istart) / p_speed)
                     right_p["dur"] = iend - end
                     right_p["at"] = end
                     right_p["linked_video"] = right["id"]
@@ -1415,7 +1543,8 @@ class Project:
             elif iend > end:
                 speed = item.get("speed") or 1.0
                 delta = end - istart
-                item["in"] = item["in"] + int(round(delta / speed))
+                item["in"] = item["in"] + _span_to_item_source(
+                    item, delta / speed)
                 item["dur"] = iend - end
                 item["at"] = end
                 kept.append(item)
@@ -1423,8 +1552,9 @@ class Project:
                     p_speed = partner.get("speed") or 1.0
                     partner_trims.append(
                         (partner, end, iend - end,
-                         int(partner.get("in", 0)) + int(round(
-                             delta / p_speed))))
+                         int(partner.get("in", 0)) +
+                         _span_to_item_source(
+                             partner, delta / p_speed)))
             # else: fully inside the range -> dropped
             else:
                 for p_track, partner in self._link_partners(item):
@@ -2594,9 +2724,24 @@ class Project:
         transitions are returned as ``errors``, not exceptions, so
         an agent can read them and fix the project)."""
         errors: list[str] = []
+        warnings: list[str] = []
         data = self.data
         if data.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
             errors.append(f"Unsupported schema: {data.get('schema')!r}")
+        # Round 19: a video clip whose media has no fps cannot have
+        # its timeline duration verified against the source frame
+        # rate, so it is reported (not silently trusted).
+        media_by_id = {m["id"]: m for m in data.get("media", [])}
+        for track in data["tracks"]:
+            for item in track["items"]:
+                medium = media_by_id.get(item.get("media"))
+                if medium is not None and medium.get("kind") == "video" \
+                        and not medium.get("fps"):
+                    warnings.append(
+                        f"Item {item['id']} references video media "
+                        f"{medium['id']} with unknown fps: its "
+                        f"timeline duration cannot be verified "
+                        f"against the source frame rate")
         mains = [t for t in data["tracks"]
                  if t.get("role") == "main" and t["kind"] == "video"]
         if not mains:
@@ -2673,10 +2818,14 @@ class Project:
                     errors.append(
                         f"Transition {trans.get('id')} references "
                         f"unknown clip {trans.get(key)!r}")
-        return {"ok": not errors, "errors": errors}
+        return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     # -- readouts -----------------------------------------------------
     def timeline_text(self) -> str:
+        # Full readout, unchanged: the MCP timeline_sheet tool and
+        # /api/project return this verbatim, and agents need the
+        # per-clip lines. The UI status bar condenses it for display
+        # in app.js (load()), it does not change this function.
         fps = fps_value(self.fps)
         lines = [f"project {self.data.get('name')} rev {self.rev} "
                  f"{self.width}x{self.height} {fps:g}fps "

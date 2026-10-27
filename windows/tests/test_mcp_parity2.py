@@ -425,19 +425,20 @@ HONEST_SAMPLE = [
     # Round 15: agent_kit_update/later left (now real); their real
     # behaviour is covered by tests/test_round15.py.
     "vibeedit_agent_status", "vibeedit_agent_setup", "vibeedit_agent_setup_show",
-    "vibeedit_agent_restart_tab", "vibeedit_agent_quick_edit", "vibeedit_agent_show_changes",
+    "vibeedit_agent_restart_tab", "vibeedit_agent_show_changes",
+    # Round 19: agent_quick_edit left (now real, alias of timeline_apply).
     "vibeedit_agent_dismiss_changes", "vibeedit_agent_undo_changes", "vibeedit_agent_detach",
     "vibeedit_agent_tools_install",
     "vibeedit_chat_send", "vibeedit_chat_command", "vibeedit_chat_commands",
     "vibeedit_chat_attach", "vibeedit_chat_detach", "vibeedit_chat_reset",
     "vibeedit_chat_status", "vibeedit_chat_transcript",
-    "vibeedit_show_about", "vibeedit_show_commands", "vibeedit_show_shortcuts",
-    "vibeedit_show_settings", "vibeedit_show_plugins", "vibeedit_show_review",
-    "vibeedit_show_history", "vibeedit_show_sections", "vibeedit_show_batch",
-    "vibeedit_show_export", "vibeedit_show_export_progress", "vibeedit_show_updates",
-    "vibeedit_show_assets", "vibeedit_show_agent_kit", "vibeedit_show_doctor",
+    "vibeedit_show_shortcuts", "vibeedit_show_settings",
+    # Round 19: show_about/commands/plugins/review/history/sections/
+    # batch/export/export_progress/updates/assets/agent_kit/doctor
+    # left (now real: dialog-content aliases of the data tools).
     "vibeedit_ui_action", "vibeedit_ui_dialog", "vibeedit_ui_view",
-    "vibeedit_ui_select", "vibeedit_ui_seek", "vibeedit_ui_frame",
+    # Round 19: ui_select/ui_seek left (now real session state ops).
+    "vibeedit_ui_frame",
     "vibeedit_ui_frames", "vibeedit_ui_respond", "vibeedit_ui_actions",
     "vibeedit_playback_toggle", "vibeedit_playback_stop",
     "vibeedit_playback_shuttle_forward", "vibeedit_playback_shuttle_back",
@@ -477,7 +478,8 @@ HONEST_SAMPLE = [
     "vibeedit_clip_send_to_agent",
     
     "vibeedit_app_vibeedit", "vibeedit_app_vibeedit_automation_clients",
-    "vibeedit_app_vibeedit_debug_log", "vibeedit_platforms_get", "vibeedit_context_get",
+    "vibeedit_app_vibeedit_debug_log", "vibeedit_platforms_get",
+    # Round 19: context_get left (now real session/project snapshot).
     "vibeedit_source_toggle_playback", "vibeedit_timeline_header_compact",
     "vibeedit_chat_stop", "vibeedit_view_compare", "vibeedit_view_safe_area",
     ]
@@ -515,7 +517,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 76)  # Round 15: 78 -> 76, agent_kit_update + agent_kit_later became real (see tests/test_round15.py)
+        self.assertEqual(len(honest), 59)  # Round 19: 76 -> 59, show_*/quick_edit/ui_select/ui_seek/context_get became real (see tests/test_round19.py)
 
 
 if __name__ == "__main__":

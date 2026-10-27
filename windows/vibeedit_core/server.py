@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .project import (Project, load_project, save_project, new_project,
                       find_project_file, PROJECT_FILENAME,
-                      write_backup, unique_media_name)
+                      write_backup, unique_media_name, migrate_fps_units)
 from .render import render, probe_media
 
 
@@ -125,6 +125,15 @@ class State:
         found = find_project_file(self.project_dir)
         if found:
             data = load_project(found)
+            # Round 19: migrate pre-fix source-frame durations once,
+            # backing up the pre-migration file first (best effort,
+            # never blocking the open).
+            if migrate_fps_units(data)["converted"]:
+                try:
+                    write_backup(found)
+                except Exception:
+                    pass
+                save_project(data, found)
             return Project(data, self.project_dir), found
         data = new_project("Untitled")
         path = os.path.join(self.project_dir, PROJECT_FILENAME)
@@ -257,6 +266,13 @@ class State:
         os.makedirs(os.path.join(candidate, "media"), exist_ok=True)
         os.makedirs(os.path.join(candidate, "render"), exist_ok=True)
         data = load_project(found)
+        # Round 19: same one-time fps-unit migration as on startup.
+        if migrate_fps_units(data)["converted"]:
+            try:
+                write_backup(found)
+            except Exception:
+                pass
+            save_project(data, found)
         self.project = Project(data, candidate)
         self.path = found
         self.project_dir = candidate
@@ -373,10 +389,16 @@ class State:
                             (t["id"] for t in proj.data["tracks"]
                              if t["kind"] == want_kind),
                             proj.data["tracks"][0]["id"])
-                result = proj.add_clip(op["media"], track_id,
-                                       int(op.get("at", 0)), in_frame,
-                                       out_frame - in_frame,
-                                       float(op.get("speed", 1.0)))
+                # Round 19: in/out are SOURCE frames, dur is PROJECT
+                # frames — convert the span (see project.py).
+                from .project import source_span_to_project_frames
+                medium = proj.media(op["media"])
+                result = proj.add_clip(
+                    op["media"], track_id, int(op.get("at", 0)), in_frame,
+                    source_span_to_project_frames(
+                        out_frame - in_frame, medium.get("fps"),
+                        proj.data["format"]["fps"]),
+                    float(op.get("speed", 1.0)))
             elif kind == "add_marker":
                 result = proj.add_marker(op["text"], int(op["at"]))
             elif kind == "remove_marker":
@@ -739,6 +761,48 @@ def _clip_covering(proj: Project, frame: int) -> tuple[dict, dict]:
     raise ValueError("No clip covers the playhead frame")
 
 
+def _safe_upload_name(filename: str) -> str:
+    """Sanitize an uploaded filename to a plain basename.
+
+    Round 19: strips Windows backslash paths too (os.path.basename
+    on Linux does not split '\\\\'), so a name can never smuggle a
+    directory or collapse to an extension-only fragment.
+    """
+    base = (filename or "").replace("\\", "/").split("/")[-1].strip()
+    return base or "upload.bin"
+
+
+def _find_media_by_sha256(project, project_dir: str,
+                          digest: str) -> dict | None:
+    """Find a media record whose content hash matches ``digest``.
+
+    Records without a hash get one backfilled from their stored file
+    (once, then it persists on the next save), so old projects gain
+    dedupe without re-import. A record whose file no longer exists
+    is never returned: reusing it would point at a missing file.
+    """
+    import hashlib
+    for medium in project.data["media"]:
+        stored = medium.get("sha256")
+        if stored is None:
+            path = os.path.join(project_dir, medium.get("path", ""))
+            if not os.path.isfile(path):
+                continue
+            try:
+                hasher = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for block in iter(lambda: fh.read(1 << 20), b""):
+                        hasher.update(block)
+                stored = medium["sha256"] = hasher.hexdigest()
+            except OSError:
+                continue
+        if stored == digest:
+            path = os.path.join(project_dir, medium.get("path", ""))
+            if os.path.isfile(path):
+                return medium
+    return None
+
+
 def _parse_multipart(body: bytes, boundary: bytes) -> dict[str, tuple[str, bytes]]:
     """Minimal multipart/form-data parser (stdlib only).
 
@@ -754,11 +818,22 @@ def _parse_multipart(body: bytes, boundary: bytes) -> dict[str, tuple[str, bytes
     for chunk in body.split(b"--" + boundary):
         if b"Content-Disposition" not in chunk:
             continue
-        head, _, payload = chunk.partition(b"\r\n\r\n")
-        payload = payload.rsplit(b"\r\n", 1)[0]
+        # Round 19: accept LF-only bodies too (some clients send
+        # \n instead of \r\n). The old code split the head only on
+        # \r\n\r\n, so an LF-only upload produced an empty payload
+        # and a filename polluted with the following headers.
+        head, sep, payload = chunk.partition(b"\r\n\r\n")
+        if not sep:
+            head, sep, payload = chunk.partition(b"\n\n")
+        if not sep:
+            continue
+        if sep == b"\r\n\r\n":
+            payload = payload.rsplit(b"\r\n", 1)[0]
+        else:
+            payload = payload.rsplit(b"\n", 1)[0]
         name = None
         filename = None
-        for line in head.decode(errors="replace").split("\r\n"):
+        for line in head.decode(errors="replace").splitlines():
             line = line.strip()
             if not line.lower().startswith("content-disposition:"):
                 continue
@@ -768,7 +843,11 @@ def _parse_multipart(body: bytes, boundary: bytes) -> dict[str, tuple[str, bytes
                 if piece.startswith("name="):
                     name = piece[5:].strip('"')
                 elif piece.startswith("filename="):
-                    filename = piece[9:].strip('"')
+                    # A filename never contains a line break; cut
+                    # there so a stray header line can never pollute
+                    # it (the old 'media/mp4' failure mode).
+                    filename = piece[9:].strip('"').split("\r")[0] \
+                        .split("\n")[0]
         if name:
             parts[name] = (filename or "", payload)
     return parts
@@ -780,6 +859,8 @@ def make_handler(state: State):
 
         def log_message(self, *args):  # keep the console readable
             pass
+
+
 
         def _send_json(self, obj, status=200):
             data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -1258,7 +1339,8 @@ def make_handler(state: State):
                         media_dir = os.path.join(state.project_dir,
                                                  "media")
                         os.makedirs(media_dir, exist_ok=True)
-                        safe = unique_media_name(media_dir, filename)
+                        safe = unique_media_name(
+                            media_dir, _safe_upload_name(filename))
                         dest = os.path.join(media_dir, safe)
                         with open(dest, "wb") as fh:
                             fh.write(payload)
@@ -1283,19 +1365,39 @@ def make_handler(state: State):
                         media_dir = os.path.join(state.project_dir,
                                                  "media")
                         os.makedirs(media_dir, exist_ok=True)
-                        safe = unique_media_name(media_dir, filename)
-                        dest = os.path.join(media_dir, safe)
-                        with open(dest, "wb") as fh:
-                            fh.write(payload)
-                        info = probe_media(dest)
-                        kind = "video" if info.get("width") else "audio"
-                        medium = state.project.add_media(
-                            f"media/{safe}", kind=kind,
-                            **{k: v for k, v in info.items() if k in
-                               ("width", "height", "fps", "frames",
-                                "duration", "hasAudio")})
-                        state.save()
-                        self._send_json({"ok": True, "media": medium})
+                        # Round 19 dedupe: the same file uploaded
+                        # twice reuses the first media id (content
+                        # hash, not name) and writes no second file.
+                        # A different file with the same name keeps
+                        # the old name-2/name-3 behaviour (its hash
+                        # differs, so dedupe does not affect it).
+                        import hashlib
+                        digest = hashlib.sha256(payload).hexdigest()
+                        existing = _find_media_by_sha256(
+                            state.project, state.project_dir, digest)
+                        if existing is not None:
+                            # Persist any hash backfills from the
+                            # lookup, then reuse without writing.
+                            state.save()
+                            self._send_json({"ok": True,
+                                             "media": existing,
+                                             "reused": True})
+                        else:
+                            safe = unique_media_name(
+                                media_dir, _safe_upload_name(filename))
+                            dest = os.path.join(media_dir, safe)
+                            with open(dest, "wb") as fh:
+                                fh.write(payload)
+                            info = probe_media(dest)
+                            kind = "video" if info.get("width") else "audio"
+                            medium = state.project.add_media(
+                                f"media/{safe}", kind=kind,
+                                sha256=digest,
+                                **{k: v for k, v in info.items() if k in
+                                   ("width", "height", "fps", "frames",
+                                    "duration", "hasAudio")})
+                            state.save()
+                            self._send_json({"ok": True, "media": medium})
                     else:
                         self._send_json({"error": "Not found"}, 404)
             except (ValueError, KeyError, FileNotFoundError, RuntimeError) as exc:
@@ -1317,10 +1419,30 @@ def open_browser(url: str) -> bool:
         return False
 
 
+class QuietDisconnectServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that stays silent on client disconnects.
+
+    Round 19: closing the browser tab mid-response raises
+    ConnectionResetError/BrokenPipeError in wfile.write, and the
+    default BaseServer.handle_error prints a traceback for every tab
+    close. (The override belongs here, on the server: BaseRequest-
+    Handler has no handle_error, so overriding it on the handler
+    would never run.) Only those two disconnect errors are
+    swallowed; every other handler error still prints its traceback.
+    """
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def run_server(project_dir: str | None, port: int = 8000,
                open_browser_flag: bool = False) -> None:
     state = State(project_dir)
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(state))
+    server = QuietDisconnectServer(("127.0.0.1", port),
+                                   make_handler(state))
     url = f"http://127.0.0.1:{port}/"
     print(f"VibeEdit Windows MVP running at {url}")
     print(f"Project folder: {state.project_dir}")

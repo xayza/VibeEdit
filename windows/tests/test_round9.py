@@ -415,8 +415,8 @@ class RegistryCountTest(unittest.TestCase):
                   if (t.get("description") or "").startswith(
                       "Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(honest), 76)  # Round 15: 78 -> 76
-        self.assertEqual(len(TOOLS) - len(honest), 403)
+        self.assertEqual(len(honest), 59)  # Round 19: 76 -> 59
+        self.assertEqual(len(TOOLS) - len(honest), 420)
         for name in ("vibeedit_clip_backdrop", "vibeedit_run_dismiss",
                      "vibeedit_run_toggle", "vibeedit_run_follow",
                      "vibeedit_run_fix_issues",

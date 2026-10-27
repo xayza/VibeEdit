@@ -55,18 +55,20 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 15; UI round 17)
+## Current status (honest, full-parity round 19; UI round 19)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **403
-  real-operation tools and 76 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **420
+  real-operation tools and 59 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
   real aliases sharing handlers, as in the original's own
   shared-handler design), and round 15 re-ran that check with the
-  same result; what remains genuinely unported is listed
-  honestly in `windows/PARITY.md`.
+  same result; round 19 converted 17 more honest tools to real
+  (13 show_* dialog aliases, agent_quick_edit, and 3 session-state
+  tools ui_select/ui_seek/context_get); what remains genuinely
+  unported is listed honestly in `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +
   playhead, Export CTA gradient softened to #0e7490→#be185d, clip
@@ -80,7 +82,17 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   agent drawer, split library, aspect-correct preview canvas, CSS
   tokens/dedup) and added two keyboard-shortcut batches (mapped keys
   listed in windows/README.md, unmapped keys honestly reported, no
-  fakes); 663 tests OK.
+  fakes); round 19 added draggable panel resizing (tool/details/
+  timeline/agent, persisted in localStorage, double-click reset),
+  a clipping-proof body-level icon tooltip, a single "+ Nhập"
+  import control, and fixed a blocking fps bug (source-frame
+  durations used as project frames doubled 60fps clips in 30fps
+  projects — now converted both sides plus a one-time migration
+  for old projects), upload dedupe by SHA-256, and a batch of
+  real-click fixes from Windows testing (the `post is not defined`
+  bug killing 14 buttons, magnetic toggle, go-to-start, voice
+  backend checks, undo/redo status, tab-close server tracebacks);
+  target + full suite results are in windows/README.md.
 - **Working:** project/media/timeline editing (cut, trim, move,
   copy/paste, split, undo/redo, markers, close gaps), full magnetic
   Main block-move + linked audio, source and export preview, audio

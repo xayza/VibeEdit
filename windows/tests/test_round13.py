@@ -212,5 +212,5 @@ class TestRound13Audit(unittest.TestCase):
                      if t.get("description", "").startswith(
                          "Not available"))
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(honest, 76)  # Round 15: 78 -> 76
-        self.assertEqual(len(TOOLS) - honest, 403)
+        self.assertEqual(honest, 59)  # Round 19: 76 -> 59
+        self.assertEqual(len(TOOLS) - honest, 420)

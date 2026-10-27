@@ -108,10 +108,15 @@ icon transition nhỏ ở điểm nối; tên dài cắt bằng "…".
 - Font stack hệ thống Inter/SF Pro, không tải font ngoài: ĐẠT.
 - Accent neon chỉ pink #ec4899, cyan #06b6d4, purple #8b5cf6, green
   #10b981; playhead đỏ #ef4444: ĐẠT; không còn viền trắng (đã sửa cả
-  playhead thước trắng thành đỏ).
-- Toolbar icon tối giản + CTA Export Video gradient cyan→pink, góc
-  phải, bo góc: ĐẠT (SVG inline + `.sr-only` giữ nhãn cho test và
-  trình đọc màn hình).
+  playhead thước trắng thành đỏ). Vòng 16 hài hòa lại: chrome về
+  trung tính (nút primary #1e1e24 chữ trắng, không glow; vạch tiêu
+  đề vùng #52525b), cyan chỉ còn ở active/selected/focus + CTA +
+  màu clip + playhead; CTA dịu thành #0e7490→#be185d; clip mờ fill
+  0.08 + viền 0.45.
+- Toolbar icon tối giản + CTA Export Video gradient (vòng 14:
+  cyan→pink; vòng 16 dịu thành #0e7490→#be185d), góc phải, bo góc:
+  ĐẠT (SVG inline + `.sr-only` giữ nhãn cho test và trình đọc màn
+  hình).
 - Media Library grid 3 cột, thumbnail bo 6px, badge thời lượng nền
   đen mờ: ĐẠT (badge lấy từ duration thật của media).
 - Player khung đen, điều khiển dưới, timecode trắng nhỏ mm:ss.cs:
@@ -127,6 +132,9 @@ icon transition nhỏ ở điểm nối; tên dài cắt bằng "…".
   (853px hiệu dụng, dưới chiều rộng tối thiểu 1161pt của app gốc)
   preview bị bóp hẹp nhưng trang vẫn không cuộn ngang, Inspector và
   timeline còn nguyên; gập Agent trong Settings để lấy lại chỗ.
+- Vòng 16: cột Agent 300px→340px (tổng ở 1280 vẫn ≤1280). Vòng 17:
+  rail dọc thành hàng ngang trên cùng, thước và lane dùng chung gốc
+  (margin-left thước 138px, 94px ở ≤720px) nên playhead thẳng hàng.
 
 ## 8. Ngôn ngữ giao diện (quyết định, vòng 14)
 
@@ -171,3 +179,109 @@ thư mục local, thiếu auto-update bản phát hành đã ký; plugin hiện 
 tìm trong máy local, thiếu fetch registry — lưu ý: registry TỒN TẠI
 (static `registry.json` trong bashcut-plugins), bản ghi cũ nói "không
 tồn tại" là sai. Cả hai xếp SAU vòng giao diện, dưới dạng chức năng.
+
+## 11. Bố cục vòng 18 (bổ sung sau, không sửa các mục 1–10)
+
+- **Topbar đúng 48px một hàng, không wrap:** `#status` dời khỏi header
+  thành toast cố định tự ẩn sau 4s; các mục phụ gom vào
+  `<details class="top-more">` trong header; hai nút toggle Agent và
+  Inspector nằm NGOÀI top-more nên luôn nhìn thấy được.
+- **Agent là drawer phải cố định:** top 98px, rộng 340px (giữ nguyên
+  giá trị khóa vòng 16), có backdrop, đóng bằng Esc / click backdrop /
+  nút X (vòng 19); mở mặc định khi viewport ≥1600px, trạng thái lưu
+  localStorage; drawer giữ nguyên nội dung dock (lệnh MCP + lệnh an
+  toàn), đúng mô hình agent ngoài qua MCP/CLI của app gốc.
+- **Thư viện tách riêng:** dropzone tách khỏi danh sách media (giữ
+  đúng 3 cột, nút "+" overlay khi hover/focus); vòng 19 gộp tiếp thành
+  MỘT nút "+ Nhập" duy nhất (dropzone là nút, input file ẩn bằng
+  class visually-hidden, submit ẩn khỏi mắt nhìn nhưng vẫn trong DOM).
+- **Preview canvas:** đúng tỉ lệ project qua `--project-aspect`, cao
+  tối đa min(52vh,600px); vòng 19 thêm poster: chưa có bản xuất thì
+  hiện frame đầu của clip main qua `/api/media/<id>` sẵn có (không
+  endpoint mới), không còn hộp đen; chỉ còn một thông báo trống chính
+  (`#previewEmpty`), nhãn phụ ẩn khi trống.
+- **Phím tắt vòng 18:** Ctrl+N/O/S/Z/Shift+Z/Y, Delete, Space, J (tua
+  lùi 1 giây, không phải phát ngược), K, L, mũi tên ±1 frame,
+  Alt+Shift+C, Ctrl+E/T, Shift+Z, Ctrl+K tách, Ctrl+Shift+K tách tất
+  cả, S = Magnetic, Shift+A/A, Shift+Backspace khít khoảng trống,
+  Ctrl+R bảng tốc độ, Shift+B đường cong tốc độ.
+- **Giá trị khóa phải giữ (vòng 18):** tool-col 280px, agent-col 340px,
+  track-label 128px, gap 10px, ruler margin-left 138px (94px ở
+  ≤720px), timeline-wrap padding ngang 14px, mediaList đúng 3 cột,
+  details-col 300/340px, workbench grid
+  `280px minmax(0, 1fr) auto`, thứ tự rail, nav tool-rail trước
+  workbench, agent-col trước tool-col, details-col trước timeline-wrap.
+
+## 12. Vòng 19: tay kéo đổi cỡ, tooltip icon, sửa từ test thật
+
+- **Tay kéo đổi cỡ (kéo thả, Pointer Events):** giữa tool-col và cột
+  giữa (đổi rộng cột trái), giữa cột giữa và details-col (đổi rộng
+  Details), giữa workbench và timeline (đổi cao timeline), cạnh trái
+  drawer Agent (đổi rộng drawer, không xung đột logic đóng/mở).
+  Mặc định không đổi (280/340/300-340px, timeline
+  clamp(240px,32vh,340px)); đổi cỡ chỉ bằng inline style do JS đặt,
+  không sửa rule CSS bị khóa. Giới hạn: trái 180–480px, Details
+  220–520px, timeline 180px–60vh, drawer 280–520px. Nhớ cỡ qua
+  localStorage key `vibeedit_panel_sizes` (kiểm tra hợp lệ trước khi
+  áp, hỏng thì dùng mặc định); double-click tay kéo trả vùng đó về
+  mặc định.
+- **Tooltip nút icon:** nguyên nhân thật vòng 18 — CSS tooltip
+  `::after` đặt DƯỚI nút nhưng toolbar có overflow-x auto nên cả hai
+  trục đều thành scroll container, tooltip bị chính toolbar cắt
+  (z-index không thắng được overflow clipping). Sửa: một
+  `#uiTooltip` duy nhất do JS tạo ở cấp body, position fixed,
+  z-index 100, nội dung lấy từ aria-label, hiện khi hover và khi
+  focus bàn phím, ẩn khi rời chuột/phím, khi pointerdown, khi scroll;
+  không thêm thuộc tính title (tránh tooltip đôi). Rule CSS cũ giữ
+  nguyên văn vì test khóa.
+- **Sửa từ test thật trên Windows:** helper `post` duy nhất ở cấp
+  top-level (trước đây chỉ sống trong một IIFE nên 14 nút
+  Knowledge/Vision/Plugin chết với `post is not defined`); Magnetic
+  toggle nay đảo thật + trạng thái tiếng Việt; "Về đầu" luôn về
+  frame 0; Undo/Redo báo trạng thái mới kèm rev; Sections thành
+  toggle thật (aria-pressed + marker trên ruler); Voice kiểm tra
+  backend thật (voice_check) trước khi tạo, thiếu thì báo rõ, không
+  im lặng; đổi tên project commit bằng Enter + báo tên mới; nhịp
+  0-beat báo rõ đã chạy nhưng không tìm thấy nhịp; ducking và đổi
+  tên đã kiểm chứng persist thật (handler + status đã có, không
+  phải bug mới); Ollama vốn đã báo trung thực "chưa kết nối trong
+  app"; server nuốt lặng ConnectionResetError/BrokenPipeError khi
+  đóng tab (override ở tầng server, vì handler không có
+  handle_error).
+- **Bug chặn fps (làm trước mọi mục khác):** `dur` là frame PROJECT
+  ở mọi nơi tiêu thụ (timeline, server duration, render) nhưng
+  add_clip mặc định, source_insert và overwrite_insert cũ dùng frame
+  NGUỒN làm dur → clip 60fps trong project 30fps dài gấp đôi. Sửa:
+  quy đổi seconds-first (frame_nguồn / fps_nguồn × fps_project) ở
+  cả client (mediaDurFrames, mediaDurationS) và server; `in` vẫn là
+  frame nguồn (render chia cho fps media); migration một lần khi mở
+  project cũ (đổi dur của clip video, đóng dấu `fps_units`,
+  backup file trước migration, clip thiếu fps media thì bỏ qua và
+  báo skipped); project test của người dùng (2 clip 59,94fps, đang
+  hiện 453s) sau pull sẽ hiện ~226,9s mà không cần import lại.
+  Cùng gốc: upload dedupe theo SHA-256 (cùng file → dùng lại media
+  id cũ, báo rõ; khác file trùng tên vẫn name-2/name-3), parser
+  multipart chịu cả LF (lỗi cũ lưu file tên "mp4" do header lọt vào
+  tên), tên file giữ nguyên sau sanitize (cả đường dẫn Windows).
+- **Làm đẹp / chi tiết (chỉ phần không vướng test khóa):** clip
+  radius 6 + viền rgba(255,255,255,.06), lane #14141a / lẻ #17171e /
+  kẻ #22222a, playhead giữ #ef4444 (chỉ phần dưới mờ 40%), nhãn
+  "INSPECTOR" 11px uppercase letter-spacing .08em màu #8a8579,
+  topbar GIỮ 48px (test khóa, không đổi sang 44px), logo GIỮ data
+  URI (pipeline đẩy snapshot text-only làm hỏng PNG nhị phân),
+  toolbar đã là SVG nên không còn glyph Unicode để đổi (giữ
+  stroke-width 2 cho cùng bộ topbar), nút zoom −/+ bước theo đúng
+  pxPerSec (kẹp 10–200), hint footer có max-width + title đủ text
+  (giữ nowrap vì test khóa), nút "Mở Cài đặt" (btnDetailsModify)
+  vốn đã nối vào Settings nên không xóa, chỉ báo "Đã lưu" sau khi
+  POST /api/save thành công thật (lúc ghi hiện "Đang lưu…" nhấp
+  nháy), lane trống 28px bằng class riêng `.is-empty`, ruler chỉ
+  render tick trong vùng nhìn thấy (tick phụ 500ms khi đủ thưa).
+- **Dừng do test khóa (không sửa test):** chữ phụ tiếng Anh trong
+  dropzone ("Drag and drop videos, photos, and audio files here")
+  GIỮ NGUYÊN vì test_capcut_ui.py:90 và test_round18.py:115 khóa
+  chuỗi đó.
+- **Ghi chú sửa mục 10 (không sửa nội dung mục 10):** mục 10 viết
+  trước vòng 15 nên đã cũ — skills hiện là 21 (không phải 4) và
+  agent_kit_update/later đã thật từ vòng 15; xem PARITY vòng 19.
+

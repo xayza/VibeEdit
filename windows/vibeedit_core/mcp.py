@@ -25,7 +25,8 @@ import json
 import sys
 
 from .project import (Project, load_project, save_project, find_project_file,
-                      write_backup,
+                      write_backup, migrate_fps_units,
+                      source_span_to_project_frames,
                       PROJECT_FILENAME)
 
 TOOLS = [
@@ -489,7 +490,7 @@ TOOLS.extend([
     {"name": "vibeedit_agent_setup", "description": "Not available in this Windows build: no agent terminal setup exists in this headless server."},
     {"name": "vibeedit_agent_setup_show", "description": "Not available in this Windows build: no agent setup view exists in this headless server."},
     {"name": "vibeedit_agent_restart_tab", "description": "Not available in this Windows build: no agent tab exists in this headless server."},
-    {"name": "vibeedit_agent_quick_edit", "description": "Not available in this Windows build: no quick-edit UI exists in this headless server; edits go through timeline_apply."},
+    {"name": "vibeedit_agent_quick_edit", "description": "Apply quick timeline edits (alias of timeline_apply; takes an ops list of add_clip/add_text/trim/split/move/delete/set_speed/set_fade/set_volume/set_text/set_keyframes/set_color/add_marker/remove_marker/add_transition/remove_transition; no quick-edit UI exists here)."},
     {"name": "vibeedit_agent_show_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server; use timeline/project reads and the backup file."},
     {"name": "vibeedit_agent_dismiss_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server."},
     {"name": "vibeedit_agent_undo_changes", "description": "Not available in this Windows build: no agent-changes view exists in this headless server; use timeline_undo."},
@@ -503,26 +504,26 @@ TOOLS.extend([
     {"name": "vibeedit_chat_reset", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_chat_status", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_chat_transcript", "description": "Not available in this Windows build: no chat session exists in this headless server."},
-    {"name": "vibeedit_show_about", "description": "Not available in this Windows build: no About dialog exists in this headless server; use app_version for version data."},
-    {"name": "vibeedit_show_commands", "description": "Not available in this Windows build: no commands dialog exists in this headless server; use mcp_tools_list."},
+    {"name": "vibeedit_show_about", "description": "About dialog content for this headless build: same data as app_version (MCP server, Python and project-schema versions); no dialog window exists here."},
+    {"name": "vibeedit_show_commands", "description": "Commands dialog content for this headless build: same list as mcp_tools_list (tools + count); no dialog window exists here."},
     {"name": "vibeedit_show_shortcuts", "description": "Not available in this Windows build: no shortcuts dialog exists in this headless server."},
     {"name": "vibeedit_show_settings", "description": "Not available in this Windows build: no settings dialog exists in this headless server."},
-    {"name": "vibeedit_show_plugins", "description": "Not available in this Windows build: no plugins dialog exists in this headless server; use plugins_list."},
-    {"name": "vibeedit_show_review", "description": "Not available in this Windows build: no review dialog exists in this headless server; use review_run/review_get for the data."},
-    {"name": "vibeedit_show_history", "description": "Not available in this Windows build: no history dialog exists in this headless server; use project_history."},
-    {"name": "vibeedit_show_sections", "description": "Not available in this Windows build: no sections dialog exists in this headless server."},
-    {"name": "vibeedit_show_batch", "description": "Not available in this Windows build: no batch dialog exists in this headless server; use batch_status."},
-    {"name": "vibeedit_show_export", "description": "Not available in this Windows build: no export dialog exists in this headless server; use export_status."},
-    {"name": "vibeedit_show_export_progress", "description": "Not available in this Windows build: no export progress view exists in this headless server; exports here are synchronous."},
-    {"name": "vibeedit_show_updates", "description": "Not available in this Windows build: no updates dialog exists in this headless server; no updater is configured in this build."},
-    {"name": "vibeedit_show_assets", "description": "Not available in this Windows build: no assets dialog exists in this headless server; use media_list."},
-    {"name": "vibeedit_show_agent_kit", "description": "Not available in this Windows build: no agent-kit view exists in this headless server; the skills store is another agent's job."},
-    {"name": "vibeedit_show_doctor", "description": "Not available in this Windows build: no doctor dialog exists in this headless server; use doctor_run for the check data."},
+    {"name": "vibeedit_show_plugins", "description": "Plugins dialog content for this headless build: same list as plugins_list (discovered plugins + enable state); no dialog window exists here."},
+    {"name": "vibeedit_show_review", "description": "Review dialog content for this headless build: same data as review_get (validation, stats, last export); no dialog window exists here."},
+    {"name": "vibeedit_show_history", "description": "History dialog content for this headless build: same data as project_history (revision, .bak file, backups/ folder); no dialog window exists here."},
+    {"name": "vibeedit_show_sections", "description": "Sections dialog content for this headless build: same list as markers_list (sections are markers in this port, shown by the timeline Sections button); no dialog window exists here."},
+    {"name": "vibeedit_show_batch", "description": "Batch dialog content for this headless build: same data as batch_status (queued folders + last results); no dialog window exists here."},
+    {"name": "vibeedit_show_export", "description": "Export dialog content for this headless build: same data as export_status (last export report or null); no dialog window exists here."},
+    {"name": "vibeedit_show_export_progress", "description": "Export progress content for this headless build: same data as export_status; exports here are synchronous, so there is no in-progress state to report."},
+    {"name": "vibeedit_show_updates", "description": "Updates dialog content for this headless build: same data as app_update_check (current version + channel status); no dialog window exists here."},
+    {"name": "vibeedit_show_assets", "description": "Assets dialog content for this headless build: same list as media_list (project media); no dialog window exists here."},
+    {"name": "vibeedit_show_agent_kit", "description": "Agent-kit dialog content for this headless build: same data as agent_kit_check (kit folder, installed skills, installed version, releases channel); no dialog window exists here."},
+    {"name": "vibeedit_show_doctor", "description": "Doctor dialog content for this headless build: same data as doctor_run (Python/FFmpeg/FFprobe environment check); no dialog window exists here."},
     {"name": "vibeedit_ui_action", "description": "Not available in this Windows build: no live UI session exists for this headless server to act on."},
     {"name": "vibeedit_ui_dialog", "description": "Not available in this Windows build: no live UI session exists for this headless server to show a dialog in."},
     {"name": "vibeedit_ui_view", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
-    {"name": "vibeedit_ui_select", "description": "Not available in this Windows build: no live UI selection exists in this headless server; use timeline_select_all for the server selection."},
-    {"name": "vibeedit_ui_seek", "description": "Not available in this Windows build: no live player exists in this headless server; use playhead_* tools for the session playhead."},
+    {"name": "vibeedit_ui_select", "description": "Set the server session selection to the given timeline item ids (validated against the open project; unknown ids raise); with no items argument, returns the current selection. Selection is session state, reset on open; clip_backdrop defaults to it."},
+    {"name": "vibeedit_ui_seek", "description": "Set the server session playhead to an absolute frame (frame int, clamped at 0); returns the new frame. Same session playhead the playhead_* step tools move."},
     {"name": "vibeedit_ui_frame", "description": "Not available in this Windows build: no live player frame exists in this headless server; use media_frame for a media first frame."},
     {"name": "vibeedit_ui_frames", "description": "Not available in this Windows build: no live player frames exist in this headless server."},
     {"name": "vibeedit_ui_respond", "description": "Not available in this Windows build: no live UI session exists for this headless server to respond in."},
@@ -644,7 +645,7 @@ TOOLS.extend([
     {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Not available in this Windows build: no app-level automation clients exist in this headless server."},
     {"name": "vibeedit_app_vibeedit_debug_log", "description": "Not available in this Windows build: no app debug log is kept by this headless server."},
     {"name": "vibeedit_platforms_get", "description": "Not available in this Windows build: no platform-client registry exists in this headless server."},
-    {"name": "vibeedit_context_get", "description": "Not available in this Windows build: no live editor context exists in this headless server; use project_get, timeline_get and the playhead_* tools."},
+    {"name": "vibeedit_context_get", "description": "Live editor context snapshot for this headless build: project name/rev, session playhead, selection, zoom, source marks/frame, track/item counts, duration and markers — all read from the open project and the server session, never invented."},
     {"name": "vibeedit_source_toggle_playback", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
     {"name": "vibeedit_timeline_header_compact", "description": "Not available in this Windows build: no timeline header UI exists in this headless server."},
     {"name": "vibeedit_vision_cutout", "description": "Cut out the foreground of an image with OpenCV grabCut (raises a clear error naming the missing backend when OpenCV is absent)."},
@@ -714,6 +715,10 @@ class MCPServer:
         self.project = Project(data, os.path.dirname(os.path.abspath(found)))
         self.path = found
         self._needs_first_backup = True
+        # Round 19: one-time fps-unit migration (backs up the
+        # pre-migration file via the first-save rule, then saves).
+        if migrate_fps_units(data)["converted"]:
+            self._save()
         self.playhead_frame = 0
         self.selection = []
         self.source_marks = {}
@@ -907,6 +912,23 @@ class MCPServer:
         # that already exist under their vision_* names.
         "vibeedit_media_ocr": "vibeedit_vision_text",
         "vibeedit_media_subjects": "vibeedit_vision_faces",
+        # Round 19 aliases: show_* dialog content is the underlying
+        # data tool's output (no dialog window exists in this headless
+        # server); agent_quick_edit applies edits through timeline_apply.
+        "vibeedit_show_about": "vibeedit_app_version",
+        "vibeedit_show_commands": "vibeedit_mcp_tools_list",
+        "vibeedit_show_plugins": "vibeedit_plugins_list",
+        "vibeedit_show_history": "vibeedit_project_history",
+        "vibeedit_show_assets": "vibeedit_media_list",
+        "vibeedit_show_batch": "vibeedit_batch_status",
+        "vibeedit_show_export": "vibeedit_export_status",
+        "vibeedit_show_export_progress": "vibeedit_export_status",
+        "vibeedit_show_review": "vibeedit_review_get",
+        "vibeedit_show_doctor": "vibeedit_doctor_run",
+        "vibeedit_show_agent_kit": "vibeedit_agent_kit_check",
+        "vibeedit_show_updates": "vibeedit_app_update_check",
+        "vibeedit_show_sections": "vibeedit_markers_list",
+        "vibeedit_agent_quick_edit": "vibeedit_timeline_apply",
     }
 
     def _touch_agent_status(self) -> None:
@@ -2351,10 +2373,15 @@ class MCPServer:
                         (t["id"] for t in proj.data["tracks"]
                          if t["kind"] == want_kind),
                         proj.data["tracks"][0]["id"])
-            result = proj.add_clip(args["media"], track_id,
-                                   int(args.get("at", 0)), in_frame,
-                                   out_frame - in_frame,
-                                   float(args.get("speed", 1.0)))
+            # Round 19: in/out are SOURCE frames, dur is PROJECT
+            # frames — convert the span (see project.py).
+            medium = proj.media(args["media"])
+            result = proj.add_clip(
+                args["media"], track_id, int(args.get("at", 0)), in_frame,
+                source_span_to_project_frames(
+                    out_frame - in_frame, medium.get("fps"),
+                    proj.data["format"]["fps"]),
+                float(args.get("speed", 1.0)))
             self._save()
             return result
         if name == "vibeedit_close_gaps":
@@ -2688,6 +2715,51 @@ class MCPServer:
             self.playhead_frame = max(
                 0, self.playhead_frame - int(round(self._fps_value(proj))))
             return {"frame": self.playhead_frame}
+        if name == "vibeedit_ui_select":
+            # Round 19: targeted session selection (timeline_select_all
+            # selects everything; this sets exactly the given items).
+            if args.get("items") is None:
+                return {"selection": list(self.selection)}
+            proj = self._require()
+            known = {i["id"] for t in proj.data["tracks"]
+                     for i in t["items"]}
+            wanted = [str(i) for i in args["items"]]
+            unknown = [i for i in wanted if i not in known]
+            if unknown:
+                raise ValueError(
+                    f"ui_select: unknown timeline items: {unknown}")
+            self.selection = wanted
+            return {"selection": list(self.selection)}
+        if name == "vibeedit_ui_seek":
+            # Round 19: absolute set for the same session playhead the
+            # playhead_* step tools move (they only step relatively).
+            if "frame" not in args:
+                raise ValueError("ui_seek: pass frame (int, >= 0)")
+            try:
+                frame = int(args["frame"])
+            except (TypeError, ValueError):
+                raise ValueError("ui_seek: frame must be an int")
+            self.playhead_frame = max(0, frame)
+            return {"frame": self.playhead_frame}
+        if name == "vibeedit_context_get":
+            # Round 19: headless equivalent of live editor context — a
+            # snapshot assembled from the open project + session state.
+            proj = self._require()
+            tracks = proj.data["tracks"]
+            items = [i for t in tracks for i in t["items"]]
+            return {
+                "name": proj.data.get("name"),
+                "rev": proj.rev,
+                "playhead_frame": self.playhead_frame,
+                "selection": list(self.selection),
+                "zoom_px_per_s": self.zoom_px_per_s,
+                "source_frame": self.source_frame,
+                "source_marks": dict(self.source_marks),
+                "tracks": len(tracks),
+                "items": len(items),
+                "duration_seconds": round(proj.duration_seconds(), 3),
+                "markers": proj.data.get("markers", []),
+            }
         if name == "vibeedit_layer_add_video":
             proj = self._require()
             track = proj.add_track("video", args.get("role", ""),
