@@ -15,38 +15,25 @@
     <span id="projectRev" class="rev-label">Edited rev 0</span>
     <button id="btnUndo">Undo</button>
     <button id="btnRedo">Redo</button>
-    <button id="btnExportReport" class="secondary">Export report</button>
+    <button id="btnExportReport" class="secondary">Export report</button><button id="btnPlugins" class="secondary" title="Plugin hook trong windows/plugins/">Plugins</button><button id="btnReviewTop" class="secondary" title="Mở Review">Review</button>
     <button id="btnExportDraft" class="secondary">Export draft</button>
     <label>Tỉ lệ <select id="formatPreset"><option value="1920x1080">16:9</option><option value="1080x1920">9:16</option><option value="1080x1080">1:1</option><option value="1080x1350">4:5</option><option value="1080x1440">3:4</option><option value="1440x1080">4:3</option><option value="1920x810">21:9</option><option value="custom">Tùy chỉnh…</option></select></label><button id="btnSettings" title="Cài đặt">⚙</button><button id="btnExportFull" class="primary">Export video</button>
   </div>
   <div id="status" class="status"></div>
 </header>
-<nav class="tool-toolbar" aria-label="Editor tools">
-<button type="button" class="tool-btn active" data-tab="media"><span class="tool-icon">🎬</span><span>Media</span></button>
-<button type="button" class="tool-btn" data-tab="voice"><span class="tool-icon">🎙</span><span>Voice</span></button>
-<button type="button" class="tool-btn" data-tab="audio"><span class="tool-icon">🎧</span><span>Audio</span></button>
-<button type="button" class="tool-btn" data-tab="text"><span class="tool-icon">T</span><span>Text</span></button>
-<button type="button" class="tool-btn" data-tab="stickers"><span class="tool-icon">✨</span><span>Stickers</span></button>
-<button type="button" class="tool-btn" data-tab="effects"><span class="tool-icon">★</span><span>Effects</span></button>
-<button type="button" class="tool-btn" data-tab="transitions"><span class="tool-icon">⇄</span><span>Transitions</span></button>
-<button type="button" class="tool-btn" data-tab="captions"><span class="tool-icon">📄</span><span>Captions</span></button>
-<button type="button" class="tool-btn" data-tab="filters"><span class="tool-icon">◎</span><span>Filters</span></button>
-<button type="button" class="tool-btn" data-tab="effects"><span class="tool-icon">★</span><span>Adjustment</span></button>
-<button type="button" class="tool-btn" data-tab="templates"><span class="tool-icon">📁</span><span>Templates</span></button>
-<button type="button" class="tool-btn" data-tab="ai"><span class="tool-icon">✦</span><span>AI</span></button>
-</nav>
 <div class="workbench">
   <div class="tool-col">
     <nav class="tool-rail" aria-label="Library menu">
-<button type="button" class="rail-btn" data-tab="media">Import</button>
 <button type="button" class="rail-btn" data-tab="media">Media</button>
+<button type="button" class="rail-btn" data-tab="audio">Audio</button>
+<button type="button" class="rail-btn" data-tab="text">Text</button>
+<button type="button" class="rail-btn" data-tab="stickers">Stickers</button>
+<button type="button" class="rail-btn" data-tab="effects">Effects</button>
+<button type="button" class="rail-btn" data-tab="transitions">Transitions</button>
+<button type="button" class="rail-btn" data-tab="filters">Filters</button>
 <button type="button" class="rail-btn" data-tab="voice">Voice</button>
 <button type="button" class="rail-btn" data-action="timeline">Timeline</button>
-<button type="button" class="rail-btn" data-tab="templates">Subprojects</button>
-<button type="button" class="rail-btn" data-tab="media">Yours</button>
-<button type="button" class="rail-btn" data-tab="ai">Generate</button>
-<button type="button" class="rail-btn" data-tab="templates">Spaces</button>
-<button type="button" class="rail-btn" data-tab="media">Library</button>
+<button type="button" class="rail-btn" data-tab="templates">More</button>
 </nav>
     <div class="tool-panels">
 <section class="panel tool-panel" data-panel="media">
@@ -65,7 +52,8 @@
       <label>Duration (frames) <input id="addDur" type="number" placeholder="whole media"></label>
       <label>Speed <input id="addSpeed" type="number" step="0.25" value="1"></label>
       <button type="submit" class="primary">Add clip</button>
-    </form><div class="create-tools"><p class="create-tools-title">No media? Create with these tools</p><div class="create-cards"><button type="button" class="create-card" data-tab="ai">Generate</button><button type="button" class="create-card" data-tab="ai">AI avatars</button><button type="button" class="create-card" disabled title="Recording is not available in VibeEdit yet">Record</button></div></div>
+      <button type="button" id="btnAddClipQuick" class="secondary" title="Thêm file đang chọn vào timeline, tự chọn vị trí trống">Thêm vào timeline (tự chọn vị trí)</button>
+    </form><div id="mediaAddStatus" class="media-add-status"></div><div class="create-tools"><p class="create-tools-title">No media? Create with these tools</p><div class="create-cards"><button type="button" class="create-card" data-tab="ai">Generate</button><button type="button" class="create-card" data-tab="ai">AI avatars</button><button type="button" class="create-card" disabled title="Recording is not available in VibeEdit yet">Record</button></div></div>
 </section>
 <section class="panel tool-panel" data-panel="voice" hidden>
 <h3>Voiceover</h3>
@@ -177,7 +165,7 @@
     </form><button id="btnSrtExport" class="secondary">Export Captions as SRT</button><form id="karaokeForm">
       <label>Selected text item is used. Words JSON: [{"text":"Hello","start":0,"end":1}] <textarea id="karaokeWords" rows="2" placeholder='[{"text":"Hello","start":0,"end":1}]'></textarea></label>
       <button type="submit" class="primary">Add karaoke timings to selected item</button>
-    </form><button id="btnKaraokeAss" class="secondary">Export karaoke as .ass</button>
+    </form><button id="btnKaraokeAss" class="secondary">Export karaoke as .ass</button><form id="transcribeForm"><label>Media <select id="transcribeMedia" required></select></label><label>Model <select id="transcribeModel"><option value="tiny">tiny (nhẹ nhất)</option><option value="small">small</option></select></label><button type="submit" class="primary">Transcribe thành phụ đề (faster-whisper)</button><p><small>Cần cài faster-whisper trên máy (pip install faster-whisper); nếu chưa cài, app báo rõ chứ không tạo phụ đề giả.</small></p></form>
 </section>
 <section class="panel tool-panel" data-panel="filters" hidden>
 <h3>Filters</h3>
@@ -278,7 +266,7 @@
         <label>Value <input id="kfValue" type="number" step="0.1" value="1"></label>
         <button type="submit" class="primary">Add keyframe</button>
       </form>
-      <p><small>Position/scale/volume keyframes are rendered linearly. Overlay opacity is rendered stepwise (held at each keyframe). Main-track position/scale keyframes render via zoompan; main-track opacity renders stepwise.</small></p>
+      <p><small>Position/scale/volume keyframes are rendered linearly. Overlay opacity is rendered stepwise (held at each keyframe). Main-track position/scale keyframes render via zoompan; main-track opacity renders stepwise.</small></p></div><div class="panel"><h4>Plugins</h4><p><small>Áp dụng plugin mẫu cho clip đang chọn (chạy qua plugin hook thật trong windows/plugins/).</small></p><form id="pluginForm"><label>Plugin <select id="pluginSelect"><option value="uppercase_text">uppercase_text — viết hoa chữ</option><option value="vivid_color">vivid_color — preset màu vivid</option></select></label><button type="submit" class="primary">Áp dụng cho clip đang chọn</button></form><div id="pluginResult"></div>
     </div>
   </div>
   <section class="panel agent-dock" id="agentDock">
@@ -287,6 +275,7 @@
     <pre>python windows\vibeedit.py mcp &lt;project-folder&gt;</pre>
     <label>Provider <select id="agentProvider"><option value="mcp">External agent (MCP) — 106 tools</option><option value="ollama">Ollama (not connected)</option></select></label>
     <div id="agentChat" class="agent-chat"><div class="msg-agent">Hello — I am the project agent dock, not a connected LLM. Type <b>help</b> to see the commands I can really run, or connect an external agent via MCP for full AI editing.</div></div>
+    <div class="agent-chips" id="agentChips"><button type="button" class="secondary" data-agent-chip="list clips">Liệt kê clip</button><button type="button" class="secondary" data-agent-chip="review">Review</button><button type="button" class="secondary" data-agent-chip="export">Xuất bản nháp</button><button type="button" class="secondary" data-agent-chip="stats">Thống kê</button><button type="button" class="secondary" data-agent-chip="undo">Hoàn tác</button></div>
     <form id="agentChatForm">
       <label>Message to agent <input id="agentChatInput" placeholder="Type help, list clips, export, review, stats…" required></label>
       <button type="submit" class="primary">Send</button>
