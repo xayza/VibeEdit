@@ -80,6 +80,7 @@ a = Analysis(
         "vibeedit_core.project",
         "vibeedit_core.render",
         "vibeedit_core.round8",
+        "vibeedit_core.round9",
         "vibeedit_core.server",
         "vibeedit_core.skills",
         "vibeedit_core.thumbnail",

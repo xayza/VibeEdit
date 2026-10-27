@@ -141,6 +141,74 @@ def validate_reframe(window) -> dict:
         raise ValueError("reframe window must fit inside the source frame")
     return {"x": x, "y": y, "w": w, "h": h}
 
+
+def validate_backdrop(backdrop) -> dict:
+    """Validate an item backdrop (original ``clip.backdrop``, P3-J7).
+
+    The backdrop fills a fitted picture's bars: kind ``blur`` draws a
+    blurred copy of the same frame scaled to fill, kind ``color`` a
+    solid colour. ``blur`` is the radius as a share of the frame's
+    short side (default 0.05, range 0..0.5 — the original's
+    validation test rejects blur=2); ``dim`` darkens it (0..1,
+    default 0); ``color`` is #RRGGBB (default black). Returns a
+    normalised dict; raises instead of silently rendering a wrong
+    backdrop. One deliberate strictness over the original: the
+    original parses a bad colour as black (UInt32 ?? 0); here a
+    malformed colour is rejected, so a typo cannot silently turn
+    the bars black.
+    """
+    if not isinstance(backdrop, dict):
+        raise ValueError("backdrop must be an object with kind")
+    kind = backdrop.get("kind")
+    if kind not in ("blur", "color"):
+        raise ValueError(
+            f"backdrop kind must be 'blur' or 'color', not {kind!r}")
+    try:
+        blur = float(backdrop.get("blur", 0.05))
+    except (TypeError, ValueError):
+        raise ValueError("backdrop blur must be a number")
+    if not 0 <= blur <= 0.5:
+        raise ValueError("backdrop blur must be within 0..0.5")
+    try:
+        dim = float(backdrop.get("dim", 0))
+    except (TypeError, ValueError):
+        raise ValueError("backdrop dim must be a number")
+    if not 0 <= dim <= 1:
+        raise ValueError("backdrop dim must be within 0..1")
+    color = backdrop.get("color", "#000000")
+    if not isinstance(color, str) or not re.fullmatch(
+            r"#[0-9A-Fa-f]{6}", color):
+        raise ValueError(
+            f"backdrop color must be #RRGGBB, not {color!r}")
+    return {"kind": kind, "color": color.upper(),
+            "blur": blur, "dim": dim}
+
+
+def run_panel_snapshot(data: dict) -> dict:
+    """The run panel's headless state, derived from project data.
+
+    Round 9 re-examines round 8's "no run panel headless" decision:
+    the panel itself is a viewer widget, but whether it is shown,
+    dismissed or following is plain state, and it is stored here so
+    run.dismiss / run.toggle / run.follow have something real to
+    change and run.checklist has something real to report. The
+    original's visibility rule is: a run with stages the user did
+    not close, still going or with a result, or a panel the user
+    opened with the agent button. Headless, the closest faithful
+    form is: shown_by_user, or a non-empty run log that has not
+    been dismissed. There is no run-number boundary in the Windows
+    run log, so a dismiss lasts until an explicit show (toggle
+    while hidden) rather than "until the next run" — that
+    simplification is documented, not hidden.
+    """
+    panel = data.get("run_panel") or {}
+    dismissed = bool(panel.get("dismissed"))
+    shown_by_user = bool(panel.get("shown_by_user"))
+    log = data.get("run_log") or []
+    visible = shown_by_user or (bool(log) and not dismissed)
+    return {"dismissed": dismissed, "shown_by_user": shown_by_user,
+            "follow": bool(panel.get("follow")), "visible": visible}
+
 # Honest FFmpeg eq presets for the original colour/adjustment idea.
 # Values are eq filter arguments; "none" applies nothing.
 COLOR_PRESETS = {
@@ -1952,6 +2020,35 @@ class Project:
             item.pop("reframe", None)
         else:
             item["reframe"] = validate_reframe(window)
+        self._bump()
+        return item
+
+    def set_backdrop(self, item_id: str, backdrop) -> dict:
+        """Set (or, with backdrop None, remove) a clip's backdrop.
+
+        Rendered by render.py: the fitted picture over a blurred
+        fill copy of itself or a solid colour (see
+        validate_backdrop). Mirrors the original's guards: the item
+        must be a video clip or image on a video track. One honest
+        narrowing: the Windows render chain implements the backdrop
+        only for main-track items, so an overlay video item is
+        rejected with a clear error instead of storing a backdrop
+        that would never render (overlay items are composited over
+        the main picture and have no backdrop layer yet).
+        """
+        track, item = self.item(item_id)
+        if "media" not in item or track.get("kind") != "video":
+            raise ValueError(
+                "Backdrop applies to video clips or images only")
+        if track.get("role") != "main":
+            raise ValueError(
+                "Backdrop renders on the main track only in this "
+                "build; overlay video items have no backdrop layer "
+                "yet")
+        if backdrop is None:
+            item.pop("backdrop", None)
+        else:
+            item["backdrop"] = validate_backdrop(backdrop)
         self._bump()
         return item
 

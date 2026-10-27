@@ -690,10 +690,15 @@ class MCPHandlerTest(unittest.TestCase):
                                    {"plugin": "p",
                                     "overlays": "[]"})
             self.assertEqual(overlays["overlays"], [])
-            with self.assertRaises(Exception) as ctx:
-                server.call("vibeedit_clip_backdrop",
-                            {"item": clip["id"]})
-            self.assertIn("NOT_AVAILABLE", str(ctx.exception))
+            # Round 9: clip_backdrop is real now (was honest in
+            # round 8); its real behaviour is covered by
+            # tests/test_round9.py. Here it must set the backdrop
+            # and report rev/items, not raise NOT_AVAILABLE.
+            backed = server.call("vibeedit_clip_backdrop",
+                                 {"item": clip["id"], "kind": "color",
+                                  "color": "#00FF00"})
+            self.assertEqual(backed["items"], [clip["id"]])
+            self.assertEqual(backed["backdrop"]["color"], "#00FF00")
 
     def test_registry_counts(self):
         real = [t for t in TOOLS

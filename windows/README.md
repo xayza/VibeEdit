@@ -62,9 +62,12 @@ không chủ động bỏ tính năng nào của bản gốc. Bảng parity đ�
 [`PARITY.md`](PARITY.md): mỗi tính năng ghi works / partial /
 missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
 chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
+Vòng 9 bổ sung: backdrop clip (blur/màu, render thật), state panel
+chạy (dismiss/toggle/follow), request follow-up fix-issues /
+another-recipe đúng wording gốc, và mở view plugin (show-view).
 
-Trạng thái hiện tại (sau đợt full-parity vòng 8): **MCP 479 công cụ
-(394 thao tác thật, 85 kiểm tra-và-báo-lỗi)** — số live đọc từ
+Trạng thái hiện tại (sau đợt full-parity vòng 9): **MCP 479 công cụ
+(401 thao tác thật, 78 kiểm tra-và-báo-lỗi)** — số live đọc từ
 `/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
 mới. Đã hoạt động thêm từ các đợt full-parity: magnetic đầy đủ +
 linked audio + reorder, cài plugin, skills (đọc + ghi), knowledge
@@ -88,11 +91,10 @@ Windows thật. Còn thiếu và sẽ port tiếp (không bỏ): bộ cài/.exe 
 máy Windows sạch, Windows CI, voice provider (tạo/clone giọng nói),
 app updater tự thay app đang chạy (chỉ mới có handoff + hoãn/bỏ qua),
 model
-segmentation học sâu cho cutout, `clip_backdrop`, `clip_send_to_agent`,
-panel chạy `run_*`, `plugins_setup`, `plugins_show_view`,
-`agent_kit_update`/`agent_kit_later`, `image_generate`,
-`library_generate`, và hợp nhất vào `VibeEdit/` — xem `PARITY.md`
-để có danh sách thật.
+segmentation học sâu cho cutout, `clip_send_to_agent`,
+`plugins_setup`, `agent_kit_update`/`agent_kit_later`,
+`image_generate`, `library_generate`, và hợp nhất vào `VibeEdit/` —
+xem `PARITY.md` để có danh sách thật.
 
 An toàn dữ liệu (Phase 0):
 - Upload trùng tên không còn ghi đè: file thứ hai lưu thành `tên-2.ext`,
@@ -120,7 +122,74 @@ trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — 
 trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
 `VibeEdit/` hay `BashCut-main`.
 
-## Full-parity vòng 8 — state/workflow + provider-local thật, 28 công cụ từ honest thành thật (mới nhất)
+## Full-parity vòng 9 — backdrop clip, run-panel actions, plugins.show-view: 7 công cụ từ honest thành thật (mới nhất)
+
+- **Đọc spec gốc trước khi code:** `ClipBackdrop.swift` +
+  `ProjectDocument+Backdrop.swift` + `ClipBackdropTests.swift`
+  (P3-J7), `UIAction.swift` + `ProjectDocument+UIActions.swift` +
+  `RunPanelModel.swift` + `AgentFollowUp.swift`,
+  `ProjectDocument+PluginViews.swift` + `PluginViewModel.swift`.
+- **`clip_backdrop` thật (`project.py` + `render.py`):**
+  `validate_backdrop`/`set_backdrop` theo đúng ngữ nghĩa gốc
+  (kind blur/color, blur 0–0,5 mặc định 0,05, dim 0–1, màu
+  #RRGGBB mặc định đen; kind lạ/blur vượt khoảng/dim vượt
+  khoảng/màu sai định dạng đều bị từ chối — test validation gốc
+  từ chối blur=2 và kind glow; màu sai gốc parse thành đen còn
+  bản này từ chối rõ để typo không lặng thành đen). Render thật
+  cho main track still/video/freeze: ảnh fit phủ lên nền là bản
+  sao fill-scale của chính khung hình + blur Gaussian (bán kính =
+  blur × cạnh ngắn, dưới 0,5 px thì không blur như gốc) hoặc màu
+  solid, dim nhân RGB (đi qua gbrp — nhân trong YUV sẽ rửa
+  chroma); fades/màu/motion/tilt chạy trên composite nên backdrop
+  di chuyển, mờ dần và grading cùng clip như gốc. Bằng chứng
+  pixel (still nửa đỏ/nửa xanh 200×100 fit vào 320×180): không
+  backdrop thì fill phủ kín canvas; màu xanh lá thì bar xanh lá
+  và ảnh vẫn đỏ/xanh; blur thì bar trái đỏ/phải xanh; dim 0,5 thì
+  bar đỏ tối đúng khoảng như test gốc. Thu hẹp thật: chỉ main
+  track — item overlay track bị từ chối rõ vì chưa có lớp
+  backdrop (render lặng mà không báo mới là giả).
+- **Run-panel actions thật (`round9.py`):** vòng 8 giữ honest vì
+  "headless không có panel"; vòng 9 xét lại — widget panel là
+  chuyện viewer, còn trạng thái shown/dismissed/follow là state
+  thật lưu trong project data, `run_checklist` nay kèm trường
+  `panel` để quan sát được. `run_dismiss`/`run_toggle`/
+  `run_follow` đổi state thật (toggle khi ẩn thì show, khi hiện
+  thì dismiss; follow bật/tắt cờ, headless không có viewer để
+  cuộn nên chỉ cờ là thật và ghi rõ vậy). `run_fix_issues`/
+  `run_another_recipe` trả đúng text follow-up AgentFollowUp gốc
+  (fix cần result + issues còn lại, đếm fresh từ validation;
+  validate Windows chỉ có errors nên warnings luôn 0); headless
+  không có session agent để deliver nên tool trả request cho
+  agent gọi MCP thực thi, không bao giờ tuyên bố đã gửi.
+- **`plugins_show_view` thật (`round9.py`):** validate như
+  panelPlugin gốc (plugin có views, đang bật — disabled bị từ
+  chối; view phải có trong manifest), trả plugin + view +
+  location theo placement; placement inspector trả shown=False
+  và không đổi state (đúng bản gốc: view inspector theo
+  selection, không có gì để mở); placement khác ghi view đang mở
+  vào project data để lần gọi sau thấy cùng view đang mở.
+  `plugins_view` vẫn là đường render component.
+- **Sửa lỗi do test spec bắt được:** module mới `round9` chưa có
+  trong `vibeedit.spec` — test spec bắt mọi module core phải là
+  hidden import, thiếu nó bản frozen sẽ hỏng như vòng 8 từng gặp
+  với `round8`; đã thêm `vibeedit_core.round9` (nay 20 hidden
+  import).
+- **Lỗi đã biết phát hiện trong vòng 9 (chưa sửa, ghi trong
+  `PARITY.md`):** freeze ở fps mà khung cuối không rơi đúng mốc
+  thập phân 3 chữ số (30 fps: 29/30 → "0.967" làm mất khung) nên
+  đoạn freeze render 0 khung và file ngắn hơn report; lỗi có sẵn
+  giống hệt khi có/không backdrop, test vòng 9 dùng 25 fps để
+  kiểm chứng nhánh freeze backdrop thật mà không sửa lặng lỗi
+  chung (hướng sửa: tăng độ chính xác timestamp trim ở đường
+  freeze, cần chạy lại toàn bộ test render).
+- **Số liệu:** MCP vẫn **479** (không thêm công cụ mới),
+  **401 thật / 78 honest**; **549 tests OK** trên Linux VM
+  (531 + 18 test vòng chín mới). Cây Swift không động, không hợp
+  nhất, chưa đẩy. Smoke server trên project tạm riêng: `GET /`
+  200, `/api/mcp-tools` 479 công cụ gồm cả 7 công cụ vòng 9,
+  `/api/info` 200 (Python 3.12.3, FFmpeg 8.1.2).
+
+## Full-parity vòng 8 — state/workflow + provider-local thật, 28 công cụ từ honest thành thật
 
 - **Nhóm state/workflow (đọc spec gốc trước khi code):**
   `clip_motion` (10 preset MotionPreset chép nguyên từ

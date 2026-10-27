@@ -20,10 +20,13 @@ Original specs (read before coding, VibeEdit Swift tree, read-only):
   setting).
 - ``CommandCatalog+Ledger.swift``: ``outcomes.import`` / ``outcomes.map``.
 - ``CommandCatalog+Plan.swift``: ``run.append`` / ``run.log`` /
-  ``run.status`` / ``run.checklist`` (``run.dismiss`` / ``run.toggle`` /
-  ``run.follow`` / ``run.fix-issues`` / ``run.another-recipe`` are
-  UIAction run-panel actions, not CommandSpecs, and stay honest:
-  this headless server has no run panel to dismiss or toggle).
+  ``run.status`` / ``run.checklist``. The UIAction run-panel
+  actions (``run.dismiss`` / ``run.toggle`` / ``run.follow`` /
+  ``run.fix-issues`` / ``run.another-recipe``) moved to
+  ``round9.py`` in round 9: dismiss/toggle/follow are real
+  persisted panel state, fix-issues/another-recipe return the
+  exact follow-up request text for the calling agent (headless
+  has no agent session to deliver to).
 - ``CommandCatalog+Images.swift``: ``image.style`` (a project style
   lock — pure state), ``image.disclose`` (text items over generated
   pictures), ``image.generate`` (needs a provider — stays honest).
@@ -50,6 +53,7 @@ import zipfile
 from .project import (
     fps_value,
     frames_to_seconds,
+    run_panel_snapshot,
     seconds_to_frames,
 )
 
@@ -808,7 +812,11 @@ def run_checklist(proj) -> dict:
     return {"stages": [stages[sid] for sid in sorted(stages)],
             "audits": audits, "auditDetails": audit_details,
             "recipe": plan.get("recipe"),
-            "open": open_items}
+            "open": open_items,
+            # Round 9: the run panel's headless state, so
+            # run.dismiss / run.toggle / run.follow are observable
+            # here instead of write-only flags.
+            "panel": run_panel_snapshot(proj.data)}
 
 
 # ---------------------------------------------------------------------------

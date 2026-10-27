@@ -620,9 +620,9 @@ TOOLS.extend([
     {"name": "vibeedit_plugins_actions", "description": "List actions plugins add to the editor, from manifest action declarations, with parameters, placements and availability."},
     {"name": "vibeedit_plugins_option", "description": "Set one plugin option (omit value to reset it to its default). Values are validated against the plugin's declared schema; project-scope values are a project edit, user-scope values are saved in plugins.json."},
     {"name": "vibeedit_plugins_options", "description": "Read a plugin's options: declared schema, scope (user/project) and current values (user-scope from plugins.json, project-scope from the open project; without an open project, project-scope options report their defaults)."},
-    {"name": "vibeedit_plugins_show_view", "description": "Not available in this Windows build: no viewer exists in this headless server to show a plugin view in; the view's components are available via plugins_view."},
+    {"name": "vibeedit_plugins_show_view", "description": "Show a plugin view where it lives (panel/dock/sheet/window per its manifest placement) and record it as the project's currently-shown view; inspector views follow the selection and return shown=False. Needs an enabled plugin with that view; plugins_view stays the render path."},
     {"name": "vibeedit_clip_motion", "description": "Animate a clip with a MotionPreset (zoom-in/out, pan-left/right/up/down, fade-in-out, pop-in, slide-up, zoom-punch) or custom keyframes JSON; stored as keyframes and rendered by the zoompan/tilt/opacity paths. Focus framing is refused (needs a viewer band)."},
-    {"name": "vibeedit_clip_backdrop", "description": "Not available in this Windows build: the render chain is fill-scale/crop only, so there are no fitted-picture bars to fill; a backdrop needs fit-mode plus background-layer rendering that is not in the chain."},
+    {"name": "vibeedit_clip_backdrop", "description": "Fill a fitted picture's bars with a blur of itself or a colour (Inspector › Video › Backdrop). kind blur/color/none (none removes); blur is the radius as a share of the frame's short side (0-0.5, default 0.05), dim darkens it (0-1); main-track video/image items only; item(s) default to the server selection. Returns rev, items and backdrop."},
     {"name": "vibeedit_clip_change_framing", "description": "Cycle a video clip through Wide/Medium/Close-up/Left/Right framing presets (ReframePreset); zoom renders as fill scale and pan/tilt as crop offsets."},
     {"name": "vibeedit_clip_reframe", "description": "Set (or clear with null) a media clip's reframe window; rendered as a crop before scaling, never stretched."},
     {"name": "vibeedit_clip_send_to_agent", "description": "Not available in this Windows build: no agent session exists in this headless server to send a clip to."},
@@ -632,12 +632,12 @@ TOOLS.extend([
     {"name": "vibeedit_outcomes_import", "description": "Import an export's retention curve and totals (JSON {curve, totals}, a point list, or CSV), stored per export in the project; re-import replaces."},
     {"name": "vibeedit_outcomes_map", "description": "Map an imported export's outcomes onto its sections (markers, else the whole video): retention, change, drop/lift points, replay peak, views at start, largest drops with nearby caption words."},
     {"name": "vibeedit_run_append", "description": "Append an entry to the run log stored in the project; stage gates enforced (done needs evidence or is unverified, skipped needs a reason, review-done with open required stages returns stage_pending)."},
-    {"name": "vibeedit_run_checklist", "description": "The run's checklist derived from the plan and the run log: stage statuses, skill reads, audits, recipe and open items."},
-    {"name": "vibeedit_run_dismiss", "description": "Not available in this Windows build: run.dismiss is a UIAction that dismisses the run panel, and this headless server has no run panel."},
-    {"name": "vibeedit_run_fix_issues", "description": "Not available in this Windows build: run.fix-issues is a UIAction on the run panel, and this headless server has no run panel; fix issues with timeline ops, then review_verify."},
-    {"name": "vibeedit_run_follow", "description": "Not available in this Windows build: run.follow is a UIAction toggling follow-agent scrolling in the live viewer, and this headless server has no viewer."},
-    {"name": "vibeedit_run_toggle", "description": "Not available in this Windows build: run.toggle is a UIAction toggling the run panel, and this headless server has no run panel."},
-    {"name": "vibeedit_run_another_recipe", "description": "Not available in this Windows build: run.another-recipe is a UIAction on the run panel, and this headless server has no run panel."},
+    {"name": "vibeedit_run_checklist", "description": "The run's checklist derived from the plan and the run log: stage statuses, skill reads, audits, recipe, open items and the run panel's state (dismissed/shown/follow/visible)."},
+    {"name": "vibeedit_run_dismiss", "description": "Close the run panel until it is shown again; the dismissed/shown state is stored in the project and reported by run_checklist."},
+    {"name": "vibeedit_run_fix_issues", "description": "Draft the result card's Fix remaining issues request (exact original wording) from the current validation counts; needs a run result with issues left. Headless has no agent session to deliver to, so the request is returned for the calling agent to execute, never claimed delivered."},
+    {"name": "vibeedit_run_follow", "description": "Toggle (or set with follow) the run panel's follow-agent state, stored in the project and reported by run_checklist; headless there is no viewer to scroll, so only the flag itself is real."},
+    {"name": "vibeedit_run_toggle", "description": "Open or close the run panel (dismisses when visible, shows when hidden); state stored in the project and reported by run_checklist."},
+    {"name": "vibeedit_run_another_recipe", "description": "Draft the result card's Try another recipe request (exact original wording) for a new version with a different recipe, keeping this one; needs a run result. Returned for the calling agent to execute, never claimed delivered."},
     {"name": "vibeedit_acme_voice_fast", "description": "Not available in this Windows build: acme.voice.fast is a provider capability string from the original's agent instructions and no acme provider is wired here; voice generation via Edge/Piper is the separate voice_synthesize tool."},
     {"name": "vibeedit_speech_rate", "description": "Measure speaking rate from transcript words (analysis-record words, or caption words for the timeline): syllables for Vietnamese, characters for CJK, else words; per-phrase p10/p50/p90, overall and articulation. Voice takes carry no text, so no voice rate is fabricated."},
     {"name": "vibeedit_app_vibeedit", "description": "Not available in this Windows build: no app-level automation client exists in this headless server."},
@@ -3789,6 +3789,109 @@ class MCPServer:
             proj = self._require()
             result = proj.set_reframe(args["item"], args.get("window"))
             self._save()
+            return result
+        if name == "vibeedit_clip_backdrop":
+            # Round 9: original clip.backdrop (see project.py
+            # validate_backdrop / set_backdrop). Items come from
+            # "items" (comma separated), a single "item", or the
+            # server selection — the original's default. All items
+            # are validated before any is changed, so a bad id
+            # cannot leave a half-applied multi-item edit.
+            from .project import validate_backdrop
+            proj = self._require()
+            raw = args.get("items", "")
+            if isinstance(raw, str):
+                ids = [s.strip() for s in raw.split(",") if s.strip()]
+            elif isinstance(raw, list):
+                ids = [str(s) for s in raw]
+            else:
+                ids = []
+            if not ids and args.get("item"):
+                ids = [args["item"]]
+            if not ids:
+                ids = list(self.selection)
+            if not ids:
+                raise ValueError(
+                    "clip_backdrop needs item or items, or a server "
+                    "selection (timeline_select_all)")
+            kind = args.get("kind")
+            if kind is None:
+                raise ValueError(
+                    "clip_backdrop needs kind: blur, color or none")
+            backdrop = None
+            if kind != "none":
+                backdrop = {"kind": kind}
+                if args.get("color") is not None:
+                    backdrop["color"] = args["color"]
+                if args.get("blur") is not None:
+                    backdrop["blur"] = args["blur"]
+                if args.get("dim") is not None:
+                    backdrop["dim"] = args["dim"]
+                backdrop = validate_backdrop(backdrop)
+                for item_id in ids:
+                    track, item = proj.item(item_id)
+                    if "media" not in item \
+                            or track.get("kind") != "video":
+                        raise ValueError(
+                            "Backdrop applies to video clips or "
+                            "images only")
+                    if track.get("role") != "main":
+                        raise ValueError(
+                            "Backdrop renders on the main track "
+                            "only in this build")
+            for item_id in ids:
+                proj.set_backdrop(item_id, backdrop)
+            self._save()
+            return {"rev": proj.rev, "items": ids,
+                    "backdrop": backdrop}
+        if name in ("vibeedit_run_dismiss", "vibeedit_run_toggle",
+                    "vibeedit_run_follow", "vibeedit_run_fix_issues",
+                    "vibeedit_run_another_recipe"):
+            # Round 9: run-panel actions (see round9.py). The
+            # state actions save; the follow-up drafters do not
+            # mutate the project, so they do not save.
+            from . import round9 as _r9
+            proj = self._require()
+            if name == "vibeedit_run_dismiss":
+                result = _r9.run_panel_dismiss(proj)
+                self._save()
+            elif name == "vibeedit_run_toggle":
+                result = _r9.run_panel_toggle(proj)
+                self._save()
+            elif name == "vibeedit_run_follow":
+                on = args.get("follow")
+                if on is None:
+                    flag = None
+                elif isinstance(on, bool):
+                    flag = on
+                else:
+                    flag = str(on).lower() in ("true", "1", "yes")
+                result = _r9.run_panel_follow(proj, flag)
+                self._save()
+            elif name == "vibeedit_run_fix_issues":
+                output = None
+                if self.last_export and self.last_export.get("output"):
+                    output = self.last_export["output"]
+                result = _r9.run_fix_issues(proj, output)
+            else:
+                result = _r9.run_another_recipe(proj)
+            return result
+        if name == "vibeedit_plugins_show_view":
+            # Round 9: original plugins.show-view (see round9.py).
+            # Only a shown (non-inspector) view mutates state, so
+            # only then is the project saved. Missing parameters
+            # are a controlled ValueError, never a KeyError (the
+            # round 3 handler rule).
+            from . import round9 as _r9
+            proj = self._require()
+            if not args.get("plugin") or not args.get("view"):
+                raise ValueError(
+                    "plugins_show_view needs plugin and view")
+            result = _r9.show_plugin_view(
+                proj, args["plugin"], args["view"],
+                args.get("plugins_dir"))
+            if result.get("shown"):
+                self._save()
             return result
         # Round 8: state/workflow + local-data tools (see
         # vibeedit_core/round8.py and plugins.py for the logic).

@@ -459,6 +459,10 @@ HONEST_SAMPLE = [
     # framing, music_replace, narration_windows, outcomes,
     # run_append/checklist and speech_rate left (now real);
     # their real behaviour is covered by tests/test_round8.py.
+    # Round 9: clip_backdrop, run dismiss/toggle/follow/
+    # fix-issues/another-recipe and plugins_show_view left (now
+    # real); their real behaviour is covered by
+    # tests/test_round9.py.
     # Round 7: sync/speech_map/strip left (now real) -- removed
     # from the honest sample; their real behaviour is covered
     # by tests/test_round7_analysis.py.
@@ -469,16 +473,7 @@ HONEST_SAMPLE = [
     
     
     
-    "vibeedit_plugins_show_view",
-    
-    "vibeedit_clip_backdrop",
     "vibeedit_clip_send_to_agent",
-    
-    
-    
-    "vibeedit_run_dismiss",
-    "vibeedit_run_fix_issues", "vibeedit_run_follow", "vibeedit_run_toggle",
-    "vibeedit_run_another_recipe",
     
     "vibeedit_app_vibeedit", "vibeedit_app_vibeedit_automation_clients",
     "vibeedit_app_vibeedit_debug_log", "vibeedit_platforms_get", "vibeedit_context_get",
@@ -519,7 +514,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 85)  # Round 8: 113 -> 85, 28 tools became real (see tests/test_round8.py)
+        self.assertEqual(len(honest), 78)  # Round 9: 85 -> 78, 7 tools became real (see tests/test_round9.py)
 
 
 if __name__ == "__main__":

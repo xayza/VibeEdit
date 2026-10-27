@@ -49,9 +49,10 @@ arc-right, diamond, crash-out, infinite-out, screen-in, screen-out,
 dip-black, color-shift, flicker, kaleidoscope) render with real
 FFmpeg filter chains, not xfade substitutions — see
 MOTION_TRANSITIONS, _motion_segment and list_transition_renderability().
-The one original kind that still cannot render is halftone (see
-UNRENDERABLE_TRANSITIONS); it raises a clear error, never a silent
-dissolve/fade. Reframe (a per-clip crop window in source fractions)
+Halftone renders since round 4 (see HALFTONE_TRANSITIONS); nothing
+in TRANSITION_KINDS is unrenderable any more (the empty
+UNRENDERABLE_TRANSITIONS set is kept for the registry shape).
+Reframe (a per-clip crop window in source fractions)
 is honoured in the main-track video/still/freeze paths via
 reframe_crop_filter(). Wiring note: this file is the renderer only.
 Project.add_transition() in project.py and the transitions list in
@@ -71,8 +72,8 @@ import subprocess
 import sys
 
 from .project import (frames_to_seconds, fps_value, COLOR_PRESETS,
-                      validate_cube, keyframe_points, TRANSITION_XFADE,
-                      eq_preset_filter)
+                      validate_cube, validate_backdrop, keyframe_points,
+                      TRANSITION_XFADE, eq_preset_filter)
 
 # Fallback fonts on the Linux build/test machine. Windows fonts are
 # resolved first from the SystemRoot environment variable in
@@ -1306,6 +1307,42 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         return (f":x='min(max((iw-ow)/2+{pan:g},0),iw-ow)'"
                 f":y='min(max((ih-oh)/2+{tilt:g},0),ih-oh)'")
 
+    def _backdrop_fill_scale() -> str:
+        """Fill-scale a frame to the canvas (the backdrop layer's
+        geometry: same scale+ crop the main chain uses for fill)."""
+        return (f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+                f"crop={out_w}:{out_h}")
+
+    def _backdrop_effects(bd: dict) -> list[str]:
+        """Turn a fill-scaled frame into the backdrop layer, per the
+        original ClipBackdrop: blur kind is the same frame scaled to
+        fill plus a Gaussian blur whose radius is blur * the short
+        side (the original skips the blur below 0.5 px); color kind
+        is a solid frame; dim multiplies the picture in RGB (the
+        original's CIColorMatrix) — done in gbrp, because in YUV
+        the same multiply would also wash out the chroma."""
+        if bd["kind"] == "blur":
+            radius = float(bd["blur"]) * min(out_w, out_h)
+            fx = [f"gblur=sigma={radius:.3f}"] if radius >= 0.5 else []
+        else:
+            fx = [f"drawbox=x=0:y=0:w={out_w}:h={out_h}:"
+                  f"color=0x{bd['color'][1:]}:t=fill"]
+        dim = float(bd["dim"])
+        if dim > 0:
+            k = 1.0 - dim
+            fx.extend(["format=gbrp",
+                       f"colorchannelmixer=rr={k:.4f}:gg={k:.4f}:bb={k:.4f}",
+                       "format=yuv420p"])
+        return fx
+
+    def _backdrop_composite(bg_label: str, fg_label: str) -> str:
+        """Overlay a fitted picture centred over its backdrop layer."""
+        out = next_label("vbd")
+        filter_parts.append(
+            f"[{bg_label}][{fg_label}]overlay="
+            f"'(main_w-overlay_w)/2':'(main_h-overlay_h)/2'[{out}]")
+        return out
+
 
     def _motion_filter(item: dict, frame_offset: float = 0.0) -> str | None:
         """zoompan filter for main-track x/y/scale keyframes.
@@ -1373,7 +1410,74 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         src_s = item.get("in", 0) / media_fps(medium) + local_start * speed
         src_dur_s = local_dur * speed
         label = next_label("vseg")
+        bd = None
+        if item.get("backdrop") is not None:
+            # An invalid stored backdrop is a hard error, like a
+            # missing/invalid LUT — never a silent plain render.
+            bd = validate_backdrop(item["backdrop"])
         if medium.get("kind") == "image":
+            if bd is not None:
+                # Round 9: backdrop stills. The backdrop layer is
+                # the same frame fill-scaled plus the backdrop
+                # effect; the fitted picture is fit-scaled and
+                # centred over it with overlay (no pad: padding
+                # would paint black bars over the backdrop). The
+                # rest of the chain (motion, tilt, colour, alpha,
+                # fades) runs on the composite, so the backdrop
+                # moves, fades and grades with the clip, as in
+                # the original. Both branches carry their own fps
+                # (the looped still has no rate of its own), so
+                # the composite chain adds none.
+                bg = next_label("vbd")
+                bg_filters = ["loop=loop=-1:size=1:start=0"]
+                _reframe = reframe_crop_filter(item)
+                if _reframe is not None:
+                    bg_filters.append(_reframe)
+                bg_filters.append(_backdrop_fill_scale())
+                bg_filters.extend(_backdrop_effects(bd))
+                bg_filters.append("setsar=1")
+                bg_filters.append("format=yuv420p")
+                bg_filters.append(f"fps={fps_str}")
+                filter_parts.append(
+                    f"[{idx}:v]{','.join(bg_filters)}[{bg}]")
+                fg = next_label("vbd")
+                fg_filters = ["loop=loop=-1:size=1:start=0"]
+                if _reframe is not None:
+                    fg_filters.append(_reframe)
+                fg_filters.append(
+                    f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease")
+                fg_filters.append("setsar=1")
+                fg_filters.append("format=yuv420p")
+                fg_filters.append(f"fps={fps_str}")
+                filter_parts.append(
+                    f"[{idx}:v]{','.join(fg_filters)}[{fg}]")
+                comp = _backdrop_composite(bg, fg)
+                tail = []
+                motion = _motion_filter(
+                    item, local_start * fps_value(fmt["fps"]))
+                if motion is not None:
+                    tail.append(motion)
+                tilt = _tilt_filter(item, local_start)
+                if tilt is not None:
+                    tail.append(tilt)
+                tail.extend(_color_filters(item, lut_dir))
+                if alpha is not None:
+                    tail.append("format=yuva420p")
+                    tail.append(f"colorchannelmixer=aa={_num(alpha)}")
+                    tail.append("format=yuv420p")
+                else:
+                    tail.append("format=yuv420p")
+                if fade_in > 0:
+                    tail.append(
+                        f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
+                if fade_out > 0:
+                    tail.append(
+                        f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:"
+                        f"d={min(fade_out, dur_s):.3f}")
+                tail.append(f"trim=end={dur_s:.3f}")
+                tail.append("setpts=PTS-STARTPTS")
+                filter_parts.append(f"[{comp}]{','.join(tail)}[{label}]")
+                return label, dur_s
             # Phase 7: still-image clips now render their keyframes
             # too (previously stored, not rendered). The looped still
             # feeds zoompan exactly like a video clip: zoompan's
@@ -1444,6 +1548,39 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             _reframe = reframe_crop_filter(item)
             if _reframe is not None:
                 ffilters.append(_reframe)
+            if bd is not None:
+                # Round 9: backdrop on a held frame — same two-layer
+                # composite as the still path, from the held frame.
+                pre = list(ffilters)
+                bg = next_label("vbd")
+                bg_filters = list(pre)
+                bg_filters.append(_backdrop_fill_scale())
+                bg_filters.extend(_backdrop_effects(bd))
+                bg_filters.append("setsar=1")
+                bg_filters.append("format=yuv420p")
+                bg_filters.append(f"fps={fps_str}")
+                filter_parts.append(
+                    f"[{idx}:v]{','.join(bg_filters)}[{bg}]")
+                fg = next_label("vbd")
+                fg_filters = list(pre)
+                fg_filters.append(
+                    f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease")
+                fg_filters.append("setsar=1")
+                fg_filters.append("format=yuv420p")
+                fg_filters.append(f"fps={fps_str}")
+                filter_parts.append(
+                    f"[{idx}:v]{','.join(fg_filters)}[{fg}]")
+                comp = _backdrop_composite(bg, fg)
+                tail = list(_color_filters(item, lut_dir))
+                tail.append("format=yuv420p")
+                if fade_in > 0:
+                    tail.append(
+                        f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
+                if fade_out > 0:
+                    tail.append(
+                        f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:d={min(fade_out, dur_s):.3f}")
+                filter_parts.append(f"[{comp}]{','.join(tail)}[{label}]")
+                return label, dur_s
             ffilters.append(fscale)
             ffilters.extend(_color_filters(item, lut_dir))
             ffilters.append(f"fps={fps_str}")
@@ -1482,6 +1619,58 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         _reframe = reframe_crop_filter(item)
         if _reframe is not None:
             vfilters.append(_reframe)
+        if bd is not None:
+            # Round 9: backdrop video. Both layers share the
+            # trim/speed/reverse/reframe pre-steps so the backdrop
+            # stays in sync with the picture; the zoom that the
+            # plain chain bakes into its fill scale is applied
+            # after the composite instead, so it zooms the
+            # picture and its backdrop together.
+            pre = list(vfilters)
+            bg = next_label("vbd")
+            bg_filters = list(pre)
+            bg_filters.append(_backdrop_fill_scale())
+            bg_filters.extend(_backdrop_effects(bd))
+            bg_filters.append("setsar=1")
+            bg_filters.append("format=yuv420p")
+            bg_filters.append(f"fps={fps_str}")
+            filter_parts.append(
+                f"[{idx}:v]{','.join(bg_filters)}[{bg}]")
+            fg = next_label("vbd")
+            fg_filters = list(pre)
+            fg_filters.append(
+                f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease")
+            fg_filters.append("setsar=1")
+            fg_filters.append("format=yuv420p")
+            fg_filters.append(f"fps={fps_str}")
+            filter_parts.append(
+                f"[{idx}:v]{','.join(fg_filters)}[{fg}]")
+            comp = _backdrop_composite(bg, fg)
+            tail = []
+            if zoom != 1.0:
+                tail.append(scale)
+            tail.extend(_color_filters(item, lut_dir))
+            motion = _motion_filter(
+                item, local_start * fps_value(fmt["fps"]))
+            if motion is not None:
+                tail.append(motion)
+            tilt = _tilt_filter(item, local_start)
+            if tilt is not None:
+                tail.append(tilt)
+            if alpha is not None:
+                tail.append("format=yuva420p")
+                tail.append(f"colorchannelmixer=aa={_num(alpha)}")
+                tail.append("format=yuv420p")
+            else:
+                tail.append("format=yuv420p")
+            if fade_in > 0:
+                tail.append(
+                    f"fade=t=in:st=0:d={min(fade_in, dur_s):.3f}")
+            if fade_out > 0:
+                tail.append(
+                    f"fade=t=out:st={max(dur_s - fade_out, 0):.3f}:d={min(fade_out, dur_s):.3f}")
+            filter_parts.append(f"[{comp}]{','.join(tail)}[{label}]")
+            return label, dur_s
         vfilters.append(scale)
         vfilters.extend(_color_filters(item, lut_dir))
         motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
