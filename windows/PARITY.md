@@ -8,19 +8,26 @@ còn thiếu trong bảng này đều ghi trạng thái
 đã biết. Không có tính năng gốc nào bị ghi là "out of scope" hay
 "not planned" ở đây.
 
-Trạng thái hiện tại (đợt full-parity vòng 2, sau Phase 2):
-**MCP 472 công cụ** (số live đọc từ `/api/mcp-tools` trong app; số
+Trạng thái hiện tại (đợt full-parity vòng 3, sau Phase 2):
+**MCP 478 công cụ** (số live đọc từ `/api/mcp-tools` trong app; số
 trong tài liệu này là số tại thời điểm viết và sẽ cũ đi khi thêm công
-cụ mới — app luôn là nguồn đúng nhất). Trong 472 công cụ có **334
-công cụ thao tác thật** và **138 công cụ kiểm tra-và-báo-lỗi trung
+cụ mới — app luôn là nguồn đúng nhất). Trong 478 công cụ có **346
+công cụ thao tác thật** và **132 công cụ kiểm tra-và-báo-lỗi trung
 thực** (trả lỗi `NOT_AVAILABLE` kèm lý do và hướng port, không bao giờ
-trả thành công giả). Con số này KHÔNG có nghĩa là đã đạt 249/249 tên
-gốc: tên gốc và tên Windows khác nhau do đổi tên, và bản Windows còn
-có thêm công cụ riêng; các tên gốc còn thiếu được liệt kê thật ở mục
-8 bên dưới. Test: **369 tests OK** trên Linux VM (359 trước vòng hai
-+ 10 test vòng hai mới). Vòng hai đã rà soát lại toàn bộ và sửa các
-dòng cũ còn sót trong README (một số mục vẫn ghi MCP 144/249 và liệt
-kê vision/knowledge/magnetic/motion là chưa làm dù đã port xong).
+trả thành công giả). Về tên gốc: **cả 249 spec gốc đều có tên tương
+ứng trong registry** theo cách đếm đã kiểm chứng bằng test
+(`tests/test_round3_parity.py`: trích spec từ
+`CommandCatalog*.swift` bằng regex đa dòng — grep một dòng chỉ tìm
+được 7 vì spec viết nhiều dòng — rồi chuẩn hóa dấu `.` và `-` thành
+`_`, thêm tiền tố `vibeedit_`). 4 tên khác với tên Windows chính
+(`beats.detect`, `clip.speed-curve`, `transcript.words`,
+`library.save-selection`) được bao phủ bằng alias thật trỏ về handler
+thật, theo đúng tiền lệ handler dùng chung của bản gốc
+(`voice.speak`/`voice.lines` cùng handler `voice.synthesize`).
+Đây là bao phủ **tên**, không phải tuyên bố 249 hành vi gốc khác biệt
+— các alias dùng chung handler, và các giới hạn thật còn lại vẫn liệt
+kê ở mục 8 bên dưới. Test: **384 tests OK** trên Linux VM (369 trước
+vòng ba + 15 test vòng ba mới).
 
 ## Cách đọc cột Verification
 
@@ -80,8 +87,8 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Tính năng | Status | Verification | Ghi chú |
 |---|---|---|---|
 | Thêm / di chuyển / trim / tách / copy-paste / xóa clip, undo/redo (50 bước) | works | Linux VM | Kéo-thả trong cùng track và sang track khác; tách tại playhead (nút + phím S) |
-| Snap, marker, đóng khoảng trống (close gaps) | works | Linux VM | Close gaps đưa clip đầu về frame 0; chưa phải magnetic đầy đủ |
-| Magnetic di chuyển cả khối (block-move) trên Main | works | Linux VM | Xóa/chèn/di chuyển/trim cuối trên Main dời các clip sau theo, không để gap, không overlap, có undo; tắt được bằng `magnetic_set` (mặc định bật). Reorder (đổi thứ tự khối) đã có từ vòng hai: `reorder_main` dời clip tới trước một clip khác hoặc xuống cuối, các clip ở giữa dời theo cùng linked audio, không đổi duration. Marker nay dời theo khi chèn/xóa/trim cuối magnetic trên Main (marker trong đoạn bị xóa/trim co về đầu đoạn). Giới hạn còn lại: marker chưa dời theo khi move clip và khi close_gaps; ripple chỉ từ thao tác trực tiếp, kéo audio gắn liền không ripple toàn timeline |
+| Snap, marker, đóng khoảng trống (close gaps) | works | Linux VM | Close gaps đưa clip đầu về frame 0; marker dời theo cả khi close_gaps (marker trong clip dời cùng clip, marker trong gap co về đầu clip kế tiếp, marker sau clip cuối giữ nguyên) |
+| Magnetic di chuyển cả khối (block-move) trên Main | works | Linux VM | Xóa/chèn/di chuyển/trim cuối trên Main dời các clip sau theo, không để gap, không overlap, có undo; tắt được bằng `magnetic_set` (mặc định bật). Reorder (đổi thứ tự khối) đã có từ vòng hai: `reorder_main` dời clip tới trước một clip khác hoặc xuống cuối, các clip ở giữa dời theo cùng linked audio, không đổi duration. Marker nay dời theo khi chèn/xóa/trim cuối magnetic trên Main (marker trong đoạn bị xóa/trim co về đầu đoạn) và từ vòng ba: khi move clip (marker trong span của clip dời theo clip, marker ngoài span giữ nguyên; move magnetic trên Main dời cả clip lẫn follower) và khi reorder (map một lần từ vị trí gốc, tránh lỗi dời kép). Giới hạn còn lại: ripple chỉ từ thao tác trực tiếp, kéo audio gắn liền không ripple toàn timeline |
 | Âm thanh gắn liền (linked audio) | works | Linux VM | `link_audio`/`unlink_audio` lưu `linked_audio` + `linked_video` hai chiều; di chuyển/trim/tách video kéo audio theo cùng delta, tách video tách audio cùng điểm; xóa video xóa luôn audio gắn liền, xóa audio thì video còn lại và bị unlink (đúng tính không đối xứng của bản gốc); thao tác làm audio va chạm bị từ chối toàn bộ, dữ liệu không đổi. Giới hạn: ghi đè lên chính clip audio gắn liền bị từ chối (phải unlink trước); audio của clip bị ghi đè mà không căn khớp chính xác cũng bị từ chối thay vì bịa thời gian |
 | Track đổi tên / xóa track | works | Linux VM | Xóa từ chối track Main và track còn clip |
 
@@ -100,7 +107,8 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Âm lượng, fade từng clip (0–5s), ducking nhạc dưới giọng nói, loudnorm | works | Linux VM | Ducking mặc định bản gốc: level −14, attack 3, release 8 |
 | Sóng âm (waveform) thật, beat grid, snap theo beat | works | Linux VM | Waveform giải mã thật bằng FFmpeg; file không giải mã được báo 400, không vẽ hình giả |
 | Import và đặt voiceover take lên track Voiceover | works | Linux VM | Tạo track Voiceover nếu chưa có |
-| Thu voiceover trong app, tạo giọng nói, nhân bản giọng (voice clone) | missing — planned to port | Đọc source gốc | Bản gốc không có sẵn catalogue giọng trong app — giọng đi qua plugin provider; hướng port: làm provider plugin cho giọng nói sau khi có cài plugin từ URL, rồi mới nối tạo/clone/thu vào panel Voice; hiện tại các nút này ghi rõ là chưa có, không tạo giọng giả |
+| Thu voiceover trong app, nhân bản giọng (voice clone) | missing — planned to port | Đọc source gốc | Tạo giọng nói đã nối thật từ vòng ba (xem dưới); còn thiếu thu trong app và clone. Bản gốc không có sẵn catalogue giọng trong app — giọng đi qua plugin provider; hướng port: làm provider plugin cho giọng nói sau khi có cài plugin từ URL, rồi mới nối thu/clone vào panel Voice; hiện tại các nút này ghi rõ là chưa có, không tạo giọng giả |
+| Tạo giọng nói (voice generation: Edge TTS / Piper) | partial | Linux VM | Vòng ba: `voice.py` mới — Edge TTS qua module `edge-tts` hoặc Piper qua binary + model `.onnx` (model do người dùng chỉ đường, không bundle, không bịa model mặc định); thiếu cả hai backend thì báo rõ cách cài cả hai; `voice_synthesize`/`lines`/`place`/`use`/`fit` và alias `voice_speak` đều là công cụ thật, panel Voice đã nối tới op thật (`voice_generate`...). Chưa kiểm chứng tổng hợp giọng thật ở đâu (cả hai backend đều vắng trên máy ảo Linux này) — chỉ mới kiểm chứng đường báo lỗi thiếu backend và giao diện; thu trong app và clone vẫn chưa có (clone cần model của provider clone, bản gốc dùng provider on-device) |
 
 ### 5. Captions và chữ
 
@@ -110,7 +118,7 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Phụ đề tự động (transcription) | partial | Linux VM | Chỉ chạy khi máy đã cài faster-whisper (mặc định tiny); chưa cài thì báo rõ, không tạo phụ đề giả |
 | Caption transcribe/generate/align thành công cụ MCP | partial | Linux VM | Vòng hai: `captions_transcribe`/`media_transcribe` chạy transcribe thật vào text track; `captions_generate` transcribe rồi trả SRT thật; `captions_align` snap timing của caption về segment giọng nói đã detect (mapping thuần đã có test riêng). Tất cả đều báo lỗi rõ khi máy chưa cài faster-whisper, không đổi timing, không bịa phụ đề |
 | Font import | works | Linux VM | Vòng hai: import .ttf/.otf vào thư mục fonts của app (tên duy nhất, không ghi đè, từ chối đuôi khác); font đã import trở thành candidate cho renderer và xuất hiện trong `fonts_list` |
-| Voice check / app update check | partial | Linux VM | Vòng hai: `voice_check` kiểm tra thật (piper binary, edge-tts module, số voiceover take trong project đang mở); `app_update_check` trả trạng thái thật (version hiện tại, chưa có kênh updater). Tạo/clone giọng và bản thân updater vẫn chưa có |
+| Voice check / app update check | partial | Linux VM | Vòng hai: `voice_check` kiểm tra thật (piper binary, edge-tts module, số voiceover take trong project đang mở); `app_update_check` trả trạng thái thật (version hiện tại, chưa có kênh updater). Vòng ba: tạo giọng đã nối thật (xem mục 4); updater nay có khung check/download/verify (`updater.py`, kênh lấy từ biến môi trường `VIBEEDIT_RELEASES_URL` hoặc file `updater.json` cạnh module — mặc định chưa cấu hình nên chỉ trả trạng thái, không bịa URL; download verify SHA-256 và không bao giờ tự chạy file tải về; `app_update_download` là công cụ thật). Còn thiếu: bản thân việc thay app đang chạy bằng bản mới (cần người dùng chọn vị trí releases thật của VibeEdit rồi chạy installer bằng tay sau khi thoát app); `app_update_later`/`skip` vẫn là công cụ báo lỗi (defer là tùy chọn giao diện, chưa có kênh) |
 
 ### 6. Effects và màu
 
@@ -131,7 +139,7 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Tính năng | Status | Verification | Ghi chú |
 |---|---|---|---|
 | Export H.264 + phụ đề đốt vào, draft 720p | works | Linux VM | Lỗi filter dấu `:` trên Windows đã sửa ở Phase 7 nhưng người dùng chưa xác nhận lại trên Windows thật |
-| Export preset đủ 10 mục gốc | partial | Linux VM | TikTok/Reels/Shorts 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ (prores_ks, .mov); preset lạ báo lỗi, không rơi về H.264 lặng; render 4K và ProRes đầy đủ CHƯA chạy (chỉ assert mapping + render youtube1080/quickdraft) — cần kiểm tra trên Windows thật |
+| Export preset đủ 10 mục gốc | partial | Linux VM | TikTok/Reels/Shorts 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ (prores_ks, .mov); preset lạ báo lỗi, không rơi về H.264 lặng; vòng ba đã chạy render thật trên máy ảo Linux với clip tổng hợp 1s: youtube4k ra 3840×2160 H.264 High (target 45 Mbps, thực tế ~25,8 Mbps cho clip test ngắn) và proRes422HQ ra .mov ProRes profile HQ ở đúng kích thước project (preset ProRes giữ kích thước project theo thiết kế). Giới hạn thật: clip nguồn chỉ 320×180 nên bản 4K là upscale, chưa phải footage 4K gốc; vẫn cần kiểm tra trên Windows thật với footage thật |
 | OTIO export/import, batch export | works | Linux VM | Import OTIO merge có backup trước khi ghi (Phase 0); file media thiếu được liệt kê, không bịa |
 | Review workflow (run/accept/verify + các công cụ con) | works | Linux VM | run/accept/verify thật, không bịa verdict; các công cụ review con (compare/coverage/layout/measure/packet/picture/shots/sync/window) trả dữ liệu từ lần review run thật, hoặc báo lỗi rõ nếu chưa chạy review |
 
@@ -140,8 +148,9 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Tính năng | Status | Verification | Ghi chú |
 |---|---|---|---|
 | CLI `vibeedit` (serve, mcp, export…) | works | Linux VM | Cần kiểm tra lại trên Windows thật (đường dẫn, quyền) |
-| MCP 472 công cụ (334 thao tác thật, 138 kiểm tra-và-báo-lỗi) | partial | Linux VM | Số live từ registry; UI/help đọc live từ `/api/mcp-tools`, không còn số ghi cứng trong `static/`; vòng hai chuyển thêm 29 công cụ từ báo-lỗi thành thao tác thật (knowledge 21, skills ghi 6, voice_check, app_update_check) và thêm 9 công cụ mới (caption transcribe/generate/align, media_transcribe, fonts_import, timeline_reorder thật; chat_stop/view_compare/view_safe_area báo lỗi theo thiết kế). Test quét toàn bộ registry bắt mọi công cụ mồ côi (có mô tả mà không có handler) |
-| Các tên gốc còn thiếu sau đợt full-parity vòng hai | missing — planned to port | Đọc source gốc | Voice provider — tạo/clone giọng (10 công cụ; chỉ mới có `voice_check` kiểm tra thật backend đã cài và số voiceover take); app updater (update/later/skip — chưa có updater nào được cấu hình; chỉ mới có `app_update_check` trả trạng thái thật); model segmentation học sâu cho cutout tốt hơn; dời marker khi move clip và khi close_gaps; panel giao diện cho các tính năng mới (knowledge/skills/vision/plugin install/reframe/link/magnetic — hiện mới có API/MCP/server op). Các công cụ này hiện trả lỗi `NOT_AVAILABLE` kèm lý do và hướng port, không trả thành công giả. Riêng `chat.stop`, `view.compare`, `view.safe-area` giữ nguyên là công cụ báo lỗi theo thiết kế: không có chat session nào để dừng (bản gốc cũng đã gỡ panel model-API), còn Compare và Safe-area đã có sẵn dưới dạng điều khiển trong giao diện web — MCP headless không có viewer để bật/tắt |
+| MCP 478 công cụ (346 thao tác thật, 132 kiểm tra-và-báo-lỗi) | partial | Linux VM | Số live từ registry; UI/help đọc live từ `/api/mcp-tools`, không còn số ghi cứng trong `static/`; vòng ba chuyển thêm 6 công cụ giọng từ báo-lỗi thành thao tác thật (synthesize/speak/lines/use/fit/place) và thêm 6 công cụ mới (4 alias tên gốc, `app_update_download`, `vision_cutout_model`). Test quét toàn bộ registry bắt mọi công cụ mồ côi (có mô tả mà không có handler); test vòng ba bắt mọi handler mới phải báo lỗi có kiểm soát (ValueError) thay vì KeyError khi thiếu tham số |
+| Các tên gốc còn thiếu sau đợt full-parity vòng ba | works (bao phủ tên) — xem giới hạn | Linux VM | Rà soát lại bằng regex đa dòng: cả 249 spec gốc đều có tên tương ứng trong registry (4 tên qua alias thật). Những gì thực sự còn chưa port xong, không còn là "tên thiếu": thu voiceover trong app, clone giọng (cần model provider clone), bản thân updater thay app đang chạy (cần người dùng chọn vị trí releases thật), thực thi model segmentation học sâu cho cutout (vòng ba chỉ thêm khe cắm backend: nhận đường dẫn model do người dùng cung cấp, thiếu model thì báo rõ tên model thiếu, có model nhưng thiếu ONNX Runtime thì báo rõ runtime thiếu, không bao giờ trả kết quả grabCut giả làm "learned"), thực thi code plugin dạng manifest, fetch cập nhật plugin từ registry, transition halftone (pre-rendered segment). Riêng `chat.stop`, `view.compare`, `view.safe-area` giữ nguyên là công cụ báo lỗi theo thiết kế: không có chat session nào để dừng (bản gốc cũng đã gỡ panel model-API), còn Compare và Safe-area đã có sẵn dưới dạng điều khiển trong giao diện web — MCP headless không có viewer để bật/tắt |
+| Panel giao diện cho tính năng vòng một/vòng hai | works | Linux VM | Vòng ba đã nối panel thật, không còn nút chết: Knowledge & Skills (list/get/enable/disable/remove có confirm/save/propose draft/add lesson), Vision (OCR/faces/cutout/learned-model — thiếu backend thì báo rõ, không trả kết quả giả), cài plugin (folder/.zip + download URL chỉ-download có confirm), toggle Magnetic trên thanh timeline. Mọi control đều gọi op server thật và được test quét id + op |
 | Kho kiến thức / skill cho agent (knowledge/skills store) | works | Linux VM | Knowledge store đã hoạt động (vòng hai): lessons/facts/prefs/claims/proposals/memo/history/verdicts/revert/migrate, lưu trong chính project data (đi cùng save/backup/undo), nội dung đều do người gọi cung cấp, không bịa lesson/fact nào; 21 công cụ MCP thật + server op `knowledge` theo action. Skills đã đủ cả đọc và ghi: list/get/search + save (header provenance User-written, từ chối ghi đè nếu không có overwrite), enable/disable (state `skills.json`), export nguyên văn, remove (cần confirm=true), propose (bản nháp dưới `proposals/`, không liệt kê thành skill hoạt động). `windows/skills/` có 4 skill (1 skill gốc chép nguyên văn `loudness-check` từ cây gốc, 3 skill ghi rõ là suy ra từ tài liệu gốc). Giới hạn: proposal không tự duyệt — cần approve tường minh |
 | Terminal cho agent trong app (in-app LLM terminal) | works (parity by design) | Đọc source gốc | Bản gốc cũng KHÔNG có chat LLM trong app (panel model-API đã bị gỡ trong `AgentDockModel.swift`; agent chạy trong terminal nhúng Claude/Codex/Shell) — tương đương trên Windows là terminal/VS Code ngoài nối qua MCP; không phải tính năng thiếu |
 
@@ -150,8 +159,8 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Tính năng | Status | Verification | Ghi chú |
 |---|---|---|---|
 | 2 plugin mẫu, áp plugin, liệt kê, bật/tắt, quét lại | works | Linux VM | Tắt plugin nay được `apply_plugin` thực thi (sửa ở code-gap batch 2); trạng thái lưu ở `windows/plugins.json` |
-| Cài plugin từ URL/bundle, cập nhật plugin | partial | Linux VM | Cài đặt đã hoạt động: folder hoặc .zip, manifest kiểm tra trước khi copy (từ chối id không an toàn, traversal, symlink, bundle nhiều thư mục, >50 MiB, trùng id), cài xong ở trạng thái tắt, có cảnh báo nguồn không tin cậy, không thực thi code khi cài; download URL là bước riêng cần xác nhận; remove (từ chối khi đang bật) và update-check (chỉ metadata, không fetch) đã có; plugin manifest nay được `list_plugins` phát hiện và bật/tắt được. Còn thiếu: thực thi code của plugin dạng manifest (apply báo lỗi rõ thay vì giả vờ chạy); fetch cập nhật từ registry (không có registry nào được bịa ra) |
-| Vision / OCR / cutout (plugin vision gốc) | partial | Linux VM | Pipeline đã có thật qua `vision.py` + server op + công cụ MCP (OCR bằng Tesseract, detect faces bằng OpenCV Haar, cutout bằng OpenCV grabCut), nhưng chạy được chỉ khi máy đã cài backend đó; trên máy ảo Linux này cả Tesseract và OpenCV đều vắng nên các công cụ trả lỗi rõ tên backend thiếu và cách cài, không bao giờ trả kết quả giả. Còn thiếu: model segmentation học sâu tương đương mask của Apple Vision (không bundle, không tham chiếu model nào không tồn tại); panel Vision trong giao diện web |
+| Cài plugin từ URL/bundle, cập nhật plugin | partial | Linux VM | Cài đặt đã hoạt động: folder hoặc .zip, manifest kiểm tra trước khi copy (từ chối id không an toàn, traversal, symlink, bundle nhiều thư mục, >50 MiB, trùng id), cài xong ở trạng thái tắt, có cảnh báo nguồn không tin cậy, không thực thi code khi cài; download URL là bước riêng cần xác nhận; remove (từ chối khi đang bật) và update-check (chỉ metadata, không fetch) đã có; plugin manifest nay được `list_plugins` phát hiện và bật/tắt được. Vòng ba đã nối form cài/download trong panel Templates vào op thật. Còn thiếu: thực thi code của plugin dạng manifest (apply báo lỗi rõ thay vì giả vờ chạy); fetch cập nhật từ registry (không có registry nào được bịa ra) |
+| Vision / OCR / cutout (plugin vision gốc) | partial | Linux VM | Pipeline đã có thật qua `vision.py` + server op + công cụ MCP (OCR bằng Tesseract, detect faces bằng OpenCV Haar, cutout bằng OpenCV grabCut), nhưng chạy được chỉ khi máy đã cài backend đó; trên máy ảo Linux này cả Tesseract và OpenCV đều vắng nên các công cụ trả lỗi rõ tên backend thiếu và cách cài, không bao giờ trả kết quả giả. Vòng ba đã thêm panel Vision trong giao diện web (nối tới op thật) và khe cắm learned cutout: `cutout_segmented(path, model_path)` — thiếu model thì báo rõ tên model thiếu, có model nhưng thiếu ONNX Runtime thì báo rõ runtime thiếu; khi đủ cả hai mới chạy với giả định đã ghi rõ (input NCHW float, output đầu tiên là mask, ngưỡng 0,5, resize NEAREST, lưu RGBA PNG). Còn thiếu: model segmentation thật và ONNX Runtime trên máy người dùng (không bundle, không tham chiếu model nào không tồn tại) |
 
 ### 10. Tích hợp native và phát hành Windows
 
@@ -161,9 +170,46 @@ bản port đang phát triển, `VibeEdit/` hiện vẫn là mã Swift/macOS.
 | Tắt app sạch (server dừng cùng cửa sổ) | works | Linux VM | Phase 2: `shutdown_server` (shutdown + server_close + join thread) trên mọi đường thoát (đóng cửa sổ, Ctrl+C, lỗi); cổng được ràng buộc lại ngay sau khi tắt — đã kiểm chứng bằng test và smoke. Cần kiểm tra lại trên Windows thật (cửa sổ pywebview thật) |
 | Launcher `.bat`/`.ps1` (chạy, cập nhật bằng git pull, desktop) | partial | Linux VM (chưa chạy trên Windows) | Launcher đã chấp nhận FFmpeg ở 3 vị trí (VIBEEDIT_FFMPEG_DIR, PATH, cạnh app); người dùng cần chạy thử trên Windows thật |
 | Phím tắt chuẩn Windows (Ctrl thay Command) | works | Linux VM | Phase 2: Ctrl+Z hoàn tác, Ctrl+Shift+Z/Ctrl+Y làm lại, Ctrl+S lưu qua endpoint `/api/save`; phím một chữ cái bỏ qua khi giữ Ctrl nên Ctrl+S không còn tách clip vô tình. Cần kiểm tra lại trong trình duyệt Windows thật |
-| Bộ cài / .exe cho máy Windows sạch (bundle runtime + FFmpeg/FFprobe) | missing — planned to port | Đọc source gốc | Workflow `build-windows.yml` đã có sẵn ở máy phát triển (Phase 6) nhưng CHƯA có trong repo (đẩy workflow qua GitHub App bị chặn 403) và CHƯA từng chạy; người dùng cần đẩy file này bằng git thật hoặc giao diện web GitHub, rồi tải .exe từ lần chạy Actions xanh; chưa kiểm tra điều khoản phân phối của FFmpeg bundle |
+| Bộ cài / .exe cho máy Windows sạch (bundle runtime + FFmpeg/FFprobe) | missing — planned to port | Đọc source gốc | Workflow `build-windows.yml` đã có sẵn ở máy phát triển (Phase 6) nhưng CHƯA có trong repo (đẩy workflow qua GitHub App bị chặn 403) và CHƯA từng chạy; người dùng cần đẩy file này bằng git thật hoặc giao diện web GitHub, rồi tải .exe từ lần chạy Actions xanh; chưa kiểm tra điều khoản phân phối của FFmpeg bundle. Vòng ba đã sửa một defect thật trong `build_windows.bat`: trước đây chỉ cài PyInstaller trong khi bản đóng gói cần cả Pillow cho đường vision cutout (import lazy trong `vision.py`) — nay cài `pillow pyinstaller`; core editor/export không cần Pillow. Chưa có .exe nào được build và chưa có CI nào chạy — không tuyên bố khác |
+| Màn hình chính vừa viewport, không lăn chuột (1280×720–1920×1080, scaling 125%/150%) | partial | Linux VM (chỉ kiểm chứng bằng CSS + tính toán, chưa nhìn thấy trên Windows thật) | Vòng ba sửa theo đúng số liệu gốc đã đọc kỹ (xem ghi chú cuối bảng): cột phải 300 (340 khi viewport ≥1680) thay cho 380 cố định; cột trái 356 → 300 dưới 1161 → 280 dưới 860; timeline theo đúng ruler 22 / hàng 29 / hàng Main 46 / cách 6 và pane cao tối đa clamp(300px, 46vh, 480px) ≈ ideal 330 của bản gốc, cuộn nội bộ khi vượt; preview flex vừa pane (kiểu Fit gốc, margin thay bằng padding) thay cho sizing theo vh; rail cuộn nội bộ + tile gọn dưới 900 chiều cao (bản gốc: rail bỏ label dưới 900 và cuộn trong ScrollView; bản web dùng tile chữ nên gọn tile + cuộn nội bộ thay cho icon-only). Đã xóa block media query 1100px cũ bị xung đột — chính nó biến workbench thành dải cuộn ngang ở đúng các chiều rộng hiệu dụng khi scaling (1024/1093/911) khiến cột Inspector bị cắt ở mép phải. Dưới 780px workbench cuộn ngang là phương án cuối (bản gốc từ chối hẳn cửa sổ cỡ đó). CẦN người dùng xác nhận bằng mắt trên Windows thật sau khi pull — chưa render trình duyệt thật ở đây |
 | Windows CI (build + test trên runner Windows) | missing — planned to port | — | Cùng file workflow trên; chưa có CI Windows nào trong repo; CI của cây Swift gốc không phải CI Windows |
 | Test chạy được trên Windows (không giả định `python3`, đường dẫn POSIX) | partial | Linux VM | Phase 2 đã sửa: subprocess `python3` duy nhất đổi sang `sys.executable`, đầu file test ghi rõ lệnh `py` trên Windows. Còn thiếu: chưa từng chạy toàn bộ suite bằng `py` trên Windows thật |
+
+## Ghi chú: số liệu bố cục gốc dùng cho bản sửa viewport vòng ba
+
+Đọc kỹ từ cây Swift gốc (chỉ đọc, không sửa):
+`Views/EditorView+Layout.swift` (rail 54, library 300–520 mặc định 372
+trên màn hình ≥1680 còn không thì 300, viewer tối thiểu 260, cột
+editor tối thiểu 860, Inspector 300 / 340 từ cửa sổ ≥1680, timeline
+tối thiểu 170 / lý tưởng 330, cửa sổ tối thiểu cao 600, rộng 860 hoặc
+1161 khi có cột agent), `EditorView+Rail.swift` (dưới 900 chiều cao
+rail bỏ label, label thành tooltip, rail vẫn cuộn), `EditorView+
+Toolbar.swift` (cửa sổ hẹp gấp các mục cuối toolbar vào menu ☰ bằng
+ViewThatFits thay vì đẩy hàng xuống hay đẩy nội dung ra ngoài),
+`EditorView+Viewer.swift` (Fit giữ margin 24, vừa pane, không cuộn ở
+chế độ Fit; Compare gốc là player thứ hai mask nửa trái + vạch chia
+và nhãn Before/After — bản web đang dùng hai player cạnh nhau, đã ghi
+rõ là không khóa khung hình và không phải masked wipe),
+`SourceViewer.swift` (In/Out + Insert E / Overwrite Q),
+`InspectorView.swift` + `+Speed` (cột Inspector cuộn nội bộ; control
+số gồm label + ô 60–70 + slider bên dưới) + `+Crop`,
+`WelcomeView.swift` (cột trái tối đa 440 + padding 40, cột recent tối
+thiểu 240 / lý tưởng 480 / tối đa 480 + padding 32, welcome tối thiểu
+rộng 560), `RecentProjectsView.swift` (danh sách cuộn nội bộ, tối đa
+cao 420), `Core/Services/EditorUIState.swift` (mặc định hiện library
+panel và agent dock), `Views/Timeline/TimelineLayout.swift` (ruler 22,
+hàng 29, hàng Main 46, cách hàng 6, footer 22).
+Quy đổi: 1pt = 1 CSS px ở scale 100% (điểm AppKit map 1:1 sang CSS px;
+Windows scaling 125%/150% làm viewport CSS nhỏ lại nên các breakpoint
+kích hoạt đúng khi cửa sổ hiệu dụng thu nhỏ — cùng điều kiện với
+chiều rộng cột theo cửa sổ của bản gốc). Hành vi khi cửa sổ nhỏ của
+bản gốc được giữ tương đương: cửa sổ không thu dưới minSize (bản web
+không ép được kích thước cửa sổ nên dùng bậc cột 356→300→280 và
+workbench cuộn ngang chỉ dưới 780px làm phương án cuối); panel có thể
+ẩn (bản gốc) tương đương với cuộn nội bộ từng panel (bản web); rail
+gọn + cuộn nội bộ; toolbar gấp mục (bản gốc) tương đương với topbar
+và player-head wrap hàng (bản web, không cắt nội dung); timeline giữ
+chiều cao lý tưởng và canvas cuộn nội bộ; viewer Fit vừa pane.
 
 ## Những gì KHÔNG phải là tính năng thiếu
 

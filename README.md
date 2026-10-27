@@ -57,14 +57,15 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
 
 ## Current status (honest, full-parity round 2 — after Phase 2)
 
-- **MCP: 472 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **334
-  real-operation tools and 138 check-and-error tools** that raise a
+- **MCP: 478 tools** (live count from the app's `/api/mcp-tools`
+  endpoint; the number in docs goes stale as tools are added): **346
+  real-operation tools and 132 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
-  never a fake success. This is NOT a claim of 249/249 original names:
-  original and Windows names differ through renaming, and the Windows
-  build has Windows-specific tools too; the original names still
-  missing are listed honestly in `windows/PARITY.md`.
+  never a fake success. Round 3 verified by test that all 249 original CommandCatalog
+  spec names have a registry name (dots/hyphens normalised, 4 via
+  real aliases sharing handlers, as in the original's own
+  shared-handler design); what remains genuinely unported is listed
+  honestly in `windows/PARITY.md`.
 - **Working:** project/media/timeline editing (cut, trim, move,
   copy/paste, split, undo/redo, markers, close gaps), full magnetic
   Main block-move + linked audio, source and export preview, audio
@@ -76,7 +77,7 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   plugins with enable/disable/install, desktop window with clean
   shutdown, Ctrl shortcuts, magnetic reorder, knowledge store,
   skills read + write, caption transcription/generation/alignment
-  (where faster-whisper is installed), font import, and 369 tests
+  (where faster-whisper is installed), font import, and 384 tests
   OK on the Linux VM.
 - **Partial:** Compare view is not frame-locked; ProRes/4K export
   presets are mapped but not fully rendered; plugin install works
