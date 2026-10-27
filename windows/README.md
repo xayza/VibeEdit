@@ -17,6 +17,53 @@
   Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
   `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
 
+## Phase 0 — bảng parity và an toàn dữ liệu (mới nhất)
+
+Mục tiêu sản phẩm là **chuyển TOÀN BỘ BashCut gốc macOS thành ứng dụng
+Windows mang tên VibeEdit** — không giới hạn ở MVP hay Giai đoạn 1, và
+không chủ động bỏ tính năng nào của bản gốc. Bảng parity đầy đủ ở
+[`PARITY.md`](PARITY.md): mỗi tính năng ghi works / partial /
+missing — planned to port kèm mức độ xác minh (Windows thật / Linux VM /
+chỉ đọc source gốc). Không có tính năng gốc nào bị ghi là "out of scope".
+
+Trạng thái hiện tại: **MCP 144/249 công cụ gốc** (số live đọc từ
+`/api/mcp-tools` trong app; số trong tài liệu sẽ cũ đi khi thêm công cụ
+mới). Đã hoạt động: project/media/timeline/preview/audio/captions/
+effects/export cơ bản, CLI + MCP, plugin mẫu, cửa sổ desktop pywebview.
+Hoạt động một phần: Compare chưa khóa khung hình, export preset ProRes/
+4K mới assert mapping chưa render đầy đủ, desktop chưa kiểm tra tắt
+sạch/HiDPI trên Windows thật, phím tắt Ctrl chưa chuẩn hóa, test chưa
+chạy sạch trên Windows. Còn thiếu và sẽ port tiếp (không bỏ):
+vision/OCR/cutout, kho kiến thức/skill cho agent, magnetic đầy đủ +
+linked audio, cài plugin từ URL, ~105 tên công cụ MCP còn lại,
+transition motion-only, bộ cài/.exe cho máy Windows sạch và Windows CI.
+
+An toàn dữ liệu (Phase 0):
+- Upload trùng tên không còn ghi đè: file thứ hai lưu thành `tên-2.ext`,
+  clip cũ vẫn trỏ file cũ.
+- Backup có dọn dẹp: autosave KHÔNG tạo backup mới. Backup chỉ tạo khi
+  lưu lần đầu sau khi mở project và trước thao tác ảnh hưởng dữ liệu
+  (xóa clip/track, ghi đè từ nguồn, đổi format, import OTIO merge, xóa
+  qua MCP). Giữ 1 file `project.json.bak` (bản lưu ngay trước đó) +
+  thư mục `backups/` tối đa 5 bản mới nhất + 1 bản/ngày trong 7 ngày,
+  chỉ chứa JSON project, không chứa media, và không bị liệt kê làm media
+  hay bị copy theo khi nhân bản project.
+- Số công cụ MCP trong giao diện/help nay đọc live từ `/api/mcp-tools`,
+  không còn số ghi cứng trong `static/` (đợt này sửa cả chỗ "106 tools"
+  còn sót trong đoạn mô tả capabilities).
+
+Cấu trúc đích (chưa làm bước hợp nhất trong đợt này): sản phẩm cuối
+cùng chỉ có hai ứng dụng — `BashCut-main` giữ nguyên cho macOS, và
+VibeEdit hoàn thiện thành ứng dụng Windows đầy đủ. Hiện mã Windows đang
+ở `windows/` và `VibeEdit/` vẫn là mã Swift/macOS. Việc hợp nhất mã
+Windows vào `VibeEdit/` chỉ làm SAU KHI port đã hoàn thiện và kiểm thử
+xong, và chỉ dọn cấu trúc cũ khi đã bảo toàn mã và dữ liệu. Bước hợp
+nhất đó có cổng kiểm soát riêng (xem `PARITY.md`: kiểm tra BashCut-main
+còn nguyên, đối chiếu thay đổi riêng của cây Swift, tạo tag/bản lưu
+trước khi hợp nhất, kiểm thử lại app Windows sau hợp nhất) — chưa làm
+trong đợt này, và đợt này không di chuyển/đổi tên/xóa gì trong
+`VibeEdit/` hay `BashCut-main`.
+
 ## Code-gap batch 2 (mới nhất)
 Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP hiện tại: 144/249 công cụ gốc. Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope).
 
