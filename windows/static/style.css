@@ -661,3 +661,15 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .agent-chips button { font-size: 11px; padding: 5px 8px; }
 #agentChatForm { flex-shrink: 0; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Code-gap batch: source In/Out range bar under the player. */
+.source-range { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; }
+.source-range input[type="number"] { width: 90px; }
+.source-range select { max-width: 220px; }
+
+/* Code-gap batch: Compare split view (original: second player masked
+   to one half + Before/After labels). Web equivalent: two players
+   side by side, source on the left, latest export on the right. */
+#compareWrap { display: flex; gap: 8px; }
+#compareWrap > div { flex: 1; min-width: 0; }
+#compareWrap video { width: 100%; }

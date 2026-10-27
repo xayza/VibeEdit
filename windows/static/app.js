@@ -3,7 +3,7 @@
    latest export only (Phase 1 limit); dragging a clip saves once on
    drop, and the server rejects overlaps. */
 let project = null, selectedId = null, playheadFrame = 0, pxPerSec = 60;
-let previewMode = "export", previewMediaId = null, previewItemId = null;
+let previewMode = "export", previewMediaId = null, previewItemId = null, lastExportPath = null;
 
 const $ = (id) => document.getElementById(id);
 function fps() {
@@ -44,6 +44,7 @@ async function load() {
   $("btnUndo").disabled = !data.can_undo;
   $("btnRedo").disabled = !data.can_redo;
   syncFormatUI();
+  lastExportPath = data.last_export || null;
   if (previewMode !== "source" && data.last_export) {
     $("preview").src = "/api/preview?" + Date.now();
     $("previewImage").hidden = true;
@@ -152,6 +153,10 @@ function renderMedia() {
     li.addEventListener("dblclick", () => addMediaToTimeline(li.dataset.media));
   });
   $("mediaList").querySelectorAll("[data-add-media]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); addMediaToTimeline(b.dataset.addMedia); }));
+  const srcSel = $("sourceMedia");
+  if (srcSel) srcSel.innerHTML = project.media.map((m) =>
+    `<option value="${m.id}">${mediaBaseName(m)}</option>`).join("");
+  if (srcSel && previewMediaId) srcSel.value = previewMediaId;
   $("addMedia").innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
   $("beatMedia").innerHTML = project.media.map((m) =>
@@ -315,6 +320,11 @@ function renderInspector() {
   $("inspStrength").value = (item.color && item.color.strength !== undefined) ? item.color.strength : "";
   $("inspPreset").value = (item.color && item.color.preset) || "";
   $("inspPresetStrength").value = (item.color && item.color.preset_strength !== undefined) ? item.color.preset_strength : "";
+  const eq = (item.color && item.color.eq) || {};
+  $("inspEqBrightness").value = eq.brightness !== undefined ? eq.brightness : "";
+  $("inspEqContrast").value = eq.contrast !== undefined ? eq.contrast : "";
+  $("inspEqSaturation").value = eq.saturation !== undefined ? eq.saturation : "";
+  $("inspEqGamma").value = eq.gamma !== undefined ? eq.gamma : "";
   renderKeyframes();
 }
 
@@ -378,6 +388,7 @@ function loadMediaPreview(mediaId) {
   if (!medium) { setStatus("Không tìm thấy media: " + mediaId, true); return; }
   previewItemId = null;
   showSourcePreview(medium);
+  const srcSel = $("sourceMedia"); if (srcSel) srcSel.value = mediaId;
   setStatus(`Đang xem file gốc: ${baseNameOf(medium)}. Bấm ▶ để phát, hoặc thêm clip vào timeline để dựng.`);
 }
 function loadSourcePreviewForItem(item) {
@@ -534,7 +545,12 @@ $("inspectorForm").addEventListener("submit", async (e) => {
     await api("/api/project", { op: "set_fade", item: $("inspId").value, fadeIn: Number($("inspFadeIn").value), fadeOut: Number($("inspFadeOut").value) });
     if ($("inspText").value) await api("/api/project", { op: "set_text", item: $("inspId").value, text: $("inspText").value });
     await api("/api/project", { op: "set_volume", item: $("inspId").value, volume: Number($("inspVolume").value) });
-    if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "" || $("inspPresetStrength").value !== "") await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value), preset_strength: $("inspPresetStrength").value === "" ? null : Number($("inspPresetStrength").value) });
+    const eqVals = {};
+    if ($("inspEqBrightness").value !== "") eqVals.brightness = Number($("inspEqBrightness").value);
+    if ($("inspEqContrast").value !== "") eqVals.contrast = Number($("inspEqContrast").value);
+    if ($("inspEqSaturation").value !== "") eqVals.saturation = Number($("inspEqSaturation").value);
+    if ($("inspEqGamma").value !== "") eqVals.gamma = Number($("inspEqGamma").value);
+    if ($("inspLut").value || $("inspPreset").value || $("inspStrength").value !== "" || $("inspPresetStrength").value !== "" || Object.keys(eqVals).length) await api("/api/project", { op: "set_color", item: $("inspId").value, lut: $("inspLut").value || null, preset: $("inspPreset").value || null, strength: $("inspStrength").value === "" ? null : Number($("inspStrength").value), preset_strength: $("inspPresetStrength").value === "" ? null : Number($("inspPresetStrength").value), eq: Object.keys(eqVals).length ? eqVals : null });
     setStatus("Clip updated."); await load();
   } catch (err) { setStatus(err.message, true); }
 });
@@ -959,7 +975,118 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const safeBtn = $("btnPreviewSafe"), safe = $("safeAreaOverlay");
   if (safeBtn && safe) safeBtn.addEventListener("click", () => { safe.hidden = !safe.hidden; setStatus(safe.hidden ? "Safe-area guide hidden." : "Safe-area guide shown (display guide only, not a render setting)."); });
   const cmpBtn = $("btnPreviewCompare");
-  if (cmpBtn) cmpBtn.addEventListener("click", () => setStatus("Compare view is not available yet — the preview shows the latest export only.", true));
+  // Code-gap batch: REAL Compare split view. Original (EditorView+Viewer):
+  // a second player masked to one half + Before/After labels. Web
+  // equivalent: source player on the left, latest export on the right,
+  // side by side. It is NOT a frame-accurate masked wipe, and the two
+  // players are not frame-locked — stated honestly in the status line.
+  let lastSourceMediaId = null, compareOn = false;
+  const _showSource = showSourcePreview;
+  showSourcePreview = function (medium) { lastSourceMediaId = medium.id; return _showSource(medium); };
+  function setCompare(on) {
+    compareOn = on;
+    const wrap = $("compareWrap"), video = $("preview"), img = $("previewImage");
+    if (!wrap) return;
+    if (!on) { wrap.hidden = true; video.hidden = false; return; }
+    const srcId = lastSourceMediaId || previewMediaId ||
+      (selectedId && findItem(selectedId) ? findItem(selectedId).item.media : null);
+    const src = srcId ? project.media.find((m) => m.id === srcId) : null;
+    if (!src) { compareOn = false; setStatus("Chưa có file nguồn nào để so sánh — bấm vào một clip hoặc file media trước.", true); return; }
+    if (!lastExportPath) { compareOn = false; setStatus("Chưa có bản xuất nào để so sánh — xuất bản nháp trước.", true); return; }
+    video.hidden = true; img.hidden = true;
+    $("previewCompareSource").src = "/api/media/" + encodeURIComponent(src.id);
+    $("previewCompareExport").src = "/api/preview?" + Date.now();
+    wrap.hidden = false;
+    setStatus("So sánh: trái = file nguồn (Before), phải = bản xuất gần nhất (After). Hai trình phát không khóa khung hình với nhau.");
+  }
+  const cmpModeBtn = $("btnPreviewCompareMode");
+  if (cmpModeBtn) cmpModeBtn.addEventListener("click", () => setCompare(!compareOn));
+  if (cmpBtn) cmpBtn.addEventListener("click", () => setCompare(!compareOn));
+  // Source viewer In/Out + Insert at playhead (original E/Q workflow).
+  function sourceMediaFps() {
+    const medium = project.media.find((m) => m.id === $("sourceMedia").value);
+    if (!medium) return fps();
+    if (Array.isArray(medium.fps)) return medium.fps[0] / medium.fps[1];
+    return medium.fps || fps();
+  }
+  function markSource(which) {
+    const video = $("preview");
+    if (!video || video.hidden || isNaN(video.duration)) { setStatus("Chưa có video nguồn đang phát để đánh dấu.", true); return; }
+    const frame = Math.round(video.currentTime * sourceMediaFps());
+    if (which === "in") $("sourceIn").value = frame; else $("sourceOut").value = frame;
+    $("sourceRangeStatus").textContent = `Đã đánh dấu ${which === "in" ? "In" : "Out"} = ${frame} frames.`;
+  }
+  const markInBtn = $("btnSourceMarkIn"), markOutBtn = $("btnSourceMarkOut");
+  if (markInBtn) markInBtn.addEventListener("click", () => markSource("in"));
+  if (markOutBtn) markOutBtn.addEventListener("click", () => markSource("out"));
+  async function placeSource(overwrite) {
+    const media = $("sourceMedia").value;
+    const inF = Number($("sourceIn").value), outF = Number($("sourceOut").value);
+    if (!media) { setStatus("Chọn một file nguồn trước.", true); return; }
+    if (!(outF > inF)) { setStatus("Out phải lớn hơn In.", true); return; }
+    try {
+      const data = await api("/api/project", { op: overwrite ? "source_overwrite" : "source_insert", media, in: inF, out: outF, at: playheadFrame });
+      await load();
+      if (data.result && data.result.id) selectClipAndPreview(data.result.id);
+      setStatus(overwrite ? `Đã ghi đè đoạn ${inF}–${outF} frames vào playhead.` : `Đã chèn đoạn ${inF}–${outF} frames vào playhead.`);
+    } catch (err) { setStatus(err.message, true); }
+  }
+  const srcInsertBtn = $("btnSourceInsert");
+  if (srcInsertBtn) srcInsertBtn.addEventListener("click", () => placeSource(false));
+  const srcOverwriteBtn = $("btnSourceOverwrite");
+  if (srcOverwriteBtn) srcOverwriteBtn.addEventListener("click", () => placeSource(true));
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    // Original shortcuts, from UIAction.swift: I = Mark In, O = Mark Out,
+    // E = Insert source range at playhead, Q = Overwrite at playhead.
+    if (e.key === "i" || e.key === "I") markSource("in");
+    if (e.key === "o" || e.key === "O") markSource("out");
+    if (e.key === "e" || e.key === "E") placeSource(false);
+    if (e.key === "q" || e.key === "Q") placeSource(true);
+  });
+  // Close gaps on the Main track.
+  const closeGapsBtn = $("tlCloseGaps");
+  if (closeGapsBtn) closeGapsBtn.addEventListener("click", async () => {
+    try {
+      const data = await api("/api/project", { op: "close_gaps" });
+      setStatus(`Đã khít khoảng trống: ${data.result.moved.length} clip đã dịch chuyển.`);
+      await load();
+    } catch (err) { setStatus(err.message, true); }
+  });
+  // Colour reset (sliders + LUT).
+  const colorResetBtn = $("btnColorReset");
+  if (colorResetBtn) colorResetBtn.addEventListener("click", async () => {
+    if (!selectedId) { setStatus("Chọn một clip trước.", true); return; }
+    try {
+      await api("/api/project", { op: "set_color", item: selectedId, clear_eq: true, clear_lut: true });
+      setStatus("Đã đặt lại màu của clip (xóa eq + LUT).");
+      await load(); renderInspector();
+    } catch (err) { setStatus(err.message, true); }
+  });
+  // Project switcher (welcome/recent-projects equivalent): list, open, create.
+  async function refreshProjectList() {
+    try {
+      const res = await fetch("/api/projects"); const data = await res.json();
+      const sel = $("projectSelect"); if (!sel) return;
+      sel.innerHTML = (data.projects || []).map((p) => `<option value="${p.folder}" ${p.current ? "selected" : ""}>${p.name} (${p.folder})</option>`).join("");
+    } catch (err) { /* list failure never breaks the editor */ }
+  }
+  const openProjBtn = $("btnProjectOpen");
+  if (openProjBtn) openProjBtn.addEventListener("click", async () => {
+    const folder = $("projectSelect").value;
+    if (!folder) return;
+    try { await api("/api/project/open", { folder }); await load(); await refreshProjectList(); setStatus("Đã mở project: " + folder); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  const createProjBtn = $("btnProjectCreate");
+  if (createProjBtn) createProjBtn.addEventListener("click", async () => {
+    const name = $("projectNewName").value.trim();
+    if (!name) { setStatus("Nhập tên project mới trước.", true); return; }
+    try { await api("/api/project/create", { name }); await load(); await refreshProjectList(); setStatus("Đã tạo và mở project: " + name); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  refreshProjectList();
   const playBtn = $("btnPreviewPlay"), backBtn = $("btnPreviewBack");
   if (playBtn) playBtn.addEventListener("click", () => {
     const img = $("previewImage");
