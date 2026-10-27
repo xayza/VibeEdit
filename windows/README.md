@@ -17,6 +17,9 @@
   Muốn cập nhật kiểu trên thì clone một lần như trên, rồi copy thư mục
   `windows/projects/` cũ của bạn sang bản clone để giữ nguyên các project.
 
+## Code-gap batch 2 (mới nhất)
+Soát tiếp từ code gốc và cập nhật: timeline redo (MCP), export preset theo đúng ExportPreset của bản gốc (TikTok/Reels/Shorts 1080x1920 8 Mbps, Feed 4:5 5 Mbps, Square, Portrait 3:4, YouTube 1080p 12 Mbps, YouTube 4K 45 Mbps, Quick Draft 720p 4 Mbps, ProRes 422 HQ qua prores_ks .mov), đường cong tốc độ (montage/hero/bullet/jump-cut/flash-in/flash-out theo đúng điểm trong SpeedCurve.swift), đảo ngược clip (reverse/areverse), đóng băng khung hình, quy trình review chạy/chấp nhận/kiểm tra lại, màn hình chào mừng với project gần đây + Reveal (Windows) + Copy đường dẫn + xóa khỏi gần đây (không xóa file project), thư viện clip + brand kit, panel plugin có bật/tắt/quét lại, thêm loại transition của bản gốc mà FFmpeg xfade có thật (shutter, double-exposure, seamless/infinite/crash zoom, blur, flash/blink, roll). MCP hiện tại: 144/249 công cụ gốc. Chưa làm trong đợt này: vision/OCR/cutout (cần model ML), kho kiến thức/skill (21+8 công cụ), di chuyển magnetic cả khối + âm thanh gắn liền, và các loại transition chỉ có bằng motion của bản gốc (spin, swing/arc, diamond, kaleidoscope).
+
 ## Cửa sổ desktop thật (không phải tab trình duyệt)
 
 - **Cài một lần:** `pip install pywebview` trong `.venv` của bạn.
@@ -55,7 +58,7 @@
   buttons. The input runs real safe commands (list clips, export
   draft, review, stats, workspace, undo/redo); anything else gets an
   honest reply that no LLM is connected in-app, with the real MCP
-  command `python windows\vibeedit.py mcp <project-folder>` (123
+  command `python windows\vibeedit.py mcp <project-folder>` (144
   tools). No fake AI replies, no fake timeline edits, no fake
   voices. There is no terminal emulator in the web UI — use your
   own terminal for the MCP agent.
@@ -486,8 +489,8 @@ built and downloaded from a green Actions run (the workflow
 exists but has not run yet — it can only run on GitHub after
 the user pushes the workflow file, which the GitHub App
 connection cannot write), voice providers, additional
-transcription providers, or the remaining ~126 original MCP
-tools (123 of 249 ported). Still open: a visual UI check in a
+transcription providers, or the remaining ~105 original MCP
+tools (144 of 249 ported). Still open: a visual UI check in a
 real browser on Windows. See the Phase 8 list in
 `VibeEdit/docs/windows-port.md` for what is left, all of which
 needs the user's Windows or macOS machine.
@@ -565,13 +568,7 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-123 tools (106 Phase 8 total + 17 code-gap batch tools: per-clip
-eq colour, source insert/overwrite, close-gaps, project list,
-track rename/remove, beat/marker/overlap/media-usage/search/
-duration/text/colour-reset/clip-count queries) — see the
-code-gap batch tests for the newest 17, Phase 8 for the
-previous 16, Phase 7 for the 12 before those, and Phase 6 for
-the 12 before those. Every tool calls a real Project or export
+144 tools (123 after code-gap batch 1 + 21 new code-gap batch 2 tools: timeline redo, adjustments/beats/track/media queries, speed curves, reverse, freeze, review run/accept/verify, library add/list/place/remove, brand set/get, export presets, plugin list/enable/disable; marker move and ducking get already existed) — see the code-gap batch 2 tests for the newest 23. Every tool calls a real Project or export
 operation; none is a stub.
 
 ## Tests

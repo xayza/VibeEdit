@@ -881,7 +881,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const lower = msg.toLowerCase();
     try {
       if (lower === "help" || lower.includes("help")) {
-        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (106 MCP tools). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
+        agentSay("Commands I can really run here: list clips, export, review, stats, undo, redo, workspace, project context. For full AI editing, connect an external agent: python windows\\vibeedit.py mcp <project-folder> (144 MCP tools). I am not a connected LLM, so I do not generate scripts or voices in this panel.");
       } else if (lower.includes("list clip")) {
         const items = [];
         for (const t of project.tracks) for (const it of t.items) items.push(`${t.name}: ${it.text || it.media || it.id} (${(it.at / fps()).toFixed(2)}s)`);
@@ -1154,4 +1154,99 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     await load();
     setStatus("Đang xem: bản xuất gần nhất. Muốn xem file gốc thì bấm vào clip hoặc file media.");
   });
+})();
+
+/* Code-gap batch 2 wiring (guarded lookups only): export presets,
+   review workflow, speed curve / reverse / freeze, library, brand,
+   plugin list/enable/disable, welcome panel. */
+(function gapBatch2Wiring() {
+  const needClip = () => { if (!selectedId) { setStatus("Hãy chọn một clip trên timeline trước.", true); return false; } return true; };
+  const post = async (body) => { const d = await api("/api/project", body); await load(); return d; };
+  const sc = $("speedCurveForm");
+  if (sc) sc.addEventListener("submit", async (e) => {
+    e.preventDefault(); if (!needClip()) return;
+    try { const d = await post({ op: "speed_curve", item: selectedId, preset: $("speedCurvePreset").value });
+      $("speedCurveResult").textContent = `Đã áp dụng ${d.result.preset} thành ${d.result.segments.length} đoạn, tốc độ: ${d.result.speeds.join(", ")}.`; }
+    catch (err) { $("speedCurveResult").textContent = `Áp dụng đường cong thất bại: ${err.message}`; }
+  });
+  const rev = $("btnClipReverse");
+  if (rev) rev.addEventListener("click", async () => {
+    if (!needClip()) return;
+    try { await post({ op: "clip_reverse", item: selectedId, reverse: true }); setStatus("Clip sẽ phát ngược khi xuất (cờ reverse đã lưu)."); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  const frz = $("btnClipFreeze");
+  if (frz) frz.addEventListener("click", async () => {
+    if (!needClip()) return;
+    try { const d = await post({ op: "freeze_clip", item: selectedId, frames: 30 });
+      setStatus(`Đã thêm đoạn đóng băng ${d.result.dur} khung hình sau clip đang chọn.`); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  const expP = $("btnExportPreset");
+  if (expP) expP.addEventListener("click", async () => {
+    const preset = $("exportPresetSelect").value; if (!preset) { setStatus("Hãy chọn một preset xuất trước.", true); return; }
+    try { setStatus(`Đang xuất theo preset ${preset}…`); const d = await api("/api/export", { preset: "full", export_preset: preset });
+      setStatus(`Xuất preset ${preset} xong: ${d.report.width}x${d.report.height}, codec ${d.report.video_codec}.`); await load(); }
+    catch (err) { setStatus(`Xuất preset thất bại: ${err.message}`, true); }
+  });
+  const rr = $("btnReviewRun"), ra = $("btnReviewAccept"), rv = $("btnReviewVerify");
+  const showReview = (d) => { $("reviewWorkflowResult").textContent = `Review: trạng thái ${d.result.status}, số vấn đề ${d.result.issue_count}${d.result.previous_issue_count !== undefined ? ` (lần trước ${d.result.previous_issue_count}, thay đổi: ${d.result.issue_count_changed ? "có" : "không"})` : ""}${d.result.accepted_rev !== undefined ? `, đã chấp nhận ở rev ${d.result.accepted_rev}` : ""}.`; };
+  if (rr) rr.addEventListener("click", async () => { try { showReview(await post({ op: "review_run" })); } catch (err) { $("reviewWorkflowResult").textContent = err.message; } });
+  if (ra) ra.addEventListener("click", async () => { try { showReview(await post({ op: "review_accept" })); } catch (err) { $("reviewWorkflowResult").textContent = err.message; } });
+  if (rv) rv.addEventListener("click", async () => { try { showReview(await post({ op: "review_verify" })); } catch (err) { $("reviewWorkflowResult").textContent = err.message; } });
+  const renderLibrary = async () => {
+    const box = $("libraryList"); if (!box) return;
+    try { const d = await post({ op: "library_list" });
+      box.innerHTML = (d.result.items || []).map((e) => `<div class="library-item">${e.name} <button type="button" class="secondary" data-library-place="${e.id}">Đặt lên timeline</button> <button type="button" class="secondary" data-library-remove="${e.id}">Xóa</button></div>`).join("") || "Thư viện trống.";
+      box.querySelectorAll("[data-library-place]").forEach((b) => b.addEventListener("click", async () => { try { await post({ op: "library_place", entry: b.dataset.libraryPlace }); setStatus("Đã đặt mục thư viện lên timeline."); await renderLibrary(); } catch (err) { setStatus(err.message, true); } }));
+      box.querySelectorAll("[data-library-remove]").forEach((b) => b.addEventListener("click", async () => { try { await post({ op: "library_remove", entry: b.dataset.libraryRemove }); await renderLibrary(); } catch (err) { setStatus(err.message, true); } }));
+    } catch (err) { box.textContent = err.message; }
+  };
+  const la = $("btnLibraryAdd");
+  if (la) la.addEventListener("click", async () => {
+    if (!needClip()) return;
+    try { await post({ op: "library_add", item: selectedId }); await renderLibrary(); setStatus("Đã lưu clip đang chọn vào thư viện."); }
+    catch (err) { setStatus(err.message, true); }
+  });
+  const bf = $("brandForm");
+  if (bf) bf.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const colours = $("brandColours").value.split(",").map((c) => c.trim()).filter(Boolean);
+    try { const d = await post({ op: "brand_set", colours, logo_media: $("brandLogoMedia").value.trim() || null });
+      $("brandResult").textContent = `Đã lưu thương hiệu: màu ${JSON.stringify(d.result.colours || [])}, logo ${d.result.logo_media || "(không có)"}.`; }
+    catch (err) { $("brandResult").textContent = `Lưu thương hiệu thất bại: ${err.message}`; }
+  });
+  const renderPlugins = async () => {
+    const box = $("pluginList"); if (!box) return;
+    try { const res = await fetch("/api/plugins"); const d = await res.json();
+      box.innerHTML = (d.plugins || []).filter((p) => p.name !== "_errors").map((p) => `<div class="plugin-item">${p.name} — ${p.description} (${p.enabled ? "đang bật" : "đang tắt"}) <button type="button" class="secondary" data-plugin-toggle="${p.name}" data-plugin-enable="${p.enabled ? "0" : "1"}">${p.enabled ? "Tắt" : "Bật"}</button></div>`).join("") || "Không có plugin nào.";
+      box.querySelectorAll("[data-plugin-toggle]").forEach((b) => b.addEventListener("click", async () => { try { await post({ op: b.dataset.pluginEnable === "1" ? "plugin_enable" : "plugin_disable", plugin: b.dataset.pluginToggle }); await renderPlugins(); } catch (err) { setStatus(err.message, true); } }));
+    } catch (err) { box.textContent = err.message; }
+  };
+  const pr = $("btnPluginReload");
+  if (pr) pr.addEventListener("click", renderPlugins);
+  renderLibrary(); renderPlugins();
+  // Welcome panel
+  const wp = $("welcomePanel");
+  const loadWelcome = async () => {
+    const box = $("welcomeRecent"); if (!box) return;
+    try { const res = await fetch("/api/projects"); const d = await res.json();
+      const rec = d.recent || [];
+      box.innerHTML = rec.length ? rec.map((r) => `<div class="welcome-item">${r.folder} <button type="button" class="secondary" data-welcome-open="${r.folder}">Mở</button> <button type="button" class="secondary" data-welcome-remove="${r.folder}">Xóa khỏi gần đây</button></div>`).join("") : "Chưa có project gần đây nào — hãy tạo project mới.";
+      box.querySelectorAll("[data-welcome-open]").forEach((b) => b.addEventListener("click", async () => { try { await api("/api/project/open", { folder: b.dataset.welcomeOpen }); await load(); wp.hidden = true; } catch (err) { $("welcomeStatus").textContent = err.message; } }));
+      box.querySelectorAll("[data-welcome-remove]").forEach((b) => b.addEventListener("click", async () => { try { await api("/api/recent/remove", { folder: b.dataset.welcomeRemove }); await loadWelcome(); } catch (err) { $("welcomeStatus").textContent = err.message; } }));
+    } catch (err) { box.textContent = err.message; }
+  };
+  const wb = $("btnWelcome");
+  if (wb && wp) wb.addEventListener("click", async () => { wp.hidden = !wp.hidden; if (!wp.hidden) await loadWelcome(); });
+  const wc = $("btnWelcomeClose");
+  if (wc && wp) wc.addEventListener("click", () => { wp.hidden = true; });
+  const wo = $("btnWelcomeOpen");
+  if (wo) wo.addEventListener("click", async () => { const sel = $("projectSelect"); if (!sel || !sel.value) { $("welcomeStatus").textContent = "Hãy chọn một project trước."; return; } try { await api("/api/project/open", { folder: sel.value }); await load(); wp.hidden = true; } catch (err) { $("welcomeStatus").textContent = err.message; } });
+  const wcr = $("btnWelcomeCreate");
+  if (wcr) wcr.addEventListener("click", () => { const btn = $("btnProjectCreate"); if (btn) btn.click(); });
+  const wr = $("btnWelcomeReveal");
+  if (wr) wr.addEventListener("click", async () => { try { const d = await api("/api/reveal", { folder: $("projectSelect") ? $("projectSelect").value : "" }); $("welcomeStatus").textContent = `Đã mở thư mục: ${d.path}`; } catch (err) { $("welcomeStatus").textContent = `Reveal thất bại: ${err.message}`; } });
+  const wcp = $("btnWelcomeCopyPath");
+  if (wcp) wcp.addEventListener("click", async () => { try { const res = await fetch("/api/projects"); const d = await res.json(); await navigator.clipboard.writeText(d.current || ""); $("welcomeStatus").textContent = "Đã sao chép đường dẫn project hiện tại."; } catch (err) { $("welcomeStatus").textContent = `Copy thất bại: ${err.message}`; } });
 })();
