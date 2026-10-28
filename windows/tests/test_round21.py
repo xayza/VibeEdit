@@ -139,7 +139,8 @@ class TestRound21StillHonest(unittest.TestCase):
                      "vibeedit_agent_dismiss_changes",
                      "vibeedit_agent_undo_changes",
                      "vibeedit_agent_open", "vibeedit_agent_open_chat",
-                     "vibeedit_agent_terminals", "vibeedit_agent_ask",
+                     # Round 22: agent_terminals left (now real).
+                     "vibeedit_agent_ask",
                      "vibeedit_agent_restart_tab",
                      "vibeedit_agent_detach",
                      "vibeedit_agent_tools_install",
@@ -157,7 +158,7 @@ class TestRound21StillHonest(unittest.TestCase):
                      "vibeedit_timeline_header_compact",
                      "vibeedit_show_settings", "vibeedit_platforms_get",
                      "vibeedit_app_vibeedit",
-                     "vibeedit_app_vibeedit_automation_clients",
+                     # Round 22: automation_clients left (now real).
                      "vibeedit_voice_clone_add",
                      "vibeedit_image_generate",
                      "vibeedit_library_generate",
@@ -173,8 +174,8 @@ class TestRound21RegistryCounts(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(honest), 54)
-        self.assertEqual(len(TOOLS) - len(honest), 425)
+        self.assertEqual(len(honest), 52)
+        self.assertEqual(len(TOOLS) - len(honest), 427)
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_agent_status",
                          "vibeedit_app_vibeedit_debug_log"):

@@ -516,3 +516,110 @@ test OK trên Linux VM).
 - **Còn thiếu sau vòng này:** như vòng 15, cộng kiểm chứng trực
   quan 4 kích thước trên Windows thật (ảnh chụp + đo scrollWidth)
   — chưa tuyên bố đã kiểm chứng bằng mắt.
+
+## Vòng 22 — vòng sửa lỗi từ test thật trên Windows (rev sync, zoompan-fps, export nền, inputSchema)
+
+- **MCP 479 = 427 thật + 52 honest:** giữ 2 chuyển đổi của phần audit
+  (agent_terminals, app_vibeedit_automation_clients — danh sách rỗng
+  thật vì server theo thiết kế không có phần tử nào) và không thêm
+  công cụ mới. Vòng sửa lỗi này không tự nó đổi số đếm; mọi test cũ
+  vẫn giữ nguyên ngoài việc bump số đếm theo 427/52 (xem báo cáo vòng).
+- **P0 rev sync (mất dữ liệu):** app giữ project trong RAM và ghi đè
+  toàn bộ khi lưu nên edit của agent ngoài qua MCP bị mất âm thầm
+  (đĩa rev 107, 35 marker → sau POST set_speed vẫn rev 107, 34
+  marker). Sửa: `State.refresh_from_disk()` và `MCPServer._refresh_if_newer()`
+  nạp lại file khi đĩa mới hơn RAM trước mọi apply/call (trừ
+  project_open tự nạp), xóa undo stack cũ khi trạng thái đổi từ ngoài,
+  đọc lỗi không bao giờ động vào RAM; kịch bản báo cáo nay giữ cả
+  marker lẫn speed mới, rev tăng đơn điệu; race ghi thật sự cùng lúc
+  vẫn là giới hạn (cần file locking, ngoài vòng này).
+- **#0 zoompan-fps:** clip 59,94 fps có keyframe scale bị nhân đôi thời
+  lượng vì zoompan phát lại frame theo fps của chính nó và bỏ qua
+  setpts trước đó (người dùng: timeline 226,827 s → video 330,16 s,
+  audio 226,86 s; bỏ keyframe thì đúng 226,76 s). Sửa: chèn
+  `fps={fps project}` TRƯỚC zoompan ở cả hai điểm sinh zoompan
+  (`_motion_filter` cho clip main, đường still-image của overlay) và
+  giữ `fps=` của zoompan bằng fps project; cấm fps trailing sau
+  zoompan (bài học vòng 3). Bằng chứng: thí nghiệm filter cô lập
+  (120 frame 59,94 qua zoompan fps=29,97: 120 frame/4,004 s không có
+  fps trước, 60 frame/2,002 s khi có) + test thứ tự filter (fail-trước).
+  Render đầy đủ nhỏ (đơn clip, đa clip + dissolve) đúng cả ở code cũ
+  vì `-shortest` cắt video nhân đôi tại cuối audio — đó là guard
+  không hồi quy, không phải bằng chứng fail-trước; vì sao `-shortest`
+  không cắt file 330 s của người dùng vẫn còn mở (đường render duy
+  nhất, một điểm `-shortest` duy nhất khi có audio_map) và cần preset/
+  lệnh xuất chính xác của người dùng để đóng lại. Lưới an toàn mới:
+  `_attach_duration_check` ffprobe file sau render, lệch >1,0 s so với
+  timeline thì ghi `duration_check.warning` + in cảnh báo lớn ra
+  stderr, không chặn export, probe lỗi thì chỉ ghi note.
+- **#1 export nền:** `do_POST` từng giữ `state.lock` suốt quá trình
+  render đồng bộ nên GET /api/project timeout trong lúc render
+  (người dùng: 4/5 timeout 6 s, lần thứ 5 chỉ 200 sau khi export xong).
+  Sửa: `start_export_job` render trên worker thread từ snapshot
+  deepcopy, trả job ngay; `GET /api/export/status` không cần lock
+  chính; UI poll 1 s, hiện thanh progress không xác định (renderer
+  không báo % — không bịa % giả) + nút Hủy (chỉ chặn publish, FFmpeg
+  đang chạy vẫn chạy nền, kill process là việc tồn đọng); test HTTP
+  chứng minh GET /api/project <2 s trong lúc render giả chậm 2,5 s.
+  Nguyên nhân 400 trên console chưa truy ra request/body cụ thể
+  (nhiều đường poller/status có thể trả 400 theo thiết kế, vd waveform
+  cho media không decode được) — ghi rõ là chưa đóng.
+- **#2–#6:** Magnetic — `load()` từng đọc `mg.magnetic` trong khi server
+  bọc kết quả trong `result.magnetic` nên aria-pressed luôn false và
+  click luôn gửi enabled:true; nay `_project_view` đưa `magnetic` lên
+  top-level, `load()` đồng bộ từ đó, bỏ fetch magnetic_get; #3 — không
+  phải Delete push 2 snapshot mà `magnetic_get` bị push snapshot qua
+  mỗi lần `load()` (nay early-return không snapshot + không fetch);
+  #4 — Vision/Knowledge/voice/tab-switch nay gọi `setStatus` (toast
+  4 s từ vòng 18 giữ nguyên); #5 OTIO — export ghi path tương đối theo
+  project trong khi file .otio nằm ở render/, import chỉ giải quyết
+  theo thư mục .otio nên luôn trượt rồi lưu relpath tới file không tồn
+  tại (báo Missing: media/mp4); nay thử lần lượt absolute, theo .otio,
+  as-stored, theo dest, dest/media/basename, sourceFolder từ metadata
+  (export nay ghi `sourceFolder`), không tìm thấy thì giữ nguyên
+  target trong `missing`; #6 — tab-close trên Windows ném
+  ConnectionAbortedError, anh em (không phải subclass) của
+  ConnectionResetError nên filter vòng 19 trượt; nay nuốt cả ba, lỗi
+  khác vẫn in traceback.
+- **MCP (a) notification:** `handle()` trả None cho mọi request không có
+  id và mọi method `notifications/*`; `serve()` không ghi gì khi
+  handle trả None (ghi `"null"` cũng là vi phạm); method lạ có id vẫn
+  lỗi -32603. **(b) inputSchema:** trích xuất bằng AST từ code handler
+  (không bịa từ spec Swift — spec không có metadata tham số): 479
+  công cụ đều có inputSchema `{type: object, properties, required}`;
+  270 có properties không rỗng, 209 rỗng thật (157 công cụ zero-arg
+  thật + 52 honest raise trước khi đọc arg) — bịa property cho chúng
+  sẽ vi phạm quy tắc không-bịa nên test assert đúng 270/209 thay vì
+  "mọi công cụ đều non-empty"; alias kế thừa schema gốc; các fix tay
+  đã kiểm chứng từ code tiêu thụ (blur/dim number, times array,
+  kind required, fps number|array…). **(c) nút Sao chép:** server sinh
+  lệnh thật từ vị trí app (`mcp_client_command`: python .venv/Scripts
+  nếu có, else .venv/bin, else sys.executable; script + thư mục project
+  tuyệt đối) qua `/api/agent-status` (`mcp_command`/`mcp_client`); JS
+  điền cả hai ô lệnh từ `d.mcp_command`; nút copy vốn đã copy ô đó.
+  Prose template trong câu help vẫn còn (không phải nguồn copy).
+  **.gitignore:** `windows/.gitignore` mới (`.venv/`, `__pycache__/`,
+  `projects/`, `*.pyc`…).
+- **Mục vague:** picker mở project thứ hai — gãy thật ở `open_project`
+  (từ chối path tuyệt đối ngoài `projects/`; nay cho phép + thêm ô
+  nhập path ở welcome panel); Welcome/Tạo take/Faces/Cutout — không tái
+  hiện lỗi handler trên code (đường dây đã nối, thông báo thiếu backend/
+  thiếu quyền là đúng); Batch rỗng — server cố tình xuất project hiện
+  tại khi list rỗng nên chỉ thêm note UI; "Xem bản xuất" — nay disable
+  khi chưa có `last_export`; "Thêm chữ báo overlap" — đúng, không sửa;
+  chuỗi tiếng Anh bị test khóa giữ nguyên (Save skill, Import a
+  voiceover take, Stickers-not-in-VibeEdit, dropzone subtext); gộp
+  import 3-control chưa đóng (cần audit DOM visibility: nút submit đã
+  visually-hidden nhưng tester vẫn đếm 3).
+- **Góp ý vòng 19/21 đã kiểm chứng còn hoạt động:** poster frame đầu
+  clip main, chỉ báo "Đã lưu", ruler ảo hoá, badge "lệnh nhanh — chưa
+  phải AI", icon SVG, lane/clip radius 6 + ring cyan, ruler thưa tick;
+  media card tên + độ phân giải + thời lượng đúng (chữ "mp4" tester
+  thấy là record hỏng từ OTIO, #5 xử lý gốc). Logo giữ data URI
+  (pipeline push chỉ cho text).
+- Kiểm chứng: py_compile các file chạm tới, node --check, nhóm mục tiêu
+  (test_round18 + 19 + 20 + 21 + 22) OK, full suite (xem báo cáo vòng
+  22), smoke server với project tạm (GET / 200, /api/mcp-tools count
+  479, /api/info 200, rebind cùng cổng OK, tắt sạch) + GET trong lúc
+  render <2 s; cây Swift không động, không merge. Kiểm chứng trực quan
+  trên Windows thật vẫn để lại cho người dùng sau khi pull.

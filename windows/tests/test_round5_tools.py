@@ -147,7 +147,7 @@ class TestRound5McpTools(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         # Round 5: 132 -> 120 (12 tools became real, listed below).
-        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54, 2 tools became real (see tests/test_round21.py)
+        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52, 2 tools became real (see tests/test_round22.py)
 
     def test_app_update_later_skip_via_mcp(self):
         with mock.patch.object(

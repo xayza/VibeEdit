@@ -84,6 +84,15 @@ async function load() {
   $("btnUndo").disabled = !data.can_undo;
   $("btnRedo").disabled = !data.can_redo;
   syncFormatUI();
+  // Round 22: single source of truth for Magnetic — the project
+  // view's server-computed "magnetic" field. (The old code fetched
+  // magnetic_get here via renderMedia and misread the shape, so
+  // the toggle always reset to false; the fetch also planted a
+  // junk undo snapshot on every load, breaking undo-after-delete.)
+  const mgBtn = $("tlMagnetic");
+  if (mgBtn && data.magnetic !== undefined) { mgBtn.setAttribute("aria-pressed", data.magnetic ? "true" : "false"); mgBtn.classList.toggle("active", !!data.magnetic); }
+  const expBtn = $("btnPreviewExport");
+  if (expBtn) expBtn.disabled = !data.last_export;
   lastExportPath = data.last_export || null;
   if (previewMode !== "source" && data.last_export) {
     $("preview").src = "/api/preview?" + Date.now();
@@ -263,12 +272,12 @@ async function renderMedia() {
   const vms = $("visionMedia");
   if (vms) vms.innerHTML = project.media.map((m) =>
     `<option value="${m.id}">${m.id} — ${m.path}</option>`).join("");
-  try { const mg = await api("/api/project", { op: "magnetic_get" });
-    const btn = $("tlMagnetic");
-    // Round 18: tlMagnetic is an icon toggle button now (was a
-    // checkbox); aria-pressed + .active carry the same state.
-    if (btn) { btn.setAttribute("aria-pressed", mg.magnetic ? "true" : "false"); btn.classList.toggle("active", !!mg.magnetic); }
-  } catch (e) { /* magnetic toggle keeps its default when offline */ }
+  // Round 22: no magnetic_get fetch here anymore — load() syncs
+  // the toggle from the project view's "magnetic" field (see
+  // above). The old fetch misread the response shape (the value
+  // lives in result.magnetic, not top-level) AND pushed a junk undo
+  // snapshot on every load, which made undo-after-delete need two
+  // presses.
   $("addTrack").innerHTML = project.tracks.filter((t) => t.kind === "video").map((t) =>
     `<option value="${t.id}">${t.name} (${t.role})</option>`).join("");
   $("inspTrack").innerHTML = project.tracks.map((t) =>
@@ -415,6 +424,9 @@ function renderTracks() {
     for (const item of track.items) {
       const el = document.createElement("div");
       el.className = `clip ${track.kind} role-${track.role} ${item.id === selectedId ? "selected" : ""}`;
+      // Round 22: id lookup for the overlap flash (add_text refusal
+      // names the conflicting clip; see the addTextForm handler).
+      el.dataset.item = item.id;
       el.style.left = (item.at / fps()) * pxPerSec + "px";
       el.style.width = Math.max((item.dur / fps()) * pxPerSec - 2, 24) + "px";
       if ((item.dur / fps()) * pxPerSec < 90) el.classList.add("clip-narrow");
@@ -872,14 +884,62 @@ document.addEventListener("keydown", async (e) => {
     }
   } catch (err) { setStatus(err.message, true); }
 });
-async function doExport(preset) {
-  setStatus("Đang xuất (" + preset + ")… có thể mất một lúc.");
-  try {
-    const data = await api("/api/export", { preset, normalize: $("exportNormalize") ? $("exportNormalize").checked : false });
-    setStatus(`Xuất xong: ${data.report.output} (${data.report.duration} giây, ${data.report.width}x${data.report.height}).`);
-    await load();
-  } catch (err) { setStatus("Xuất thất bại: " + err.message, true); }
+// Round 22: background export. POST /api/export returns a job
+// immediately; this polls /api/export/status (lock-free server
+// side) and shows an indeterminate progress bar with a Cancel
+// button, so the editor stays usable during a long render. The
+// bar is indeterminate on purpose: the renderer reports no
+// percentage, and inventing one would be fake progress.
+let exportPollTimer = null, exportJobId = null, exportStartedAt = 0;
+function showExportBar(show) {
+  const bar = $("exportJobBar"); if (bar) bar.hidden = !show;
 }
+async function runExportJob(body, label) {
+  showExportBar(true);
+  const txt = $("exportProgressText");
+  try {
+    const started = await api("/api/export", body);
+    exportJobId = started.job ? started.job.id : null;
+    exportStartedAt = Date.now();
+    if (txt) txt.textContent = `Đang xuất ${label}…`;
+    await new Promise((resolve, reject) => {
+      clearInterval(exportPollTimer);
+      exportPollTimer = setInterval(async () => {
+        try {
+          const res = await fetch("/api/export/status" + (exportJobId ? "?job=" + encodeURIComponent(exportJobId) : ""));
+          const d = await res.json();
+          const job = d.job;
+          if (!job) { clearInterval(exportPollTimer); resolve(null); return; }
+          const secs = Math.floor((Date.now() - exportStartedAt) / 1000);
+          if (txt) txt.textContent = `Đang xuất ${label}… ${secs}s`;
+          if (job.status === "done") { clearInterval(exportPollTimer); resolve(job); }
+          else if (job.status === "error") { clearInterval(exportPollTimer); reject(new Error(job.error || "Xuất thất bại")); }
+          else if (job.status === "cancelled") { clearInterval(exportPollTimer); resolve(null); }
+        } catch (err) { clearInterval(exportPollTimer); reject(err); }
+      }, 1000);
+    }).then(async (job) => {
+      showExportBar(false); exportJobId = null;
+      if (!job) { setStatus("Đã huỷ xuất."); return; }
+      setStatus(`Xuất xong: ${job.report.output} (${job.report.duration} giây, ${job.report.width}x${job.report.height}).`);
+      await load();
+    });
+  } catch (err) { showExportBar(false); exportJobId = null; setStatus("Xuất thất bại: " + err.message, true); }
+}
+async function doExport(preset) {
+  await runExportJob({ preset, normalize: $("exportNormalize") ? $("exportNormalize").checked : false }, preset);
+}
+// Round 22: cancel a running background export. The server marks the
+// job cancelled (its output is never published); the poller in
+// runExportJob then resolves to "Đã huỷ xuất." A second click is
+// safe: cancel_export_job returns the already-cancelled job.
+// Guarded: the bar markup sits after the script tag, so the button
+// does not exist yet at parse time.
+const cancelBtn = $("btnExportCancel");
+if (cancelBtn) cancelBtn.addEventListener("click", async () => {
+  if (!exportJobId) return;
+  try { await api("/api/export/cancel", { job: exportJobId }); }
+  catch (err) { /* poller reports the terminal state either way */ }
+});
 $("btnExportDraft").addEventListener("click", () => doExport("draft"));
 $("btnExportFull").addEventListener("click", () => doExport("full"));
 $("addClipForm").addEventListener("submit", async (e) => {
@@ -946,7 +1006,17 @@ $("addTextForm").addEventListener("submit", async (e) => {
     await api("/api/project", { op: "add_text", track: "t1", text: $("addText").value,
       at: Number($("addTextAt").value), dur: Number($("addTextDur").value) });
     setStatus("Đã thêm chữ."); await load();
-  } catch (err) { setStatus(err.message, true); }
+  } catch (err) {
+    // Round 22: overlap refusal names the conflicting clip
+    // ("Item overlaps <id> on track ...") — flash exactly that clip
+    // instead of leaving the user to guess which caption collides.
+    setStatus(err.message, true);
+    const m = /overlaps (\S+) on track/.exec(err.message || "");
+    if (m) {
+      const clash = document.querySelector(`.clip[data-item="${m[1]}"]`);
+      if (clash) { clash.classList.add("clip-flash"); setTimeout(() => clash.classList.remove("clip-flash"), 3400); }
+    }
+  }
 });
 $("inspectorForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1033,7 +1103,10 @@ $("btnSplit").addEventListener("click", splitAtPlayhead);
 $("btnPlayheadSplit").addEventListener("click", splitAtPlayhead);
 $("btnDelete").addEventListener("click", async () => {
   if (!selectedId) { setStatus("Chọn một clip trước.", true); return; }
-  try { await api("/api/project", { op: "delete", item: selectedId }); selectedId = null; await load(); }
+  // Round 22: clear the selection BEFORE awaiting, so a fast
+  // double-click cannot fire a second delete for the same clip.
+  const doomed = selectedId; selectedId = null;
+  try { await api("/api/project", { op: "delete", item: doomed }); await load(); setStatus("Đã xoá clip — bấm Ctrl+Z để hoàn tác."); }
   catch (err) { setStatus(err.message, true); }
 });
 document.addEventListener("keydown", (e) => {
@@ -1093,7 +1166,10 @@ loadMcpTools();
 $("batchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const folders = $("batchFolders").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-  setStatus("Đang xuất batch… có thể mất một lúc.");
+  // Round 22: an empty folder list still exports the current project
+  // (server behaviour) — say so up front instead of letting the
+  // "1/1 success" report surprise the user.
+  setStatus(folders.length === 0 ? "Chưa nhập thư mục phụ — sẽ chỉ xuất project hiện tại." : "Đang xuất batch… có thể mất một lúc.");
   try {
     const data = await api("/api/batch", { folders, preset: "full", normalize: $("batchNormalize").checked });
     const ok = data.results.filter((r) => r.ok).length;
@@ -1232,6 +1308,14 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       }
       if (col) col.classList.remove("tool-col-collapsed");
       activateTab(b.dataset.tab);
+      // Round 22: switching panels overwrites the status toast,
+      // so it never keeps a stale message from an earlier panel.
+      const tabLabels = { media: "Media", audio: "Audio", text: "Text",
+        stickers: "Stickers — chưa có sticker, dùng text overlay thay thế",
+        effects: "Effects", transitions: "Transitions", filters: "Filters",
+        voice: "Voice", knowledge: "Knowledge", vision: "Vision",
+        templates: "More", captions: "Captions", ai: "AI" };
+      setStatus("Panel: " + (tabLabels[b.dataset.tab] || b.dataset.tab) + ".");
     });
   });
   document.querySelectorAll('[data-action="timeline"]').forEach((b) => {
@@ -1439,6 +1523,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       }
       const data = await api("/api/project", { op: "voice_generate", text, provider, voice: voice || undefined, model: model || undefined });
       $("voiceResult").textContent = `Đã tạo giọng bằng ${data.backend}: ${data.path} (media ${data.media}). Dùng form “Import a voiceover take…” bên dưới để đặt lên track Voiceover, hoặc đặt ngay bằng voice_place qua MCP.`;
+      setStatus("Đã tạo giọng — xem chi tiết trong panel Voice.");
       await load();
     } catch (err) { $("voiceResult").textContent = "Tạo giọng thất bại: " + err.message; setStatus(err.message, true); }
   });
@@ -1804,9 +1889,8 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const expP = $("btnExportPreset");
   if (expP) expP.addEventListener("click", async () => {
     const preset = $("exportPresetSelect").value; if (!preset) { setStatus("Hãy chọn một preset xuất trước.", true); return; }
-    try { setStatus(`Đang xuất theo preset ${preset}…`); const d = await api("/api/export", { preset: "full", export_preset: preset });
-      setStatus(`Xuất preset ${preset} xong: ${d.report.width}x${d.report.height}, codec ${d.report.video_codec}.`); await load(); }
-    catch (err) { setStatus(`Xuất preset thất bại: ${err.message}`, true); }
+    // Round 22: same background job flow as doExport.
+    await runExportJob({ preset: "full", export_preset: preset }, "preset " + preset);
   });
   const rr = $("btnReviewRun"), ra = $("btnReviewAccept"), rv = $("btnReviewVerify");
   const showReview = (d) => { $("reviewWorkflowResult").textContent = `Review: trạng thái ${d.result.status}, số vấn đề ${d.result.issue_count}${d.result.previous_issue_count !== undefined ? ` (lần trước ${d.result.previous_issue_count}, thay đổi: ${d.result.issue_count_changed ? "có" : "không"})` : ""}${d.result.accepted_rev !== undefined ? `, đã chấp nhận ở rev ${d.result.accepted_rev}` : ""}.`; };
@@ -1862,6 +1946,12 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (wc && wp) wc.addEventListener("click", () => { wp.hidden = true; });
   const wo = $("btnWelcomeOpen");
   if (wo) wo.addEventListener("click", async () => { const sel = $("projectSelect"); if (!sel || !sel.value) { $("welcomeStatus").textContent = "Hãy chọn một project trước."; return; } try { await api("/api/project/open", { folder: sel.value }); await load(); wp.hidden = true; } catch (err) { $("welcomeStatus").textContent = err.message; } });
+  // Round 22: open a project by absolute path (e.g. a second project
+  // stored outside projects/). The picker only lists projects_root,
+  // so without this there was no UI path to such a project at all;
+  // the server side already accepts absolute paths (round 22).
+  const wop = $("btnWelcomeOpenPath");
+  if (wop) wop.addEventListener("click", async () => { const p = $("welcomePath"); if (!p || !p.value.trim()) { $("welcomeStatus").textContent = "Nhập đường dẫn thư mục project trước."; return; } try { await api("/api/project/open", { folder: p.value.trim() }); await load(); await refreshProjectList(); wp.hidden = true; } catch (err) { $("welcomeStatus").textContent = err.message; } });
   const wcr = $("btnWelcomeCreate");
   if (wcr) wcr.addEventListener("click", () => { const btn = $("btnProjectCreate"); if (btn) btn.click(); });
   const wr = $("btnWelcomeReveal");
@@ -1876,7 +1966,8 @@ $("btnTransitionPreview").addEventListener("click", async () => {
    gapBatch2Wiring pattern above. */
 (function round3Wiring() {
   const out = (id, text) => { const el = $(id); if (el) el.textContent = text; };
-  const show = async (fn) => { try { await fn(); } catch (err) { out("knowledgeResult", err.message); } };
+  // Round 22: panel actions also overwrite the status toast.
+  const show = async (fn) => { try { await fn(); setStatus("Xong — kết quả ở panel Knowledge."); } catch (err) { out("knowledgeResult", err.message); setStatus(err.message, true); } };
   const ks = $("btnKnowledgeSkills");
   if (ks) ks.addEventListener("click", () => show(async () => {
     const d = await post({ op: "skills_list" });
@@ -1938,9 +2029,12 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   }); });
   const vision = async (op, extra) => {
     const media = $("visionMedia") ? $("visionMedia").value : "";
-    if (!media) { out("visionResult", "Choose a media item first."); return; }
-    try { const d = await post(Object.assign({ op, media }, extra || {})); out("visionResult", JSON.stringify(d.result, null, 2)); }
-    catch (err) { out("visionResult", err.message); }
+    // Round 22: every panel action also overwrites the status
+    // toast, so it never keeps a stale message from an earlier
+    // panel (the toast itself still auto-hides after 4s).
+    if (!media) { out("visionResult", "Choose a media item first."); setStatus("Chọn một media trước.", true); return; }
+    try { const d = await post(Object.assign({ op, media }, extra || {})); out("visionResult", JSON.stringify(d.result, null, 2)); setStatus(`Vision xong (${op}) — kết quả ở panel Vision.`); }
+    catch (err) { out("visionResult", err.message); setStatus(err.message, true); }
   };
   const vo = $("btnVisionOcr"); if (vo) vo.addEventListener("click", () => vision("vision_ocr"));
   const vf = $("btnVisionFaces"); if (vf) vf.addEventListener("click", () => vision("vision_faces"));
@@ -2070,6 +2164,15 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     }
     try {
       const d = await api("/api/agent-status");
+      // Round 22: fill both command displays with the server's real
+      // MCP command (absolute paths + .venv python); the copy button
+      // copies #agentMcpCommand, so it now copies the real command.
+      if (d && d.mcp_command) {
+        const code = document.getElementById("agentMcpCommand");
+        if (code) code.textContent = d.mcp_command;
+        const dock = document.getElementById("agentDockCommand");
+        if (dock) dock.textContent = d.mcp_command;
+      }
       if (d && d.connected && d.last_seen) {
         const when = new Date(d.last_seen * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
         line.textContent = `Đã kết nối agent ngoài qua MCP (hoạt động gần nhất ${when}).`;

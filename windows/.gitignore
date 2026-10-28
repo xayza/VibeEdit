@@ -1,0 +1,11 @@
+# VibeEdit Windows port — files that are local runtime state, never
+# committed. Added round 22 (the repo previously had no .gitignore,
+# so fresh checkouts showed .venv/, __pycache__/ and projects/ as
+# untracked). None of these paths is tracked, so adding this file
+# changes no tracked file's status.
+.venv/
+__pycache__/
+projects/
+*.pyc
+*.pyo
+.vibeedit-save.tmp

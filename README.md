@@ -55,11 +55,11 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 21; UI round 19)
+## Current status (honest, full-parity round 22; UI round 19)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **425
-  real-operation tools and 54 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **427
+  real-operation tools and 52 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
@@ -71,8 +71,17 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   (show_shortcuts parsed from app.js at runtime, ui_frame/ui_frames
   rendered with FFmpeg); round 21 converted 2 more (agent_status as
   agent_kit_check data per the original spec, app_vibeedit_debug_log
-  reading a real file-backed MCP invocation log); what remains genuinely
-  unported is listed honestly in `windows/PARITY.md`.
+  reading a real file-backed MCP invocation log); round 22 kept the
+  audit part's 2 conversions (agent_terminals and
+  app_vibeedit_automation_clients, empty lists that are real because
+  the server by design has no such elements) and fixed the
+  Windows-tested bugs: rev-sync data loss (RAM copy overwriting an
+  external agent's edits), the zoompan-fps export doubling, blocking
+  synchronous export (now background jobs), MCP notification responses,
+  inputSchema for all 479 tools (270 non-empty, 209 genuinely empty),
+  and the Agent dock copy button (now the real absolute command);
+  what remains genuinely unported is listed honestly in
+  `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +
   playhead, Export CTA gradient softened to #0e7490→#be185d, clip

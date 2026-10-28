@@ -55,9 +55,9 @@ STILL_HONEST = [
     # Round 20: show_shortcuts left (now real, parsed from app.js).
     "vibeedit_show_settings",
     "vibeedit_ui_action", "vibeedit_ui_dialog",
-    "vibeedit_agent_open", "vibeedit_agent_terminals",
+    # Round 22: agent_terminals/automation_clients left (now real).
+    "vibeedit_agent_open",
     "vibeedit_agent_toggle_dock", "vibeedit_app_vibeedit",
-    "vibeedit_app_vibeedit_automation_clients",
     # Round 21: debug_log left (now real, file-backed MCP log).
     "vibeedit_platforms_get",
     "vibeedit_timeline_header_compact",
@@ -100,8 +100,8 @@ class TestRound19RegistryCounts(unittest.TestCase):
                   if (t.get("description") or "").startswith(
                       "Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54
-        self.assertEqual(len(TOOLS) - len(honest), 425)  # Round 21
+        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52
+        self.assertEqual(len(TOOLS) - len(honest), 427)  # Round 22
 
     def test_converted_descriptions_not_honest(self):
         by_name = {t["name"]: t["description"] for t in TOOLS}
@@ -945,5 +945,5 @@ class TestRound19RegistryFinal(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(real), 425)  # Round 21: 423 -> 425
-        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54
+        self.assertEqual(len(real), 427)  # Round 22: 425 -> 427
+        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52

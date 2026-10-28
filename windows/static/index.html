@@ -29,7 +29,7 @@
 </header>
 <div id="status" class="status" role="status"></div>
 <div id="welcomePanel" class="welcome-panel" hidden><h3>Chào mừng đến VibeEdit</h3><p>Chọn một project gần đây để mở, hoặc tạo project mới. Nút Reveal chỉ mở được thư mục trên Windows; nút Copy chỉ sao chép đường dẫn.</p><div id="welcomeRecent"></div>    <label>Chuyển project <select id="projectSelect"></select></label><button id="btnProjectOpen" class="secondary">Mở project</button><input id="projectNewName" type="text" placeholder="Tên project mới"><button id="btnProjectCreate" class="secondary">Tạo project</button>
-<button type="button" id="btnWelcomeOpen" class="secondary">Mở project đã chọn</button><button type="button" id="btnWelcomeCreate" class="secondary">Tạo project mới</button><button type="button" id="btnWelcomeReveal" class="secondary">Reveal thư mục project (Windows)</button><button type="button" id="btnWelcomeCopyPath" class="secondary">Copy đường dẫn project</button><button type="button" id="btnWelcomeClose" class="secondary">Đóng</button><div id="welcomeStatus"></div></div><nav class="tool-rail" aria-label="Menu thư viện">
+<button type="button" id="btnWelcomeOpen" class="secondary">Mở project đã chọn</button><label>Mở theo đường dẫn <input id="welcomePath" type="text" placeholder="Đường dẫn thư mục project"></label><button type="button" id="btnWelcomeOpenPath" class="secondary">Mở theo đường dẫn</button><button type="button" id="btnWelcomeCreate" class="secondary">Tạo project mới</button><button type="button" id="btnWelcomeReveal" class="secondary">Reveal thư mục project (Windows)</button><button type="button" id="btnWelcomeCopyPath" class="secondary">Copy đường dẫn project</button><button type="button" id="btnWelcomeClose" class="secondary">Đóng</button><div id="welcomeStatus"></div></div><nav class="tool-rail" aria-label="Menu thư viện">
 <button type="button" class="rail-btn" id="btnAgentToggle" data-agent-toggle="1" aria-label="Ẩn/hiện ô AI Agent">AI Agent</button>
 <button type="button" class="rail-btn" data-tab="media">Media</button>
 <button type="button" class="rail-btn" data-tab="audio">Audio</button>
@@ -459,6 +459,7 @@
   <div id="settingsEnvInfo">Đang tải…</div>
   <label><input type="checkbox" id="settingsAgentCollapsed"> Thu gọn panel AGENT (chỉ lưu trong trình duyệt này)</label>
 </div>
+<div id="exportJobBar" class="export-job-bar" hidden><span id="exportProgressText">Đang xuất…</span><button id="btnExportCancel" type="button" class="secondary">Huỷ xuất</button></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

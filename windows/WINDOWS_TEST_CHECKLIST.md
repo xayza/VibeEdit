@@ -107,7 +107,8 @@ py -m unittest discover -s tests
 ```
 
 - [ ] Toàn bộ test pass (số test mới nhất ghi trong
-      `windows/PARITY.md` — vòng 13 là 567 test). Gửi nguyên văn đoạn
+      `windows/PARITY.md` — đừng dùng con số cũ trong checklist này,
+      lấy số ở mục vòng mới nhất của PARITY.md). Gửi nguyên văn đoạn
       cuối (`Ran ... OK` hoặc danh sách FAIL) cho bimo nếu có lỗi.
 
 ## 10. Những thứ KHÔNG test như thể đã có (giới hạn đã biết)

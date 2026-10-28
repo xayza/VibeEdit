@@ -420,7 +420,8 @@ class TestSelectsVariantsPlanWorkflowCheckpointRunLibrary(B1Case):
 
 HONEST_SAMPLE = [
     "vibeedit_agent_open", "vibeedit_agent_open_chat", "vibeedit_agent_open_claude",
-    "vibeedit_agent_open_codex", "vibeedit_agent_open_shell", "vibeedit_agent_terminals",
+    # Round 22: agent_terminals left (now real, empty-by-design lists).
+    "vibeedit_agent_open_codex", "vibeedit_agent_open_shell",
     "vibeedit_agent_toggle_dock", "vibeedit_agent_ask",
     # Round 15: agent_kit_update/later left (now real); their real
     # behaviour is covered by tests/test_round15.py.
@@ -479,7 +480,8 @@ HONEST_SAMPLE = [
     
     "vibeedit_clip_send_to_agent",
     
-    "vibeedit_app_vibeedit", "vibeedit_app_vibeedit_automation_clients",
+    # Round 22: automation_clients left (now real, empty-by-design list).
+    "vibeedit_app_vibeedit",
     # Round 21: debug_log left (now real, file-backed MCP log).
     "vibeedit_platforms_get",
     # Round 19: context_get left (now real session/project snapshot).
@@ -520,7 +522,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54, agent_status/debug_log became real (see tests/test_round21.py)
+        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py)
 
 
 if __name__ == "__main__":

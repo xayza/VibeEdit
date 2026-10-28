@@ -828,12 +828,49 @@ def render(project: dict, folder: str, output: str, preset: str = "full",
     import tempfile
     lut_dir = tempfile.mkdtemp(prefix="vibeedit-lut-")
     try:
-        return _render_inner(project, folder, output, preset,
-                             normalize_audio, lut_dir, ducking,
-                             export_preset)
+        report = _render_inner(project, folder, output, preset,
+                               normalize_audio, lut_dir, ducking,
+                               export_preset)
+        _attach_duration_check(report, output)
+        return report
     finally:
         import shutil
         shutil.rmtree(lut_dir, ignore_errors=True)
+
+
+def _attach_duration_check(report: dict, output: str) -> None:
+    """Round 22, bug #0 safety net: ffprobe the finished file and
+    compare its duration with the timeline duration the render
+    built (report["duration"]).
+
+    Threshold 1.0s, both directions: the known honest slack is
+    tiny (audio padded by at most 1/fps, container rounding well
+    under 0.1s), while a real timing bug is seconds to minutes
+    (the zoompan bug doubled a 113s clip). A breach only WARNS —
+    loudly, in the report and on stderr — it never blocks the
+    export, because the threshold's false-positive rate on exotic
+    containers is not yet proven zero. A failed probe degrades to
+    a note, never to a render failure.
+    """
+    try:
+        file_s = float(probe_media(output).get("duration") or 0.0)
+    except Exception as exc:  # noqa: BLE001 - probe is best-effort
+        report["duration_check"] = {"warning": None,
+                                    "error": f"probe failed: {exc}"}
+        return
+    timeline_s = float(report.get("duration") or 0.0)
+    diff = file_s - timeline_s
+    warning = None
+    if abs(diff) > 1.0:
+        warning = (f"File duration {file_s:.2f}s differs from timeline "
+                   f"{timeline_s:.2f}s by {diff:+.2f}s — the export "
+                   f"may be out of sync; check the timeline before "
+                   f"publishing.")
+        print(f"VIBEEDIT DURATION WARNING: {warning}", file=sys.stderr)
+    report["duration_check"] = {"timeline_s": round(timeline_s, 3),
+                                "file_s": round(file_s, 3),
+                                "diff_s": round(diff, 3),
+                                "warning": warning}
 
 
 def _render_inner(project: dict, folder: str, output: str, preset: str,
@@ -1386,6 +1423,17 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         expression is time-shift invariant, so shifting every point
         by the segment start keeps the motion exact).
         Returns None when the item has no motion keyframes.
+
+        Round 22, bug #0: the returned chain STARTS with an fps
+        filter at the project rate. zoompan ignores input
+        timestamps and re-times frames at its own fps= rate, so a
+        59.94fps phone clip fed straight into zoompan fps=29.97
+        doubled in length (one 113s clip rendered as 226.8s, and
+        the motion played at half speed). Normalizing the input to
+        the project rate first makes zoompan 1:1: the frame count
+        and the keyframe timing both land on project frames. A
+        trailing fps filter AFTER zoompan is still forbidden
+        (Phase 3 lesson: it duplicates frames ~512x).
         """
         fps_f = fps_value(fmt["fps"])
         x_pts = [(t * fps_f - frame_offset, v) for t, v in
@@ -1401,7 +1449,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                   if x_pts else "(iw-ow)/2")
         y_expr = (f"(ih-oh)*({_piecewise_expr(y_pts, 'on')})"
                   if y_pts else "(ih-oh)/2")
-        return (f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d=1:"
+        return (f"fps={fps_str},"
+                f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d=1:"
                 f"s={out_w}x{out_h}:fps={fps_str}")
 
     def _tilt_filter(item: dict, time_offset: float = 0.0) -> str | None:
@@ -1555,8 +1604,10 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             ])
             motion = _motion_filter(item, local_start * fps_value(fmt["fps"]))
             if motion is not None:
-                # zoompan carries its own fps= option; a trailing
-                # fps filter would duplicate frames (Phase 3 lesson).
+                # Round 22: _motion_filter already prepends fps=
+                # (project rate) before zoompan; a TRAILING fps
+                # filter after zoompan would still duplicate frames
+                # (Phase 3 lesson) and must not be added.
                 img_filters.append(motion)
             else:
                 img_filters.append(f"fps={fps_str}")
@@ -1733,8 +1784,10 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             # Do NOT append an fps filter after zoompan: zoompan's
             # output timestamps use its own timebase, and a trailing
             # fps filter duplicates frames ~512x (verified: 90 input
-            # frames became 46080). zoompan's own fps= option already
-            # sets the output rate, and the segment is exact without it.
+            # frames became 46080). The input rate is normalized
+            # BEFORE zoompan instead (fps= inside _motion_filter,
+            # round 22 bug #0: without it a 59.94fps source doubled
+            # in length through zoompan fps=29.97).
         else:
             vfilters.append(f"fps={fps_str}")
         tilt = _tilt_filter(item, local_start)
@@ -1983,6 +2036,11 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                         fps_f = fps_value(fmt["fps"])
                         s_pts = [(t * fps_f - b0 * fps_f, v)
                                  for t, v in scale_pts]
+                        # Round 22, bug #0: fps BEFORE zoompan, same
+                        # reason as _motion_filter (a source-rate
+                        # stream fed straight into zoompan re-times
+                        # at zoompan's fps and changes length).
+                        ofilters.append(f"fps={fps_str}")
                         ofilters.append(
                             f"zoompan=z='{_piecewise_expr(s_pts, 'on')}':"
                             f"x='(iw-ow)/2':y='(ih-oh)/2':d=1:"

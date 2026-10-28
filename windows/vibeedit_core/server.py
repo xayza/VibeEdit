@@ -83,6 +83,37 @@ DEFAULT_PROJECT_DIR = _default_project_dir()
 
 
 
+def mcp_client_command(project_dir):
+    """Round 22: the real MCP client command for this app install.
+
+    Derived from actual paths, never hardcoded and never a
+    template: the Windows folder comes from this file's location,
+    the Python from the install's .venv when present (the shape
+    the tester verified: <windows>\\.venv\\Scripts\\python.exe)
+    else this interpreter, and the project folder from the open
+    project. Returns {"command", "args", "command_line"} where
+    command_line is the paste-ready quoted single line and
+    command/args is the MCP client-config shape. Returns None
+    fields when no project folder is known.
+    """
+    import os
+    import sys
+    windows_dir = os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))
+    candidates = [os.path.join(windows_dir, ".venv", "Scripts",
+                               "python.exe"),
+                  os.path.join(windows_dir, ".venv", "bin", "python")]
+    python = next((c for c in candidates if os.path.isfile(c)),
+                  sys.executable)
+    script = os.path.join(windows_dir, "vibeedit.py")
+    if not project_dir:
+        return {"command": None, "args": None, "command_line": None}
+    folder = os.path.abspath(project_dir)
+    args = [script, "mcp", folder]
+    line = " ".join(f'"{p}"' for p in [python] + args)
+    return {"command": python, "args": args, "command_line": line}
+
+
 def agent_status_for(project_dir):
     """Round 14: last MCP activity for one project dir (see mcp.py
     _touch_agent_status). connected=True only when an MCP process
@@ -94,17 +125,30 @@ def agent_status_for(project_dir):
     import tempfile
     import time
     if not project_dir:
-        return {"connected": False, "last_seen": None, "age_seconds": None}
-    folder = os.path.normcase(os.path.abspath(project_dir))
-    key = hashlib.sha1(folder.encode()).hexdigest()[:12]
-    stamp = os.path.join(tempfile.gettempdir(), f"vibeedit-mcp-{key}.json")
+        status = {"connected": False, "last_seen": None,
+                  "age_seconds": None}
+    else:
+        folder = os.path.normcase(os.path.abspath(project_dir))
+        key = hashlib.sha1(folder.encode()).hexdigest()[:12]
+        stamp = os.path.join(tempfile.gettempdir(),
+                             f"vibeedit-mcp-{key}.json")
     try:
         with open(stamp, encoding="utf-8") as fh:
             last = float(json.load(fh).get("last_seen", 0))
     except Exception:
-        return {"connected": False, "last_seen": None, "age_seconds": None}
-    age = time.time() - last
-    return {"connected": age < 3600, "last_seen": last, "age_seconds": age}
+        status = {"connected": False, "last_seen": None,
+                  "age_seconds": None}
+    else:
+        age = time.time() - last
+        status = {"connected": age < 3600, "last_seen": last,
+                  "age_seconds": age}
+    # Round 22: the Agent dock's copy button copies this real
+    # command (see mcp_client_command), never the template.
+    cmd = mcp_client_command(project_dir)
+    status["mcp_command"] = cmd["command_line"]
+    status["mcp_client"] = {"command": cmd["command"],
+                            "args": cmd["args"]}
+    return status
 
 class State:
     def __init__(self, project_dir: str | None):
@@ -114,10 +158,26 @@ class State:
         self.redo_stack: list[dict] = []
         self.last_export: str | None = None
         self.last_report: dict | None = None
+        # Round 22: background export jobs. Rendering used to run
+        # synchronously inside do_POST while holding state.lock, so
+        # every other request (including GET /api/project) queued
+        # behind a minutes-long full render and the UI looked hung.
+        # Jobs now render on a worker thread from a snapshot, so the
+        # editor stays responsive; only publishing the result takes
+        # state.lock briefly. Guarded by their own lock, never by
+        # state.lock, so status reads stay fast during a render.
+        self.export_jobs: dict[str, dict] = {}
+        self.export_lock = threading.Lock()
+        self.export_seq = 0
         self.project, self.path = self._load_or_create()
         # Phase 0 backup rule: the first save after a project is
         # opened creates one backup of the saved file as loaded.
         self._needs_first_backup = True
+        # Round 22 P0: True when the most recent refresh_from_disk()
+        # call reloaded a newer on-disk project (external writer,
+        # e.g. an MCP agent). Surfaced in _project_view so the UI
+        # can tell the user their view was refreshed from disk.
+        self._last_external_reload = False
 
     def _load_or_create(self) -> tuple[Project, str]:
         os.makedirs(os.path.join(self.project_dir, "media"), exist_ok=True)
@@ -152,12 +212,125 @@ class State:
             pass
         self._needs_first_backup = False
 
+    def start_export_job(self, data: dict, folder: str, out: str,
+                           preset: str, normalize: bool,
+                           export_preset: str | None) -> dict:
+        """Start a background export job; returns its job dict.
+
+        ``data`` must already be a snapshot (deep copy): the worker
+        renders without state.lock, so later edits must not mutate
+        the data being rendered. Cancelling only stops publication:
+        a render already inside FFmpeg keeps running to completion
+        in the background, but its output is never published as the
+        latest export (a render-pipeline cancel token that kills a
+        running FFmpeg process is follow-up work, not faked here).
+        """
+        with self.export_lock:
+            self.export_seq += 1
+            job_id = f"export-{self.export_seq}"
+            job: dict = {"id": job_id, "status": "running",
+                         "preset": preset, "output": out,
+                         "error": None, "report": None}
+            self.export_jobs[job_id] = job
+
+        def _run() -> None:
+            try:
+                report = render(data, folder, out, preset=preset,
+                                normalize_audio=normalize,
+                                export_preset=export_preset)
+            except Exception as exc:  # noqa: BLE001 - reported on job
+                with self.export_lock:
+                    if job["status"] == "cancelled":
+                        return
+                    job["status"] = "error"
+                    job["error"] = str(exc)
+                return
+            # Publish under the two locks separately, never nested:
+            # cancel only flips "running" -> "cancelled", so once the
+            # job is "publishing" a late cancel can no longer divert
+            # it, and the cancel response then honestly reports done.
+            with self.export_lock:
+                if job["status"] == "cancelled":
+                    return
+                job["status"] = "publishing"
+            with self.lock:
+                self.last_export = out
+                self.last_report = report
+            with self.export_lock:
+                job["status"] = "done"
+                job["report"] = report
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        return job
+
+    def export_job(self, job_id: str | None) -> dict | None:
+        """One job by id, or the latest job when id is None."""
+        with self.export_lock:
+            if job_id:
+                job = self.export_jobs.get(job_id)
+                return dict(job) if job else None
+            if not self.export_jobs:
+                return None
+            latest = max(self.export_jobs.values(),
+                         key=lambda j: int(j["id"].split("-")[1]))
+            return dict(latest)
+
+    def cancel_export_job(self, job_id: str) -> dict | None:
+        """Mark a running job cancelled; its output is never published."""
+        with self.export_lock:
+            job = self.export_jobs.get(job_id)
+            if job is None:
+                return None
+            if job["status"] == "running":
+                job["status"] = "cancelled"
+            return dict(job)
+
     def save(self) -> None:
         # Autosave itself creates no backup; only the first save
         # after opening a project does (see backup_before_change).
         if self._needs_first_backup:
             self.backup_before_change()
         save_project(self.project.data, self.path)
+
+    def refresh_from_disk(self) -> bool:
+        """Reload project.json when the file on disk is NEWER than RAM.
+
+        Round 22 P0 (silent data loss): the web server holds the
+        project in RAM while an external MCP agent writes the same
+        file. Without this check the next web save overwrote the
+        agent's edits wholesale (reported: MCP markers_add -> disk
+        rev 107 with 35 markers, then web set_speed -> disk rev 107
+        with 34 markers, the agent's marker silently lost; both
+        writers ended at rev 107 because the web copy started from
+        the older rev 106).
+        Reload only when disk rev > RAM rev; an equal or older disk
+        never overwrites RAM, and a failed read/parse never touches
+        RAM (a refresh must never break the op in progress). A
+        reload invalidates undo/redo snapshots (they describe the
+        old state), so both stacks are cleared. Callers run this
+        BEFORE mutating (apply/undo/redo/save) and before serving
+        GET /api/project, so a later write always starts from the
+        newest disk state and rev increases monotonically.
+        True simultaneous writes (both writers refreshing at the
+        same instant) can still race; that needs file locking and
+        is out of scope — the sequential interleave, which is the
+        reported case, is fully covered.
+        """
+        try:
+            disk = load_project(self.path)
+            disk_rev = int(disk.get("rev", 0) or 0)
+        except Exception:
+            self._last_external_reload = False
+            return False
+        if disk_rev <= self.project.rev:
+            self._last_external_reload = False
+            return False
+        self.project.restore(disk)
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self._last_external_reload = True
+        return True
 
     def projects_root(self) -> str:
         """Parent folder holding all project folders (windows/projects)."""
@@ -246,10 +419,18 @@ class State:
     def open_project(self, folder: str) -> dict:
         """Restart-free project switch (code-gap batch): resolve
         ``folder`` (a project folder name, a folder path, or a project
-        file path) strictly inside projects_root, load it, and point
-        this server state at it (project, path, project_dir, cleared
-        undo/redo and last export). Raises on traversal or a missing
-        project file instead of silently staying on the old project.
+        file path), load it, and point this server state at it
+        (project, path, project_dir, cleared undo/redo and last
+        export). Raises on a missing project file instead of silently
+        staying on the old project.
+
+        Round 22: absolute paths outside projects_root are now
+        allowed. The old strict-inside-projects rule made the picker
+        unable to open any second project stored elsewhere (the
+        welcome panel offered no path input at all), while the
+        server binds localhost only and the path comes from the
+        user's own UI/API call — the same authorization as a desktop
+        app's Open dialog. Bare names still resolve inside root.
         """
         root = self.projects_root()
         if os.path.isabs(folder):
@@ -258,8 +439,6 @@ class State:
             candidate = os.path.abspath(os.path.join(root, folder))
         if os.path.isfile(candidate):
             candidate = os.path.dirname(candidate)
-        if os.path.commonpath([candidate, root]) != root:
-            raise ValueError("Project folder must be inside projects/")
         found = find_project_file(candidate)
         if not found:
             raise FileNotFoundError(f"No project file in folder: {folder}")
@@ -281,6 +460,7 @@ class State:
         self.last_export = None
         self.last_report = None
         self._needs_first_backup = True
+        self._last_external_reload = False
         self.record_recent(candidate)
         return {"name": data.get("name"), "folder": candidate,
                 "rev": data.get("rev")}
@@ -297,9 +477,22 @@ class State:
         "set_project", "close_gaps"})
 
     def apply(self, op: dict) -> dict:
+        # Round 22 P0: reload-before-write. An external writer (MCP
+        # agent) may have advanced the disk file since this State
+        # loaded it; applying on top of stale RAM and then saving
+        # would silently discard the agent's edits. Refresh first
+        # so the op lands on the newest disk state (rev monotonic).
+        self.refresh_from_disk()
         proj = self.project
         if op.get("op") == "srt_export":
             return {"srt": proj.export_srt(op.get("track", "t1"))}
+        # Round 22: read-only ops must not push undo snapshots.
+        # magnetic_get used to fall through to the push below, so
+        # every UI load() (which fetched it) planted a post-edit
+        # snapshot: undo after Delete then needed two presses
+        # (first restored the identical post-delete state).
+        if op.get("op") == "magnetic_get":
+            return {"magnetic": proj.magnetic_enabled}
         if op.get("op") in self.DESTRUCTIVE_OPS:
             self.backup_before_change()
         self.undo_stack.append(proj.snapshot())
@@ -882,6 +1075,17 @@ def make_handler(state: State):
                     "duration_seconds": proj.duration_seconds(),
                     "can_undo": bool(state.undo_stack),
                     "can_redo": bool(state.redo_stack),
+                    # Round 22: single source of truth for the
+                    # Magnetic toggle (server-computed, with the True
+                    # default for projects predating the toggle). The
+                    # UI used to fetch magnetic_get separately on
+                    # every load — which misread the response shape
+                    # (result.magnetic, not top-level) AND pushed a
+                    # junk undo snapshot on every load (see apply).
+                    # Round 22 P0: whether the latest refresh reloaded
+                    # a newer on-disk project (external writer).
+                    "external_reload": state._last_external_reload,
+                    "magnetic": proj.magnetic_enabled,
                     "last_export": state.last_export}
 
         def do_GET(self):
@@ -912,6 +1116,7 @@ def make_handler(state: State):
                 self._serve_media(parsed.path[len("/api/media/"):])
             elif parsed.path == "/api/project":
                 with state.lock:
+                    state.refresh_from_disk()
                     self._send_json(self._project_view())
             elif parsed.path == "/api/projects":
                 with state.lock:
@@ -932,6 +1137,17 @@ def make_handler(state: State):
                 # mcp.py (names + descriptions), not a hardcoded list.
                 from .mcp import TOOLS
                 self._send_json({"tools": TOOLS, "count": len(TOOLS)})
+            elif parsed.path == "/api/export/status":
+                # Round 22: deliberately lock-free (export_lock only,
+                # inside export_job): polling export progress must
+                # stay fast while a render holds no state.lock at all.
+                query = urllib.parse.parse_qs(parsed.query)
+                job_id = (query.get("job") or [None])[0]
+                job = state.export_job(job_id)
+                if job is None:
+                    self._send_json({"job": None})
+                else:
+                    self._send_json({"job": job})
             elif parsed.path == "/api/preview":
                 if state.last_export and os.path.isfile(state.last_export):
                     self._serve_file(state.last_export)
@@ -1128,6 +1344,45 @@ def make_handler(state: State):
         def do_POST(self):
             parsed = urllib.parse.urlparse(self.path)
             try:
+                # Round 22: background export. This branch runs BEFORE
+                # state.lock: it snapshots the project under the lock
+                # briefly, starts the worker thread, and returns the
+                # job immediately, so GET /api/project and every other
+                # request keep answering while FFmpeg renders. The old
+                # synchronous branch (render inside state.lock) hung
+                # the whole UI for the length of a full render.
+                if parsed.path == "/api/export":
+                    body = self._read_json()
+                    preset = body.get("preset", "full")
+                    export_preset = body.get("export_preset")
+                    with state.lock:
+                        ext = "mp4"
+                        if export_preset:
+                            from .render import export_preset_info
+                            fmt = state.project.data["format"]
+                            ext = export_preset_info(
+                                export_preset, int(fmt["width"]),
+                                int(fmt["height"]))["ext"]
+                        slug = (export_preset or preset).replace("/", "_")
+                        out = os.path.join(state.project_dir, "render",
+                                           f"export-{slug}.{ext}")
+                        snapshot = copy.deepcopy(state.project.data)
+                        job = state.start_export_job(
+                            snapshot, state.project_dir, out,
+                            preset=preset,
+                            normalize=bool(body.get("normalize", False)),
+                            export_preset=export_preset)
+                    self._send_json({"ok": True, "job": dict(job)})
+                    return
+                if parsed.path == "/api/export/cancel":
+                    body = self._read_json()
+                    job = state.cancel_export_job(body.get("job", ""))
+                    if job is None:
+                        self._send_json({"error": "Unknown export job"},
+                                        404)
+                    else:
+                        self._send_json({"ok": True, "job": job})
+                    return
                 with state.lock:
                     if parsed.path == "/api/project":
                         op = self._read_json()
@@ -1190,6 +1445,11 @@ def make_handler(state: State):
                         self._send_json({"ok": True, "path": candidate})
                     elif parsed.path == "/api/undo":
                         self._read_json()
+                        # Round 22 P0: an external writer invalidates
+                        # the undo stack (refresh clears it), so a
+                        # stale snapshot can never overwrite newer
+                        # disk state.
+                        state.refresh_from_disk()
                         if not state.undo_stack:
                             raise ValueError("Nothing to undo")
                         state.redo_stack.append(state.project.snapshot())
@@ -1198,6 +1458,8 @@ def make_handler(state: State):
                         self._send_json({"ok": True, **self._project_view()})
                     elif parsed.path == "/api/redo":
                         self._read_json()
+                        # Round 22 P0: same stale-stack guard as undo.
+                        state.refresh_from_disk()
                         if not state.redo_stack:
                             raise ValueError("Nothing to redo")
                         state.undo_stack.append(state.project.snapshot())
@@ -1211,29 +1473,11 @@ def make_handler(state: State):
                         # (and, per the Phase 0 rule, only the first
                         # save after opening creates a backup).
                         self._read_json()
+                        # Round 22 P0: a plain re-save of stale RAM
+                        # must never overwrite a newer disk file.
+                        state.refresh_from_disk()
                         state.save()
                         self._send_json({"ok": True, **self._project_view()})
-                    elif parsed.path == "/api/export":
-                        body = self._read_json()
-                        preset = body.get("preset", "full")
-                        export_preset = body.get("export_preset")
-                        ext = "mp4"
-                        if export_preset:
-                            from .render import export_preset_info
-                            fmt = state.project.data["format"]
-                            ext = export_preset_info(
-                                export_preset, int(fmt["width"]),
-                                int(fmt["height"]))["ext"]
-                        slug = (export_preset or preset).replace("/", "_")
-                        out = os.path.join(state.project_dir, "render",
-                                           f"export-{slug}.{ext}")
-                        report = render(state.project.data,
-                                        state.project_dir, out, preset=preset,
-                                        normalize_audio=bool(body.get("normalize", False)),
-                                        export_preset=export_preset)
-                        state.last_export = out
-                        state.last_report = report
-                        self._send_json({"ok": True, "report": report})
                     elif parsed.path == "/api/batch":
                         from .export_ops import batch_export
                         body = self._read_json()
@@ -1427,13 +1671,20 @@ class QuietDisconnectServer(ThreadingHTTPServer):
     default BaseServer.handle_error prints a traceback for every tab
     close. (The override belongs here, on the server: BaseRequest-
     Handler has no handle_error, so overriding it on the handler
-    would never run.) Only those two disconnect errors are
-    swallowed; every other handler error still prints its traceback.
+    would never run.)
+    Round 22: on Windows the same tab-close raises
+    ConnectionAbortedError (WSAECONNABORTED), which is NOT a
+    subclass of ConnectionResetError — both are ConnectionError
+    siblings — so round 19's filter missed it and the traceback
+    (at the _serve_media wfile.write loop) survived on Windows.
+    Only disconnect errors are swallowed; every other handler error
+    still prints its traceback.
     """
 
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
-        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError,
+                            ConnectionAbortedError)):
             return
         super().handle_error(request, client_address)
 

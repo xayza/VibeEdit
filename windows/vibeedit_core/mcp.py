@@ -479,7 +479,7 @@ TOOLS.extend([
     {"name": "vibeedit_agent_open_claude", "description": "Not available in this Windows build: no Claude terminal is managed here; run Claude in an external terminal against this MCP server."},
     {"name": "vibeedit_agent_open_codex", "description": "Not available in this Windows build: no Codex terminal is managed here; run Codex in an external terminal against this MCP server."},
     {"name": "vibeedit_agent_open_shell", "description": "Not available in this Windows build: no shell terminal is managed by this headless server; use an external terminal."},
-    {"name": "vibeedit_agent_terminals", "description": "Not available in this Windows build: no terminal list exists in this headless server; terminals live outside it."},
+    {"name": "vibeedit_agent_terminals", "description": "Agent terminal tabs for this headless build: same shape as the original agent.terminals (terminal choices, unavailable plugin terminals, open tabs); this headless server has no agent dock, registers no terminal choices and no terminal sessions, and its plugin manifests carry no terminal field, so all three lists are always empty. Terminals run in an external terminal against this MCP server."},
     {"name": "vibeedit_agent_toggle_dock", "description": "Not available in this Windows build: no dock UI exists in this headless server; the web UI Agent dock is a separate browser view."},
     {"name": "vibeedit_agent_ask", "description": "Not available in this Windows build: in-app LLM chat is not present (parity-by-design: the original removed its model-API panel); use an external agent via MCP."},
     {"name": "vibeedit_agent_kit_check", "description": "Agent-kit status: kit folder, installed skills, installed kit version and releases channel (https://raw.githubusercontent.com/dongnguyenvie/bashcut-agent-kit/main/releases.json). Pass check_updates=true to compare against the channel (network); otherwise local only and newer is null."},
@@ -642,7 +642,7 @@ TOOLS.extend([
     {"name": "vibeedit_acme_voice_fast", "description": "Not available in this Windows build: acme.voice.fast is a provider capability string from the original's agent instructions and no acme provider is wired here; voice generation via Edge/Piper is the separate voice_synthesize tool."},
     {"name": "vibeedit_speech_rate", "description": "Measure speaking rate from transcript words (analysis-record words, or caption words for the timeline): syllables for Vietnamese, characters for CJK, else words; per-phrase p10/p50/p90, overall and articulation. Voice takes carry no text, so no voice rate is fabricated."},
     {"name": "vibeedit_app_vibeedit", "description": "Not available in this Windows build: no app-level automation client exists in this headless server."},
-    {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Not available in this Windows build: no app-level automation clients exist in this headless server."},
+    {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Automation clients for this headless build: the original lists clients connected to the app's Unix-socket automation server; this headless server has no Unix-socket automation server and no client registry, so the list is always empty. HTTP MCP callers are not automation clients."},
     {"name": "vibeedit_app_vibeedit_debug_log", "description": "MCP server debug log for this headless build: lines this server actually wrote to its debug-log file (ISO time + tool name per invocation, except debug-log reads themselves; arguments are never recorded), byte-capped like the original's rotation; empty with a note when no lines exist yet; the web server's HTTP log is not included."},
     {"name": "vibeedit_platforms_get", "description": "Not available in this Windows build: no platform-client registry exists in this headless server."},
     {"name": "vibeedit_context_get", "description": "Live editor context snapshot for this headless build: project name/rev, session playhead, selection, zoom, source marks/frame, track/item counts, duration and markers — all read from the open project and the server session, never invented."},
@@ -1074,6 +1074,511 @@ def shortcuts_from_app_js(app_js_path):
     }
 
 
+# Round 22: inputSchema for tools/list, derived from the actual
+# MCPServer.call handler code (see
+# ~/workspace/vibeedit-round22-tools/extract_args.py +
+# build_schemas.py — regenerate, do not hand-edit). For every
+# tool, `properties` holds exactly the arguments its handler
+# reads (args["k"] -> required, args.get("k") -> optional,
+# with types from int()/float()/bool() wrappers, .get defaults,
+# and the verified MANUAL_FIXES in build_schemas.py). Aliases
+# inherit their target's schema. Tools whose handler reads no
+# arguments get empty properties: genuinely zero-argument tools
+# (verified by the extraction) and honest check-and-error tools
+# (the _raise_honest fallthrough reads nothing before raising).
+# The shared round8-guard prelude reads `plugins_dir` for its
+# whole family, but only plugin branches use the value, so the
+# schema advertises it only there.
+TOOL_SCHEMAS = {
+    'vibeedit_acme_voice_fast': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_adjustment_add': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dur': {'type': 'integer'}, 'lut': {'type': 'string'}, 'preset': {'type': 'string'}, 'strength': {'type': 'string'}}, 'required': ['at', 'dur']},
+    'vibeedit_adjustment_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_adjustment_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_adjustment_remove': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_adjustments_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_ask': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_detach': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_dismiss_changes': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_dock_info': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_kit_check': {'type': 'object', 'properties': {'check_updates': {'type': 'boolean'}, 'kit_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_agent_kit_install': {'type': 'object', 'properties': {'kit_dir': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_agent_kit_later': {'type': 'object', 'properties': {'days': {'type': 'integer'}, 'kit_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_agent_kit_update': {'type': 'object', 'properties': {'kit_dir': {'type': 'string'}, 'version': {'type': 'string'}}, 'required': []},
+    'vibeedit_agent_open': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_open_chat': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_open_claude': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_open_codex': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_open_shell': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_quick_edit': {'type': 'object', 'properties': {'ops': {'type': 'array'}}, 'required': []},
+    'vibeedit_agent_restart_tab': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_setup': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_setup_show': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_show_changes': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_status': {'type': 'object', 'properties': {'check_updates': {'type': 'boolean'}, 'kit_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_agent_terminals': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_toggle_dock': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_tools_install': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_agent_undo_changes': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_app_update': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_app_update_check': {'type': 'object', 'properties': {'channel': {'type': 'string'}, 'check': {'type': 'string'}}, 'required': []},
+    'vibeedit_app_update_download': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'sha256': {'type': 'string'}, 'url': {'type': 'string'}}, 'required': ['dest', 'url']},
+    'vibeedit_app_update_later': {'type': 'object', 'properties': {'latest_version': {'type': 'string'}, 'remind_in_days': {'type': 'integer'}, 'version': {'type': 'string'}}, 'required': []},
+    'vibeedit_app_update_prepare': {'type': 'object', 'properties': {'app_pid': {'type': 'string'}, 'dest': {'type': 'string'}, 'sha256': {'type': 'string'}, 'url': {'type': 'string'}}, 'required': ['dest', 'url']},
+    'vibeedit_app_update_skip': {'type': 'object', 'properties': {'latest_version': {'type': 'string'}, 'version': {'type': 'string'}}, 'required': []},
+    'vibeedit_app_version': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_app_vibeedit': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_app_vibeedit_automation_clients': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_app_vibeedit_debug_log': {'type': 'object', 'properties': {'lines': {'type': 'integer'}}, 'required': []},
+    'vibeedit_audio_beats': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_audio_energy': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_audio_loudness': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_audio_measure': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_audio_mix_measure': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_batch_cancel': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_batch_presets': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_batch_queue': {'type': 'object', 'properties': {'folders': {'type': 'array'}}, 'required': []},
+    'vibeedit_batch_retry': {'type': 'object', 'properties': {'normalize': {'type': 'boolean'}, 'preset': {'type': 'string'}}, 'required': []},
+    'vibeedit_batch_run': {'type': 'object', 'properties': {'normalize': {'type': 'boolean'}, 'preset': {'type': 'string'}}, 'required': []},
+    'vibeedit_batch_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beat_count': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beat_detect': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'min_gap': {'type': 'number'}}, 'required': ['media']},
+    'vibeedit_beat_grid_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beat_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beat_nearest': {'type': 'object', 'properties': {'seconds': {'type': 'number'}}, 'required': ['seconds']},
+    'vibeedit_beat_snap': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
+    'vibeedit_beats_detect': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'min_gap': {'type': 'number'}}, 'required': ['media']},
+    'vibeedit_beats_grid': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beats_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_beats_to_markers': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_brand_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_brand_set': {'type': 'object', 'properties': {'colours': {'type': 'string'}, 'logo_media': {'type': 'string'}}, 'required': []},
+    'vibeedit_capabilities_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_captions_align': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'model': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_captions_export': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_captions_find': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': []},
+    'vibeedit_captions_generate': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'model': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_captions_group': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_captions_import': {'type': 'object', 'properties': {'srt': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['srt']},
+    'vibeedit_captions_replace': {'type': 'object', 'properties': {'query': {'type': 'string'}, 'replacement': {'type': 'string'}}, 'required': ['query', 'replacement']},
+    'vibeedit_captions_style': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'position_x': {'type': 'number'}, 'position_y': {'type': 'number'}, 'preset': {'type': 'string'}, 'size': {'type': 'number'}}, 'required': ['item']},
+    'vibeedit_captions_transcribe': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'model': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_captions_words': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_attach': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_command': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_commands': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_detach': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_reset': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_send': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_stop': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_chat_transcript': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_checkpoint_request': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_checkpoint_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_clip_at_time': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
+    'vibeedit_clip_backdrop': {'type': 'object', 'properties': {'blur': {'type': 'number'}, 'color': {'type': 'string'}, 'dim': {'type': 'number'}, 'item': {'type': 'string'}, 'items': {'type': ['array', 'string']}, 'kind': {'type': 'string'}}, 'required': ['kind']},
+    'vibeedit_clip_change_framing': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_color': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'lut': {'type': 'string'}, 'preset': {'type': 'string'}, 'preset_strength': {'type': 'string'}, 'strength': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_color_eq': {'type': 'object', 'properties': {'eq': {'type': 'string'}, 'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_color_eq_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_color_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_color_preset_strength': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'preset': {'type': 'string'}, 'preset_strength': {'type': 'number'}}, 'required': ['item', 'preset_strength']},
+    'vibeedit_clip_color_reset': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_copy': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'item', 'track']},
+    'vibeedit_clip_cut': {'type': 'object', 'properties': {'atFrame': {'type': 'integer'}, 'item': {'type': 'string'}}, 'required': ['atFrame', 'item']},
+    'vibeedit_clip_delete': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_duplicate': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'item', 'track']},
+    'vibeedit_clip_fade': {'type': 'object', 'properties': {'fadeIn': {'type': 'string'}, 'fadeOut': {'type': 'string'}, 'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_fades_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_freeze': {'type': 'object', 'properties': {'frames': {'type': 'integer'}, 'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_keyframe': {'type': 'object', 'properties': {'at': {'type': 'number'}, 'item': {'type': 'string'}, 'property': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['at', 'item', 'property', 'value']},
+    'vibeedit_clip_keyframe_remove': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'property': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_keyframes': {'type': 'object', 'properties': {'at': {'type': 'number'}, 'item': {'type': 'string'}, 'keyframes': {'type': 'array'}, 'property': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': []},
+    'vibeedit_clip_keyframes_clear': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_link_audio': {'type': 'object', 'properties': {'audio': {'type': 'string'}, 'video': {'type': 'string'}}, 'required': ['audio', 'video']},
+    'vibeedit_clip_list': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_clip_motion': {'type': 'object', 'properties': {'focus': {'type': 'string'}, 'item': {'type': 'string'}, 'keyframes': {'type': ['object', 'string']}, 'preset': {'type': 'string'}, 'within': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_move': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'item', 'track']},
+    'vibeedit_clip_mute': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_opacity_set': {'type': 'object', 'properties': {'at': {'type': 'number'}, 'item': {'type': 'string'}, 'opacity': {'type': 'number'}}, 'required': ['at', 'item', 'opacity']},
+    'vibeedit_clip_overlap_check': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dur': {'type': 'integer'}, 'track': {'type': 'string'}}, 'required': ['at', 'track']},
+    'vibeedit_clip_paste': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'track']},
+    'vibeedit_clip_paste_cross_project': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dest': {'type': 'string'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'dest', 'item', 'track']},
+    'vibeedit_clip_position_set': {'type': 'object', 'properties': {'at': {'type': 'number'}, 'item': {'type': 'string'}, 'x': {'type': 'number'}, 'y': {'type': 'number'}}, 'required': []},
+    'vibeedit_clip_reframe': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'window': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_reverse': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'reverse': {'type': 'boolean'}}, 'required': ['item']},
+    'vibeedit_clip_scale_set': {'type': 'object', 'properties': {'at': {'type': 'number'}, 'item': {'type': 'string'}, 'scale': {'type': 'number'}}, 'required': ['at', 'item', 'scale']},
+    'vibeedit_clip_send_to_agent': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_clip_slow_down': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_speed': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'speed': {'type': 'number'}}, 'required': ['item', 'speed']},
+    'vibeedit_clip_speed_curve': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'preset': {'type': 'string'}}, 'required': ['item', 'preset']},
+    'vibeedit_clip_speed_down': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_speed_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_speed_reset': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_speed_up': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_split': {'type': 'object', 'properties': {'atFrame': {'type': 'integer'}, 'item': {'type': 'string'}}, 'required': ['atFrame', 'item']},
+    'vibeedit_clip_text_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_tilt': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'keyframes': {'type': 'array'}}, 'required': ['item', 'keyframes']},
+    'vibeedit_clip_transition': {'type': 'object', 'properties': {'duration': {'type': 'number'}, 'from': {'type': 'string'}, 'kind': {'type': 'string'}, 'to': {'type': 'string'}}, 'required': ['duration', 'from', 'kind', 'to']},
+    'vibeedit_clip_trim': {'type': 'object', 'properties': {'edge': {'type': 'string'}, 'item': {'type': 'string'}, 'toFrame': {'type': 'integer'}}, 'required': ['edge', 'item', 'toFrame']},
+    'vibeedit_clip_unlink_audio': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_clip_volume': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'volume': {'type': 'number'}}, 'required': ['item', 'volume']},
+    'vibeedit_close_gaps': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_color_measure': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_color_preset_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_context_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_doctor_run': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ducking_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ducking_set': {'type': 'object', 'properties': {'amount_db': {'type': 'number'}, 'attack': {'type': 'number'}, 'enabled': {'type': 'boolean'}, 'ratio': {'type': 'string'}, 'release': {'type': 'number'}, 'threshold': {'type': 'number'}}, 'required': []},
+    'vibeedit_ducking_toggle': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_edl_import': {'type': 'object', 'properties': {'media_map': {'type': 'string'}, 'path': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_export_cancel': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_chapters': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_cover': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_dismiss_notice': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_ducked': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_history': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_link': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_normalized': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_open_output': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_otio': {'type': 'object', 'properties': {'out': {'type': 'string'}}, 'required': []},
+    'vibeedit_export_preset': {'type': 'object', 'properties': {'preset': {'type': 'string'}}, 'required': ['preset']},
+    'vibeedit_export_preset_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_preview': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_reveal_output': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_export_start': {'type': 'object', 'properties': {'preset': {'type': 'string'}}, 'required': []},
+    'vibeedit_export_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_fonts_import': {'type': 'object', 'properties': {'fonts_dir': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_fonts_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_image_cutout': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_image_disclose': {'type': 'object', 'properties': {'text': {'type': 'string'}}, 'required': []},
+    'vibeedit_image_generate': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_image_generate_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_image_style': {'type': 'object', 'properties': {'clear': {'type': 'string'}, 'disclosure': {'type': 'string'}, 'references': {'type': 'string'}, 'seed': {'type': 'string'}, 'style': {'type': 'string'}}, 'required': []},
+    'vibeedit_jobs_cancel': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_jobs_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_jobs_wait': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_karaoke_add': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'words': {'type': 'string'}}, 'required': ['item', 'words']},
+    'vibeedit_karaoke_export_ass': {'type': 'object', 'properties': {'out': {'type': 'string'}}, 'required': []},
+    'vibeedit_karaoke_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_karaoke_remove': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_karaoke_syllable_add': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'words': {'type': 'string'}}, 'required': ['item', 'words']},
+    'vibeedit_keyframes_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_knowledge_add_lesson': {'type': 'object', 'properties': {'text': {'type': 'string'}, 'title': {'type': 'string'}}, 'required': ['text']},
+    'vibeedit_knowledge_approve': {'type': 'object', 'properties': {'lesson': {'type': 'string'}, 'proposal': {'type': 'string'}}, 'required': []},
+    'vibeedit_knowledge_claims': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_facts': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_get': {'type': 'object', 'properties': {'lesson': {'type': 'string'}}, 'required': ['lesson']},
+    'vibeedit_knowledge_history': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_lessons': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_memo': {'type': 'object', 'properties': {'text': {'type': 'string'}}, 'required': []},
+    'vibeedit_knowledge_migrate': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_prefs': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_proposals': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_reject': {'type': 'object', 'properties': {'lesson': {'type': 'string'}, 'proposal': {'type': 'string'}}, 'required': []},
+    'vibeedit_knowledge_remove_lesson': {'type': 'object', 'properties': {'lesson': {'type': 'string'}}, 'required': ['lesson']},
+    'vibeedit_knowledge_revert': {'type': 'object', 'properties': {'steps': {'type': 'integer'}}, 'required': []},
+    'vibeedit_knowledge_set_claim': {'type': 'object', 'properties': {'key': {'type': 'string'}, 'statement': {'type': 'string'}}, 'required': ['key', 'statement']},
+    'vibeedit_knowledge_set_fact': {'type': 'object', 'properties': {'key': {'type': 'string'}, 'value': {'type': 'string'}}, 'required': ['key', 'value']},
+    'vibeedit_knowledge_set_pref': {'type': 'object', 'properties': {'key': {'type': 'string'}, 'value': {'type': 'string'}}, 'required': ['key', 'value']},
+    'vibeedit_knowledge_skill': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_knowledge_split_memo': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_knowledge_update_lesson': {'type': 'object', 'properties': {'lesson': {'type': 'string'}, 'text': {'type': 'string'}}, 'required': ['lesson', 'text']},
+    'vibeedit_knowledge_verdicts': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_layer_add_adjustment': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dur': {'type': 'integer'}, 'lut': {'type': 'string'}, 'preset': {'type': 'string'}, 'strength': {'type': 'string'}}, 'required': []},
+    'vibeedit_layer_add_audio': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'role': {'type': 'string'}}, 'required': []},
+    'vibeedit_layer_add_text': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'role': {'type': 'string'}}, 'required': []},
+    'vibeedit_layer_add_video': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'role': {'type': 'string'}}, 'required': []},
+    'vibeedit_layer_delete': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_layer_down': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_layer_up': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_layers_add': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'name': {'type': 'string'}, 'role': {'type': 'string'}}, 'required': []},
+    'vibeedit_layers_set': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['name', 'track']},
+    'vibeedit_library_add': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_library_analyze': {'type': 'object', 'properties': {'entry': {'type': 'string'}, 'item': {'type': 'string'}, 'media_path': {'type': 'string'}}, 'required': []},
+    'vibeedit_library_apply': {'type': 'object', 'properties': {'at': {'type': 'string'}, 'entry': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_brand_pose': {'type': 'object', 'properties': {'brand': {'type': 'string'}, 'generate': {'type': 'string'}, 'image': {'type': 'string'}, 'media': {'type': 'string'}, 'pose': {'type': 'string'}}, 'required': ['brand', 'pose']},
+    'vibeedit_library_export_pack': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'output': {'type': 'string'}, 'pack': {'type': 'string'}}, 'required': ['output']},
+    'vibeedit_library_favorite': {'type': 'object', 'properties': {'entry': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_generate': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_library_get': {'type': 'object', 'properties': {'entry': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_import_pack': {'type': 'object', 'properties': {'path': {'type': 'string'}, 'replace': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_library_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_library_move': {'type': 'object', 'properties': {'entry': {'type': 'string'}, 'to': {'type': 'integer'}}, 'required': ['entry', 'to']},
+    'vibeedit_library_place': {'type': 'object', 'properties': {'at': {'type': 'string'}, 'entry': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_preview': {'type': 'object', 'properties': {'entry': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_remove': {'type': 'object', 'properties': {'entry': {'type': 'string'}}, 'required': ['entry']},
+    'vibeedit_library_save_selection': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_library_search': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': []},
+    'vibeedit_library_stats': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_library_update': {'type': 'object', 'properties': {'entry': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['entry', 'name']},
+    'vibeedit_luts_import': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_marker_at_time': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
+    'vibeedit_marker_move': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'marker': {'type': 'string'}}, 'required': ['at', 'marker']},
+    'vibeedit_markers_add': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'text': {'type': 'string'}}, 'required': ['at', 'text']},
+    'vibeedit_markers_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_markers_remove': {'type': 'object', 'properties': {'marker': {'type': 'string'}}, 'required': ['marker']},
+    'vibeedit_mcp_tools_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_media_add': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_media_analysis': {'type': 'object', 'properties': {'activityDb': {'type': 'number'}, 'bridgeSeconds': {'type': 'number'}, 'curve': {'type': 'string'}, 'media': {'type': 'string'}, 'minScore': {'type': 'number'}, 'samples': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_analyze': {'type': 'object', 'properties': {'force': {'type': ['boolean', 'string']}, 'media': {'type': 'string'}, 'rate': {'type': 'number'}}, 'required': []},
+    'vibeedit_media_cuts': {'type': 'object', 'properties': {'add': {'type': 'string'}, 'clear': {'type': 'boolean'}, 'media': {'type': 'string'}, 'remeasure': {'type': 'boolean'}, 'remove': {'type': 'string'}, 'threshold': {'type': 'number'}}, 'required': ['media']},
+    'vibeedit_media_describe': {'type': 'object', 'properties': {'append': {'type': 'string'}, 'media': {'type': 'string'}, 'shots': {'type': 'string'}}, 'required': ['media', 'shots']},
+    'vibeedit_media_description': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': []},
+    'vibeedit_media_digest': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_duration': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_frame': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_frames': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_get': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_import': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_media_inventory': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_media_kind_list': {'type': 'object', 'properties': {'kind': {'type': 'string'}}, 'required': []},
+    'vibeedit_media_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_media_metadata': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_ocr': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_media_place': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dur': {'type': 'string'}, 'in': {'type': 'integer'}, 'media': {'type': 'string'}, 'speed': {'type': 'number'}, 'track': {'type': 'string'}}, 'required': ['at', 'media', 'track']},
+    'vibeedit_media_proxy': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'out': {'type': 'string'}, 'width': {'type': 'integer'}}, 'required': ['media']},
+    'vibeedit_media_remove': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_resolve_range': {'type': 'object', 'properties': {'dur': {'type': 'string'}, 'in': {'type': 'integer'}, 'item': {'type': 'string'}, 'media': {'type': 'string'}}, 'required': []},
+    'vibeedit_media_speech_map': {'type': 'object', 'properties': {'bridgeSeconds': {'type': 'number'}, 'media': {'type': 'string'}, 'minSeparationDb': {'type': 'number'}, 'minSpeechSeconds': {'type': 'number'}, 'thresholdDb': {'type': 'number'}}, 'required': ['media']},
+    'vibeedit_media_strip': {'type': 'object', 'properties': {'count': {'type': 'integer'}, 'from': {'type': 'number'}, 'media': {'type': 'string'}, 'to': {'type': 'number'}, 'width': {'type': 'integer'}}, 'required': ['media']},
+    'vibeedit_media_subjects': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_media_sync': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'media': {'type': 'string'}, 'to': {'type': 'string'}}, 'required': ['media', 'to']},
+    'vibeedit_media_transcribe': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'model': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_media_transcript': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_media_usage': {'type': 'object', 'properties': {'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_music_replace': {'type': 'object', 'properties': {'library': {'type': 'string'}, 'loop': {'type': 'string'}, 'media': {'type': 'string'}}, 'required': []},
+    'vibeedit_narration_windows': {'type': 'object', 'properties': {'minSeconds': {'type': 'number'}, 'min_seconds': {'type': 'number'}, 'rate': {'type': 'string'}}, 'required': []},
+    'vibeedit_otio_export': {'type': 'object', 'properties': {'out': {'type': 'string'}}, 'required': []},
+    'vibeedit_otio_import': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'merge': {'type': 'boolean'}, 'otio': {'type': 'string'}}, 'required': ['dest', 'otio']},
+    'vibeedit_outcomes_import': {'type': 'object', 'properties': {'data': {'type': 'string'}, 'export': {'type': 'string'}, 'path': {'type': 'string'}, 'payload': {'type': 'string'}}, 'required': ['export']},
+    'vibeedit_outcomes_map': {'type': 'object', 'properties': {'export': {'type': 'string'}, 'window': {'type': 'number'}}, 'required': ['export']},
+    'vibeedit_overlay_items': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plan_apply': {'type': 'object', 'properties': {'ops': {'type': 'string'}}, 'required': []},
+    'vibeedit_plan_check': {'type': 'object', 'properties': {'ops': {'type': 'array'}}, 'required': []},
+    'vibeedit_platforms_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playback_shuttle_back': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playback_shuttle_forward': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playback_stop': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playback_toggle': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playhead_back_second': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playhead_forward_second': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playhead_next_frame': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_playhead_previous_frame': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugin_disable': {'type': 'object', 'properties': {'plugin': {'type': 'string'}}, 'required': ['plugin']},
+    'vibeedit_plugin_enable': {'type': 'object', 'properties': {'plugin': {'type': 'string'}}, 'required': ['plugin']},
+    'vibeedit_plugin_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_actions': {'type': 'object', 'properties': {'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}, 'query': {'type': 'string'}}, 'required': []},
+    'vibeedit_plugins_bundles': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_download': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'url': {'type': 'string'}}, 'required': ['url']},
+    'vibeedit_plugins_hooks': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_install': {'type': 'object', 'properties': {'overwrite': {'type': 'boolean'}, 'registry_plugin': {'type': 'string'}, 'registry_version': {'type': 'string'}, 'source': {'type': 'string'}, 'source_label': {'type': 'string'}}, 'required': ['source']},
+    'vibeedit_plugins_invoke': {'type': 'object', 'properties': {'hook': {'type': 'string'}, 'item': {'type': 'string'}, 'item_id': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}}, 'required': ['hook']},
+    'vibeedit_plugins_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_option': {'type': 'object', 'properties': {'option': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}, 'value': {'type': 'string'}}, 'required': []},
+    'vibeedit_plugins_options': {'type': 'object', 'properties': {'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}}, 'required': []},
+    'vibeedit_plugins_overlays': {'type': 'object', 'properties': {'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_plugins_proposal': {'type': 'object', 'properties': {'decision': {'type': 'string'}, 'id': {'type': 'string'}}, 'required': ['decision', 'id']},
+    'vibeedit_plugins_reload': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_remove': {'type': 'object', 'properties': {'plugin': {'type': 'string'}}, 'required': ['plugin']},
+    'vibeedit_plugins_replace': {'type': 'object', 'properties': {'path': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}}, 'required': ['path', 'plugin']},
+    'vibeedit_plugins_run': {'type': 'object', 'properties': {'hook': {'type': 'string'}, 'item': {'type': 'string'}, 'item_id': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}}, 'required': ['hook']},
+    'vibeedit_plugins_search': {'type': 'object', 'properties': {'query': {'type': 'string'}, 'source': {'type': 'string'}}, 'required': []},
+    'vibeedit_plugins_set': {'type': 'object', 'properties': {'enabled': {'type': 'string'}, 'hooks': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}}, 'required': ['enabled']},
+    'vibeedit_plugins_set_overlays': {'type': 'object', 'properties': {'overlays': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}}, 'required': ['overlays', 'plugin']},
+    'vibeedit_plugins_setup': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_show_view': {'type': 'object', 'properties': {'plugin': {'type': 'string'}, 'view': {'type': 'string'}}, 'required': ['plugin', 'view']},
+    'vibeedit_plugins_updates': {'type': 'object', 'properties': {'check_registry': {'type': 'string'}, 'plugin': {'type': 'string'}}, 'required': ['plugin']},
+    'vibeedit_plugins_validate': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_plugins_view': {'type': 'object', 'properties': {'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}, 'view': {'type': 'string'}}, 'required': ['plugin', 'view']},
+    'vibeedit_plugins_view_event': {'type': 'object', 'properties': {'node': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugins_dir': {'type': 'string'}, 'type': {'type': 'string'}, 'value': {'type': 'string'}, 'view': {'type': 'string'}}, 'required': ['node', 'plugin', 'view']},
+    'vibeedit_project_backup': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_clear_recents': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_close': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_create': {'type': 'object', 'properties': {'directory': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_project_credits': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_data': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_derive': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_project_duplicate': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_project_duration_frames': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_folder': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_format': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_format_set': {'type': 'object', 'properties': {'fps': {'type': ['number', 'array']}, 'height': {'type': 'string'}, 'width': {'type': 'string'}}, 'required': []},
+    'vibeedit_project_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_history': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_import_media': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_project_info': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_magnetic_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_magnetic_set': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}}, 'required': ['enabled']},
+    'vibeedit_project_new': {'type': 'object', 'properties': {'directory': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_project_open': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_project_recents': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_rename': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_project_rev': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_save': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_search_text': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': []},
+    'vibeedit_project_set_data': {'type': 'object', 'properties': {'key': {'type': 'string'}, 'value': {'type': 'string'}}, 'required': ['key', 'value']},
+    'vibeedit_project_show_recents': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_stats': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_project_validate': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_accept': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_compare': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_coverage': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_layout': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_measure': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_packet': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_picture': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_run': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_shots': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_sync': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_verify': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_review_window': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_another_recipe': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_append': {'type': 'object', 'properties': {'by': {'type': 'string'}, 'data': {'type': 'string'}, 'eta': {'type': 'string'}, 'evidence': {'type': 'string'}, 'findings': {'type': 'string'}, 'fixed': {'type': 'string'}, 'kind': {'type': 'string'}, 'left': {'type': 'string'}, 'measured': {'type': 'string'}, 'name': {'type': 'string'}, 'notMeasured': {'type': 'string'}, 'origin': {'type': 'string'}, 'point': {'type': 'string'}, 'progress': {'type': 'string'}, 'reason': {'type': 'string'}, 'round': {'type': 'string'}, 'stage': {'type': 'string'}, 'status': {'type': 'string'}, 'text': {'type': 'string'}, 'verdict': {'type': 'string'}, 'verifiedBy': {'type': 'string'}}, 'required': ['kind']},
+    'vibeedit_run_checklist': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_dismiss': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_fix_issues': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_follow': {'type': 'object', 'properties': {'follow': {'type': 'string'}}, 'required': []},
+    'vibeedit_run_log': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_show': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_stop': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_run_toggle': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_schema_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_script_check': {'type': 'object', 'properties': {'text': {'type': 'string'}}, 'required': ['text']},
+    'vibeedit_selects_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_selects_place': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'select': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['select']},
+    'vibeedit_selects_set': {'type': 'object', 'properties': {'id': {'type': 'string'}, 'in': {'type': 'integer'}, 'media': {'type': 'string'}, 'name': {'type': 'string'}, 'out': {'type': 'string'}}, 'required': ['media', 'name']},
+    'vibeedit_show_about': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_agent_kit': {'type': 'object', 'properties': {'check_updates': {'type': 'boolean'}, 'kit_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_show_assets': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_batch': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_commands': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_doctor': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_export': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_export_progress': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_history': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_plugins': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_review': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_sections': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_settings': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_shortcuts': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_show_updates': {'type': 'object', 'properties': {'channel': {'type': 'string'}, 'check': {'type': 'string'}}, 'required': []},
+    'vibeedit_skills_disable': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_enable': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_export': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_get': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_list': {'type': 'object', 'properties': {'skills_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_skills_propose': {'type': 'object', 'properties': {'body': {'type': 'string'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}, 'title': {'type': 'string'}}, 'required': ['body', 'skill']},
+    'vibeedit_skills_remove': {'type': 'object', 'properties': {'confirm': {'type': 'boolean'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_save': {'type': 'object', 'properties': {'body': {'type': 'string'}, 'overwrite': {'type': 'boolean'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}, 'title': {'type': 'string'}}, 'required': ['body', 'skill']},
+    'vibeedit_skills_search': {'type': 'object', 'properties': {'query': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': []},
+    'vibeedit_source_close': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_source_insert': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'in': {'type': 'integer'}, 'media': {'type': 'string'}, 'out': {'type': 'integer'}, 'speed': {'type': 'number'}, 'track': {'type': 'string'}}, 'required': ['media', 'out']},
+    'vibeedit_source_mark_in': {'type': 'object', 'properties': {'frame': {'type': 'integer'}, 'media': {'type': 'string'}}, 'required': ['frame']},
+    'vibeedit_source_mark_out': {'type': 'object', 'properties': {'frame': {'type': 'integer'}, 'media': {'type': 'string'}}, 'required': ['frame']},
+    'vibeedit_source_next_frame': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_source_overwrite': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'in': {'type': 'integer'}, 'media': {'type': 'string'}, 'out': {'type': 'integer'}, 'track': {'type': 'string'}}, 'required': ['media', 'out']},
+    'vibeedit_source_previous_frame': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_source_show': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_source_toggle_playback': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_speech_rate': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'unit': {'type': 'string'}}, 'required': []},
+    'vibeedit_speed_curve_apply': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'preset': {'type': 'string'}}, 'required': ['item', 'preset']},
+    'vibeedit_srt_export': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_srt_import': {'type': 'object', 'properties': {'srt': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['srt']},
+    'vibeedit_storage_clear': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_storage_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_text_add': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'dur': {'type': 'integer'}, 'text': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'dur', 'text', 'track']},
+    'vibeedit_text_line_style': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'line_style': {'type': 'string'}}, 'required': ['item', 'line_style']},
+    'vibeedit_text_list': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_text_preset_apply': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'position_x': {'type': 'number'}, 'position_y': {'type': 'number'}, 'preset': {'type': 'string'}, 'size': {'type': 'number'}}, 'required': ['item']},
+    'vibeedit_text_preset_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_text_set': {'type': 'object', 'properties': {'item': {'type': 'string'}, 'text': {'type': 'string'}}, 'required': ['item', 'text']},
+    'vibeedit_text_style_get': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_timeline_apply': {'type': 'object', 'properties': {'ops': {'type': 'array'}}, 'required': []},
+    'vibeedit_timeline_changes': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_clip_count': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_close_gap': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': []},
+    'vibeedit_timeline_cut_range': {'type': 'object', 'properties': {'end': {'type': 'integer'}, 'start': {'type': 'integer'}}, 'required': ['end', 'start']},
+    'vibeedit_timeline_delete': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_timeline_deselect': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_duration': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_gaps': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_get': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_header_compact': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_lift': {'type': 'object', 'properties': {'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_timeline_move': {'type': 'object', 'properties': {'at': {'type': 'integer'}, 'item': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['at', 'item', 'track']},
+    'vibeedit_timeline_move_items': {'type': 'object', 'properties': {'items': {'type': 'array'}}, 'required': ['items']},
+    'vibeedit_timeline_redo': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_refresh_waveforms': {'type': 'object', 'properties': {'buckets': {'type': 'integer'}}, 'required': []},
+    'vibeedit_timeline_reorder': {'type': 'object', 'properties': {'before': {'type': 'string'}, 'item': {'type': 'string'}}, 'required': ['item']},
+    'vibeedit_timeline_select_all': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_sheet': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_snap': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
+    'vibeedit_timeline_split': {'type': 'object', 'properties': {'atFrame': {'type': 'string'}, 'item': {'type': 'string'}}, 'required': []},
+    'vibeedit_timeline_undo': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_zoom_fit': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_zoom_in': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_timeline_zoom_out': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_tool_status': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_track_add': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'name': {'type': 'string'}, 'role': {'type': 'string'}}, 'required': []},
+    'vibeedit_track_duration': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_track_get': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_track_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_track_remove': {'type': 'object', 'properties': {'track': {'type': 'string'}}, 'required': ['track']},
+    'vibeedit_track_rename': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'track': {'type': 'string'}}, 'required': ['name', 'track']},
+    'vibeedit_transcript_words': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_transition_preview': {'type': 'object', 'properties': {'transition': {'type': 'string'}}, 'required': ['transition']},
+    'vibeedit_transition_remove': {'type': 'object', 'properties': {'transition': {'type': 'string'}}, 'required': ['transition']},
+    'vibeedit_transition_set': {'type': 'object', 'properties': {'duration': {'type': 'number'}, 'from': {'type': 'string'}, 'kind': {'type': 'string'}, 'to': {'type': 'string'}}, 'required': ['duration', 'from', 'kind', 'to']},
+    'vibeedit_transitions_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_transitions_renderability': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ui_action': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ui_actions': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ui_dialog': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ui_frame': {'type': 'object', 'properties': {'time': {'type': 'number'}, 'time_s': {'type': 'number'}}, 'required': []},
+    'vibeedit_ui_frames': {'type': 'object', 'properties': {'count': {'type': 'integer'}, 'times': {'type': 'array'}, 'times_s': {'type': 'array'}}, 'required': []},
+    'vibeedit_ui_respond': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_ui_seek': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
+    'vibeedit_ui_select': {'type': 'object', 'properties': {'items': {'type': 'string'}}, 'required': ['items']},
+    'vibeedit_ui_view': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_variants_create': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_variants_diff': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+    'vibeedit_variants_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_view_compare': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_view_fullscreen': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_view_inspector_pane': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_view_library_pane': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_view_safe_area': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_vision_cutout': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_vision_cutout_model': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'model': {'type': 'string'}, 'output': {'type': 'string'}}, 'required': ['media', 'model']},
+    'vibeedit_vision_faces': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_vision_text': {'type': 'object', 'properties': {'media': {'type': 'string'}, 'output': {'type': 'string'}, 'path': {'type': 'string'}}, 'required': []},
+    'vibeedit_voice_check': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_voice_clone_add': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_voice_clone_list': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_voice_clone_remove': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_voice_fit': {'type': 'object', 'properties': {'frames': {'type': 'integer'}, 'item': {'type': 'string'}, 'max_ratio': {'type': 'number'}, 'min_ratio': {'type': 'number'}, 'to_frame': {'type': 'integer'}}, 'required': ['item']},
+    'vibeedit_voice_lines': {'type': 'object', 'properties': {'lines': {'type': 'array'}, 'model': {'type': 'string'}, 'provider': {'type': 'string'}, 'voice': {'type': 'string'}}, 'required': ['lines']},
+    'vibeedit_voice_place': {'type': 'object', 'properties': {'at': {'type': 'string'}, 'media': {'type': 'string'}}, 'required': ['media']},
+    'vibeedit_voice_speak': {'type': 'object', 'properties': {'file': {'type': 'string'}, 'model': {'type': 'string'}, 'provider': {'type': 'string'}, 'text': {'type': 'string'}, 'voice': {'type': 'string'}}, 'required': ['text']},
+    'vibeedit_voice_synthesize': {'type': 'object', 'properties': {'file': {'type': 'string'}, 'model': {'type': 'string'}, 'provider': {'type': 'string'}, 'text': {'type': 'string'}, 'voice': {'type': 'string'}}, 'required': ['text']},
+    'vibeedit_voice_use': {'type': 'object', 'properties': {'model': {'type': 'string'}, 'provider': {'type': 'string'}, 'voice': {'type': 'string'}}, 'required': []},
+    'vibeedit_windows_check': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_workflow_gates': {'type': 'object', 'properties': {}, 'required': []},
+    'vibeedit_workflow_set_gates': {'type': 'object', 'properties': {'gates': {'type': 'string'}}, 'required': ['gates']},
+}
+
+# Attach: tools/list (and /api/mcp-tools) return TOOLS directly,
+# so every entry carries its schema from import time on.
+for _tool in TOOLS:
+    _schema = TOOL_SCHEMAS.get(_tool["name"])
+    if _schema is not None:
+        _tool["inputSchema"] = _schema
+del _tool, _schema
+
 class MCPServer:
     def __init__(self, folder: str | None = None):
         self.folder = folder
@@ -1133,6 +1638,32 @@ class MCPServer:
                 pass
             self._needs_first_backup = False
         save_project(self.project.data, self.path)
+
+    def _refresh_if_newer(self) -> bool:
+        """Reload the cached project when the disk file is NEWER.
+
+        Round 22 P0, mirror of web State.refresh_from_disk: the
+        stdio MCP server caches the project between calls in one
+        process while the web app writes the same file. Without
+        this, an MCP write after a web edit overwrote the web edit
+        (and vice versa — the web side refresh covers the other
+        direction). Reload only when disk rev > cached rev; a
+        failed read never touches the cache. MCP keeps no undo
+        stack (undo restores the on-disk .bak), so nothing else
+        needs clearing. True simultaneous writes can still race;
+        the sequential interleave is fully covered.
+        """
+        if self.path is None or self.project is None:
+            return False
+        try:
+            disk = load_project(self.path)
+            disk_rev = int(disk.get("rev", 0) or 0)
+        except Exception:
+            return False
+        if disk_rev <= self.project.rev:
+            return False
+        self.project.restore(disk)
+        return True
 
     # -- Phase B1 helpers -------------------------------------------
     def _na(self, tool: str, blocker: str) -> ValueError:
@@ -1405,6 +1936,14 @@ class MCPServer:
         name = self.ALIASES.get(name, name)
         self._touch_agent_status()
         self._log_call(name)
+        # Round 22 P0: reload-before-write. Every MCP call first
+        # picks up a newer disk file (web app edits) so a later
+        # save cannot silently discard them. Handlers save
+        # immediately after mutating, so no unsaved MCP state
+        # exists at refresh time. project_open manages its own
+        # path and loads from disk itself, so it skips this.
+        if name != "vibeedit_project_open":
+            self._refresh_if_newer()
         if name in self.DESTRUCTIVE_TOOLS and self.path:
             try:
                 write_backup(self.path)
@@ -4600,6 +5139,8 @@ class MCPServer:
                     "vibeedit_agent_kit_install",
                     "vibeedit_agent_kit_update",
                     "vibeedit_agent_kit_later",
+                    "vibeedit_agent_terminals",
+                    "vibeedit_app_vibeedit_automation_clients",
                     "vibeedit_app_vibeedit_debug_log",
                     "vibeedit_plugins_overlays",
                     "vibeedit_plugins_set_overlays",
@@ -4780,6 +5321,21 @@ class MCPServer:
                     raise ValueError(
                         "agent_kit_later: days must be an integer") from None
                 return _r15.kit_later(args.get("kit_dir"), days=days)
+            if name == "vibeedit_agent_terminals":
+                # Round 22: same shape as the original's
+                # agent.terminals (ProjectDocument+Terminals.swift):
+                # choices, unavailable plugin terminals, open tabs.
+                # All three are empty by design here: no dock, no
+                # agent sessions, and no terminal field in plugin
+                # manifests (see plugins._validate_manifest), so no
+                # plugin can register a terminal either.
+                return {"terminals": [], "unavailable": [], "tabs": []}
+            if name == "vibeedit_app_vibeedit_automation_clients":
+                # Round 22: the original lists clients of its
+                # Unix-socket automation server (UnixSocket.swift);
+                # this headless server has no such socket and no
+                # client registry, so the list is always empty.
+                return {"clients": []}
             if name == "vibeedit_app_vibeedit_debug_log":
                 # Round 21: read back exactly the lines this server
                 # wrote (see _log_call); never invent lines.
@@ -5131,9 +5687,19 @@ class MCPServer:
         raise ValueError(f"Unknown tool: {name}")
 
 
-def handle(server: MCPServer, request: dict) -> dict:
+def handle(server: MCPServer, request: dict) -> dict | None:
     method = request.get("method")
     req_id = request.get("id")
+    # Round 22: JSON-RPC notifications never get a response.
+    # Previously every notification (e.g. notifications/initialized,
+    # which carries no "id") fell through to the unknown-method
+    # error branch and the server answered -32603 "Unknown method",
+    # which can disconnect spec-strict clients. A request without
+    # an "id" field, and any notifications/* method by name, is a
+    # notification: return None and serve() writes nothing.
+    # Unknown methods WITH an id still get the -32603 error.
+    if "id" not in request or str(method or "").startswith("notifications/"):
+        return None
     try:
         if method == "initialize":
             result = {"protocolVersion": "2024-11-05",
@@ -5169,8 +5735,13 @@ def serve(folder: str | None = None) -> None:
                  "error": {"code": -32700, "message": str(exc)}}) + "\n")
             sys.stdout.flush()
             continue
-        sys.stdout.write(json.dumps(handle(server, request)) + "\n")
-        sys.stdout.flush()
+        # Round 22: handle() returns None for notifications; write
+        # nothing for them (writing "null" would still be a
+        # protocol-violating response).
+        response = handle(server, request)
+        if response is not None:
+            sys.stdout.write(json.dumps(response) + "\n")
+            sys.stdout.flush()
 
 
 if __name__ == "__main__":

@@ -114,7 +114,12 @@ def export_otio(project: dict, folder: str, out_path: str) -> dict:
                    "markers": markers_json},
         "metadata": {"VibeEdit": {
             "schema": project.get("schema"), "id": project.get("id"),
-            "format": fmt, "contentLanguage": project.get("contentLanguage")}},
+            "format": fmt, "contentLanguage": project.get("contentLanguage"),
+            # Round 22: absolute source project folder, so import
+            # can relink media even when the .otio file is opened
+            # from elsewhere (the .otio file itself lives in
+            # render/, so its own directory is the wrong base).
+            "sourceFolder": os.path.abspath(folder)}},
     }
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -139,9 +144,14 @@ def import_otio(otio_path: str, dest_folder: str,
     project in ``dest_folder`` (track/item ids are regenerated on
     collision, and transition from/to references are remapped).
 
-    Media paths are resolved relative to the .otio file first, then
-    exactly as stored; a file that cannot be found is still imported
-    (its clip keeps the stored path) and is listed in ``missing`` —
+    Media paths are resolved in order: relative to the .otio file,
+    exactly as stored, relative to the destination folder (covers
+    merge imports into the project the OTIO came from), by basename
+    under ``dest/media/`` (covers media copied into the new
+    project), and relative to the source project folder recorded
+    in the OTIO metadata by export_otio (round 22). A file that
+    cannot be found anywhere is still imported (its clip keeps the
+    original stored path verbatim) and is listed in ``missing`` —
     never silently dropped and never replaced with invented media.
     Unknown OTIO objects are listed in ``warnings``.
     Returns a report: project path, track/clip/transition/marker
@@ -261,19 +271,48 @@ def import_otio(otio_path: str, dest_folder: str,
             ref = child.get("media_reference") or {}
             target = ref.get("target_url")
             if target:
-                resolved = target if os.path.isabs(target) else \
-                    os.path.join(otio_dir, target)
-                if not os.path.isfile(resolved):
-                    if os.path.isfile(target):
-                        resolved = target
-                    else:
-                        missing.append(target)
-                # Store a path the project can open: relative to the
-                # destination folder when possible, else absolute.
-                try:
-                    stored = os.path.relpath(resolved, dest_folder)
-                except ValueError:
-                    stored = resolved
+                # Round 22: export_otio writes project-relative
+                # paths while the .otio file lives in render/, so
+                # otio_dir-relative resolution alone ALWAYS missed
+                # on a round-trip (the old code then stored a
+                # relpath to a nonexistent file and the clip could
+                # never play). Try every honest base before giving
+                # up; the source folder comes from the OTIO metadata
+                # written by export_otio since round 22.
+                src_folder = meta.get("sourceFolder") or ""
+                candidates = []
+                if os.path.isabs(target):
+                    candidates.append(target)
+                else:
+                    candidates.append(os.path.join(otio_dir, target))
+                    candidates.append(target)
+                    candidates.append(os.path.join(dest_folder, target))
+                    candidates.append(os.path.join(
+                        dest_folder, "media",
+                        os.path.basename(target)))
+                    if src_folder:
+                        candidates.append(
+                            os.path.join(src_folder, target))
+                resolved = None
+                for cand in candidates:
+                    if os.path.isfile(cand):
+                        resolved = cand
+                        break
+                if resolved is None:
+                    missing.append(target)
+                    # Keep the original target verbatim: inventing
+                    # a relpath to a file that does not exist made
+                    # broken records (e.g. "media/mp4") that looked
+                    # playable but were not.
+                    stored = target
+                else:
+                    # Store a path the project can open: relative
+                    # to the destination folder when possible, else
+                    # absolute.
+                    try:
+                        stored = os.path.relpath(resolved, dest_folder)
+                    except ValueError:
+                        stored = resolved
                 medium = next((m for m in data["media"]
                                if m["path"] == stored), None)
                 if medium is None:
