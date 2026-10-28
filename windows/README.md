@@ -1,4 +1,4 @@
-# VibeEdit — Windows (Phase 8, final planned phase)
+# VibeEdit — Windows (chuyển toàn bộ BashCut macOS sang Windows)
 
 ## Chạy nhanh trong VS Code và cập nhật không cần tải ZIP
 
@@ -291,6 +291,35 @@ Chi tiết ở [`PARITY.md`](PARITY.md) mục vòng 15.
 - **Mục vague:** picker mở project thứ hai gãy thật ở `open_project` (từ chối path tuyệt đối ngoài `projects/`; nay cho phép + ô nhập path ở welcome); Welcome/Tạo take/Faces/Cutout không tái hiện lỗi handler; Batch rỗng chỉ thêm note UI (server cố tình xuất project hiện tại); "Xem bản xuất" nay disable khi chưa có `last_export`; overlap là đúng, không sửa; chuỗi tiếng Anh bị test khóa giữ nguyên; gộp import 3-control chưa đóng (cần audit DOM visibility).
 - **Góp ý vòng 19/21 còn hoạt động:** poster frame đầu clip main, chỉ báo "Đã lưu", ruler ảo hoá, badge "lệnh nhanh — chưa phải AI", icon SVG, lane/clip radius 6 + ring cyan, ruler thưa tick; media card đúng (chữ "mp4" là record hỏng từ OTIO, #5 xử lý gốc). Logo giữ data URI (pipeline push chỉ cho text).
 - Kiểm chứng: py_compile các file chạm tới, node --check, nhóm mục tiêu (test_round18 + 19 + 20 + 21 + 22) OK, full suite (xem báo cáo vòng 22), smoke server với project tạm + GET trong lúc render <2 s; cây Swift không động, không merge. Kiểm chứng trực quan trên Windows thật vẫn để lại cho người dùng sau khi pull.
+
+## Vòng 23 — skill dạng thư mục + import + đồng bộ Claude Code
+
+- **MCP 481 = 429 thật + 52 honest:** thêm 2 công cụ mới (`skills_import_plan`, `skills_import`); skill thư mục (`skills/<id>/SKILL.md` + `references/` + `kit/`), import từ .md/thư mục/plugin Claude/.zip (chỉ copy, chống zip-slip, 50 MB/2000 entry), đồng bộ sang `.claude/skills/` (dạng thư mục, không ghi đè file sửa tay nếu không có overwrite), `resources/list` + `resources/read` cho skill (`vibeedit-skill://<id>`).
+- Kiểm chứng: 21 skill phẳng không đổi; full suite 813 test OK trên Linux VM.
+
+## Vòng 24 — audit honest + hardening từ vòng 22
+
+- **MCP 481 = 432 thật + 49 honest:** 3 công cụ honest chuyển thật dạng rỗng-by-design (`voice_clone_list` → `{"clones": []}`, `ui_dialog` → `{"dialogs": []}`, `chat_status` → `{"agents": []}`); 49 công cụ còn lại vẫn honest, lý do pin trong `tests/test_round24.py`.
+- Hardening: hasAudio dò file thật (ffprobe) thay vì tin bản ghi; hủy xuất kill FFmpeg thật, xóa file dở; `MCPServer.call` kiểm tra tham số bắt buộc trước mọi tác dụng phụ; `plugins_install`/`ui_select` không còn schema bắt buộc thừa.
+- Kiểm chứng: full suite 832 test OK trên Linux VM.
+
+## Vòng 25 — khóa file project + chẩn đoán xuất
+
+- **Không đổi số đếm (481 = 432 + 49).** Khóa file `<project>.lock` (stdlib, `O_CREAT|O_EXCL`, token `pid:uuid`, timeout 10 s → lỗi to, stale 60 s, tái nhập theo luồng); giữ khóa chỉ quanh đoạn [refresh, mutate, save, rev bump]; tool chạy lâu + `project_open` giữ refresh-first không khóa.
+- Báo cáo xuất thêm chẩn đoán: `ffmpeg_command`, `filter_complex`, `shortest`, `audio_map`, `clip_fps` (fps nguồn/null + `source_fps_known: false` khi bản ghi không có fps, không lặng lẽ thay bằng fps project), `output_durations` (video_s/audio_s đo từ file xuất, null + ghi chú khi dò lỗi).
+- Kiểm chứng: 3 tiến trình × 4 `markers_add` → đủ 12 marker, rev đơn điệu, không còn file `.lock`; full suite 844 test OK trên Linux VM.
+
+## Vòng 26 — quét nhất quán ngôn ngữ: chuỗi tiếng Anh còn lại sang tiếng Việt
+
+- Ba cổng mỗi chuỗi (không test nào khóa, không code nào match, không thuộc diện cố tình giữ tiếng Anh); khoảng 600 phần thông điệp sang tiếng Việt (19 file `vibeedit_core` + HTML/JS); 10 bản dịch revert sau lần chạy suite đầu vì test khóa (không sửa test); giữ tiếng Anh có pin trong `tests/test_round26.py` (dropzone subtext, CTA Export video, tooltip icon timeline, `No beat grid detected yet`, `Unknown transition kind`, thông điệp chứa `exceeds`, tín hiệu hủy xuất, guard filelock, mô tả `mcp.py`).
+- Kiểm chứng: full suite 860 test OK trên Linux VM.
+
+## Vòng 27 — rà soát bổ sung: bản dịch phần 2, đóng pipe stderr, sửa lệch tài liệu
+
+- **Không đổi số đếm (481 = 432 + 49), không tool nào chuyển thật.** Vòng 26 bỏ sót các chuỗi viết dạng literal nối dòng (nối chuỗi ngầm nhiều dòng): bản này dịch nốt các chuỗi qua đủ ba cổng (lý do analysis/speech-map, cảnh báo OTIO/media, cảnh báo plugin, lỗi transition, cảnh báo lệch thời lượng, ghi chú render bị bỏ qua, ghi chú round8/round9/round15, body lỗi HTTP `Unknown export job`, ghi chú skill/updater, nút danh sách + trạng thái trống trong app.js).
+- Sửa rò rỉ pipe stderr trong `decode_sound_levels` và `_decode_mono_8k_envelope` (suite từng báo ResourceWarning ở hai chỗ này).
+- Sửa lệch tài liệu: tiêu đề PARITY.md + dòng bảng mục 8 về đúng 481 = 432 + 49; README.md đổi tiêu đề khỏi cụm "Phase 8…" cũ (mục tiêu là chuyển toàn bộ, không giới hạn phase) và thêm các mục vòng 23–27; checklist Windows sửa dòng registry (registry tồn tại từ vòng 15; chỉ phần chạy plugin registry trên Windows là chưa có) và thêm mục kiểm chứng vòng 23–26; UI_MAP.md thêm mục vòng 27.
+- Kiểm chứng: target test 31 test OK + full suite 891 test OK (201 s) trên Linux VM; MCP 481 = 432 + 49 không đổi; 3 bản dịch revert sau khi suite bắt được test khóa (xem PARITY.md vòng 27).
 
 ## Giao diện vòng 18 — bố cục tổng thể theo app gốc + phím tắt
 

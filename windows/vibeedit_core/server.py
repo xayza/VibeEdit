@@ -1474,7 +1474,7 @@ def make_handler(state: State):
                     body = self._read_json()
                     job = state.cancel_export_job(body.get("job", ""))
                     if job is None:
-                        self._send_json({"error": "Unknown export job"},
+                        self._send_json({"error": "Không rõ job xuất"},
                                         404)
                     else:
                         self._send_json({"ok": True, "job": job})

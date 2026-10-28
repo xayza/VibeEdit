@@ -306,3 +306,9 @@ Chi tiết đúng hiện tại nằm ở `PARITY.md`, không phải mục này.
   shortcut vòng 20 coi `"` và backtick trong regex literal là mở
   chuỗi/template — code mới tránh cả hai, xem comment trong
   app.js quanh `escHtml`/`renderMarkdown`.
+
+## §14 — Vòng 27: không đổi bố cục, chỉ rà soát bổ sung
+
+- Bố cục, giá trị khóa vòng 18, framework HTML/CSS/JS giữ nguyên.
+- Panel Review thêm dòng "Chẩn đoán xuất" từ vòng 25 (video/audio đo từ file, cờ -shortest, clip lệch fps) — xem PARITY.md vòng 25.
+- Ngôn ngữ: vòng 26 quét tiếng Việt, vòng 27 dịch nốt các chuỗi literal nối dòng còn sót (lý do analysis, cảnh báo xuất, ghi chú render) — xem PARITY.md vòng 26–27.

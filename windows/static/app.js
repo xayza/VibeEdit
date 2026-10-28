@@ -133,7 +133,7 @@ function renderTransitions() {
   const list = $("transitionList");
   const trans = project.transitions || [];
   list.innerHTML = trans.map((t) =>
-    `<li>${t.kind} ${t.from} → ${t.to} (${t.duration} frames) <button data-tr="${t.id}" class="danger">Remove</button></li>`).join("") || "<li>No transitions yet.</li>";
+    `<li>${t.kind} ${t.from} → ${t.to} (${t.duration} frames) <button data-tr="${t.id}" class="danger">Xóa</button></li>`).join("") || "<li>Chưa có transition nào.</li>";
   list.querySelectorAll("button[data-tr]").forEach((b) => b.addEventListener("click", async () => {
     try { await api("/api/project", { op: "remove_transition", transition: b.dataset.tr }); setStatus("Đã xóa transition."); await load(); }
     catch (err) { setStatus(err.message, true); }
@@ -147,7 +147,7 @@ function renderKeyframes() {
   const kfs = found.item.keyframes || [];
   $("keyframeList").innerHTML = kfs.map((kf, i) => {
     const entries = Object.entries(kf).filter(([k]) => k !== "at").map(([k, v]) => `${k}=${v}`).join(", ");
-    return `<li>${(kf.at / fps()).toFixed(2)}s: ${entries} <button data-kf="${i}" class="danger">Delete</button></li>`;
+    return `<li>${(kf.at / fps()).toFixed(2)}s: ${entries} <button data-kf="${i}" class="danger">Xóa</button></li>`;
   }).join("") || "<li>No keyframes.</li>";
   $("keyframeList").querySelectorAll("button[data-kf]").forEach((b) => b.addEventListener("click", async () => {
     const rest = kfs.filter((_, i) => String(i) !== b.dataset.kf);
@@ -1450,7 +1450,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       } else if (lower.includes("list clip")) {
         const items = [];
         for (const t of project.tracks) for (const it of t.items) items.push(`${t.name}: ${it.text || it.media || it.id} (${(it.at / fps()).toFixed(2)}s)`);
-        agentSay(items.length ? `Clips (${items.length}): ${items.join(" | ")}` : "No clips on the timeline yet.");
+        agentSay(items.length ? `Clips (${items.length}): ${items.join(" | ")}` : "Chưa có clip nào trên timeline.");
       } else if (lower.includes("export")) {
         agentSay("Đang xuất bản nháp (xuất thật, qua cùng nút Export draft)…");
         doExport("draft");
@@ -1462,7 +1462,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
         const st = data.result;
         agentSay(`Bối cảnh project: ${st.name}, rev ${st.rev}, ${st.tracks} tracks, ${st.items} items, ${st.clips} clips, ${st.duration_seconds}s.`);
       } else if (lower.includes("workspace")) {
-        agentSay(`Workspace: project "${project.name}", rev ${project.rev ?? 0}, ${project.format.width}x${project.format.height}, ${project.tracks.length} tracks. Open project folder via the server project path shown in the console.`);
+        agentSay(`Không gian làm việc: project "${project.name}", rev ${project.rev ?? 0}, ${project.format.width}x${project.format.height}, ${project.tracks.length} track. Mở thư mục project qua đường dẫn project của server hiển thị trong console.`);
       } else if (lower === "undo") {
         const b = $("btnUndo"); if (b) b.click();
         agentSay("Đã yêu cầu hoàn tác.");

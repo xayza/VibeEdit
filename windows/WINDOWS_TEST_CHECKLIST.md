@@ -117,7 +117,7 @@ py -m unittest discover -s tests
 - Chạy segmentation học sâu thật cho cutout (cần model ONNX +
   ONNX Runtime do người dùng cung cấp; khe cắm đã có, grabCut
   không phải "learned").
-- Lấy cập nhật plugin từ registry (không có registry nào tồn tại).
+- Chạy plugin lấy từ registry trên Windows (registry tồn tại từ vòng 15: file registry.json tĩnh, fetch + kiểm chữ ký đã có; nhưng các plugin registry là provider macOS, không có entry chạy được trên Windows nên chỉ cài để xem lại, không bật/chạy được).
 - Bộ cài `.exe` một lần bấm và Windows CI (workflow
   `build-windows.yml` vẫn phải đẩy bằng git thật/web UI vì GitHub
   App bị chặn 403; chưa có .exe nào được build, chưa có CI nào chạy).
@@ -129,7 +129,17 @@ py -m unittest discover -s tests
 - OCR/cutout khi máy chưa cài Tesseract/OpenCV: app phải báo thiếu
   backend rõ ràng, đó là hành vi đúng, không phải lỗi.
 
-## 11. Báo lại cho bimo cái gì
+## 11. Kiểm chứng bổ sung vòng 23–26 (sau khi pull)
+
+- [ ] Import skill từ file zip thật: `C:\Users\daoho\Downloads\thanh-hai-learn-ai-2d-studio.zip` → cài 5 skill, trong đó có `windows/skills/make-2d-video/references/style-bible.md`.
+- [ ] Panel Knowledge mới: bảng skill bấm được, xem markdown đã render (không phải JSON thô), nhập skill có xem trước theo tick, nút đồng bộ Claude Code.
+- [ ] Sửa đồng thời web + MCP: sửa bằng MCP rồi sửa bằng web (hoặc ngược lại) — cả hai đều còn, không mất cập nhật, không còn file .lock sau khi xong.
+- [ ] Xuất mới rồi đọc dòng "Chẩn đoán xuất" trong panel Review: video/audio đo từ file, cờ -shortest, clip lệch fps, số clip không rõ fps.
+- [ ] Xuất nền + hủy: bấm Export rồi bấm Hủy xuất — FFmpeg dừng thật, file dở bị xóa, không có bản xuất mới.
+- [ ] Giao diện tiếng Việt: panel Knowledge/Vision/plugin, dòng voiceover, thông báo lỗi server — đặc biệt lỗi "Không tìm thấy nguồn plugin".
+- [ ] Nút sao chép lệnh MCP trong dock AGENT cho ra lệnh thật, chạy được từ terminal khác.
+
+## 12. Báo lại cho bimo cái gì
 
 Mỗi lỗi gửi kèm đủ 5 thứ, thiếu một thứ bimo sẽ phải hỏi lại:
 

@@ -161,8 +161,8 @@ def update_status() -> dict:
                           "updater.json next to vibeedit_core, to "
                           "enable update checks")
         return base
-    base["status"] = ("updater channel configured; call "
-                      "app_update_check with check=true to query it")
+    base["status"] = ("đã cấu hình kênh updater; gọi "
+                      "app_update_check với check=true để truy vấn")
     return base
 
 

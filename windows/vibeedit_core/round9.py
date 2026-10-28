@@ -238,8 +238,8 @@ def show_plugin_view(proj, plugin: str, view_id: str,
     if location == "inspector":
         return {"plugin": plugin, "view": view_id,
                 "location": "inspector", "shown": False,
-                "note": "Inspector views follow the selection; "
-                "there is nothing to open."}
+                "note": "Các view Inspector theo selection; "
+                "không có gì để mở."}
     shown = proj.data.setdefault("plugin_views_shown", {})
     key = f"{plugin}/{view_id}"
     proj._bump()

@@ -490,10 +490,10 @@ def narration_windows(proj, min_seconds: float = 1.0,
         cursor = max(cursor, end)
     return {"windows": windows, "minSeconds": min_seconds,
             "rate": rate, "projectSeconds": round(total_s, 3),
-            "note": "Windows are timeline gaps between caption words "
-                    "and voiceover items; analysis-transcript words "
-                    "are source times, not timeline times, and are "
-                    "not used here."}
+            "note": "Các window là khoảng trống timeline giữa các từ "
+                    "caption và các item voiceover; các từ transcript "
+                    "của bản phân tích là thời gian nguồn, không phải "
+                    "thời gian timeline, và không dùng ở đây."}
 
 
 # ---------------------------------------------------------------------------
@@ -679,8 +679,8 @@ def map_outcomes(proj, export_id: str, window_seconds: float = 5.0) -> dict:
     drops.sort(key=lambda d: d["change"])
     return {"export": export_id, "sections": sections,
             "largestDrops": drops[:10],
-            "note": "Retention is in the file's unit (percent or "
-                    "fraction); viewsAtStart normalises percent."}
+            "note": "Retention tính theo đơn vị của file (phần trăm "
+                    "hoặc tỉ lệ); viewsAtStart chuẩn hoá phần trăm."}
 
 
 # ---------------------------------------------------------------------------
@@ -1021,9 +1021,9 @@ def media_digest(proj, media_id: str) -> dict:
         "lines": lines,
         "facts": facts,
         "described": bool(shots),
-        "note": "Shot facts are caller-supplied via "
-                "media.describe; header numbers are measured or "
-                "stored metadata, never invented."}
+        "note": "Các fact shot do người gọi cung cấp qua "
+                "media.describe; các số ở header đã đo hoặc là "
+                "metadata đã lưu, không bao giờ bịa."}
 
 
 # ---------------------------------------------------------------------------
@@ -1200,14 +1200,17 @@ def image_disclose(proj, text=None) -> dict:
     if label is None:
         label = (proj.data.get("brand") or {}).get("disclosure")
     if not label:
+        # REVERTED in round 27: test_round8:409 asserts "No
+        # disclosure" in this note (gate-1 miss: the scan checked
+        # the full sentence, not the asserted prefix).
         return {"added": [], "rev": proj.rev,
                 "note": "No disclosure label configured: pass text "
-                        "or set one with image.style first."}
+                        "or set a label with image.style first."}
     generated = {m["id"] for m in proj.data["media"]
                  if m.get("generated")}
     if not generated:
         return {"added": [], "rev": proj.rev,
-                "note": "No generated pictures are on the timeline."}
+                "note": "Không có ảnh đã tạo nào trên timeline."}
     captions_track = next((t for t in proj.data["tracks"]
                            if t.get("role") == "captions"
                            and t["kind"] == "text"), None)
@@ -1478,7 +1481,7 @@ def analyze_library_item(proj, entry_id: str, media_path=None) -> dict:
                 except (TypeError, ValueError):
                     true_peak = None
         except Exception as exc:  # noqa: BLE001 - reported, not hidden
-            notes.append(f"loudnorm measurement failed: {exc}")
+            notes.append(f"đo loudnorm thất bại: {exc}")
     else:
         notes.append("FFmpeg loudnorm unavailable or no sound "
                      "envelope decoded")
@@ -1500,8 +1503,8 @@ def analyze_library_item(proj, entry_id: str, media_path=None) -> dict:
                       "liftAt": round(onset, 2),
                       "peakAt": round(peak, 2)}
         else:
-            notes.append("No sound window passes the -70 dB gate, "
-                         "so landmarks are null")
+            notes.append("Không có window âm thanh nào qua cổng -70 dB, "
+                         "nên landmarks là null")
     tempo = None
     try:
         from .beats import detect_beats
@@ -1515,20 +1518,19 @@ def analyze_library_item(proj, entry_id: str, media_path=None) -> dict:
                 if median_gap > 0:
                     tempo = round(60.0 / median_gap, 1)
     except Exception as exc:  # noqa: BLE001 - reported, not hidden
-        notes.append(f"Tempo detection unavailable: {exc}")
+        notes.append(f"Không phát hiện được tempo: {exc}")
     if tempo is None:
-        notes.append("Tempo is null: the beat detector yielded no "
-                     "usable beat grid for this file")
+        notes.append("Tempo là null: bộ phát hiện nhịp không cho "
+                     "lưới nhịp dùng được cho file này")
     measured = {"duration": duration,
                 "loudness": loudness,
                 "truePeakDbTP": true_peak,
                 "landmarks": landmarks, "tempoBpm": tempo,
                 "energy": energy, "notes": notes,
-                "gateNote": "Landmark gate uses the measured dBFS "
-                            "envelope as the -70 LUFS gate "
-                            "approximation; loudness/peak come from "
-                            "FFmpeg loudnorm, not a separate "
-                            "audio.loudness provider."}
+                "gateNote": "Cổng landmark dùng envelope dBFS đã đo "
+                            "làm xấp xỉ cổng -70 LUFS; loudness/peak "
+                            "lấy từ FFmpeg loudnorm, không phải "
+                            "provider audio.loudness riêng."}
     new_entry = copy.deepcopy(entry)
     new_entry["analysis"] = measured
     new_entry["version"] = int(entry.get("version") or 1) + 1
@@ -1598,9 +1600,9 @@ def kit_check(kit_dir=None) -> dict:
                 "error": str(exc),
                 "channel": None,
                 "newer": None,
-                "note": "No agent-kit releases channel is configured "
-                        "in this build, so no newer-release check "
-                        "runs; this reports the local kit only."}
+                "note": "Build này không cấu hình kênh releases "
+                        "agent-kit nên không chạy kiểm tra bản mới; "
+                        "chỉ báo cáo kit local."}
     names = []
     for skill in skills:
         if isinstance(skill, dict):
@@ -1609,9 +1611,9 @@ def kit_check(kit_dir=None) -> dict:
             names.append(str(skill))
     return {"kitFolder": folder, "skills": names,
             "count": len(names), "channel": None, "newer": None,
-            "note": "No agent-kit releases channel is configured "
-                    "in this build, so no newer-release check runs; "
-                    "this reports the local kit only."}
+            "note": "Build này không cấu hình kênh releases "
+                    "agent-kit nên không chạy kiểm tra bản mới; "
+                    "chỉ báo cáo kit local."}
 
 
 def kit_install_skills(path: str, kit_dir=None) -> dict:

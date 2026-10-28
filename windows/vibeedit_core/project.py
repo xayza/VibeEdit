@@ -1253,8 +1253,8 @@ class Project:
         dur_frames = seconds_to_frames(duration_s, self.fps)
         if dur_frames <= 0 or dur_frames > min(int(from_item["dur"]),
                                                int(to_item["dur"])):
-            raise ValueError("Transition duration exceeds the shorter "
-                             "adjacent clip")
+            raise ValueError("Thời lượng transition vượt quá clip kề ngắn "
+                             "hơn")
         for existing in self.data["transitions"]:
             if existing["from"] == from_id and existing["to"] == to_id:
                 raise ValueError("Cut này đã có transition")

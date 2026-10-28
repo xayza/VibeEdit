@@ -647,9 +647,9 @@ def kit_update(kit_dir=None, version=None, fetcher=None, downloader=None):
             "installed": result["installed"],
             "refused": result["refused"],
             "minAppVersion": target["minAppVersion"],
-            "minAppVersionNote": "minAppVersion gates BashCut releases; "
-                                 "the Windows port reports it but does "
-                                 "not enforce it."}
+            "minAppVersionNote": "minAppVersion chặn các release BashCut; "
+                                 "bản Windows chỉ báo cáo chứ không "
+                                 "áp đặt nó."}
 
 
 def kit_later(kit_dir=None, days=7):

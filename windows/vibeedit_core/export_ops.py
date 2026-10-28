@@ -565,5 +565,5 @@ def media_metadata(project: dict, folder: str, media_id: str) -> dict:
             result["probe_error"] = str(exc)
     else:
         result["probed"] = False
-        result["warning"] = f"Media file not found on disk: {abs_path}"
+        result["warning"] = f"Không tìm thấy file media trên đĩa: {abs_path}"
     return result

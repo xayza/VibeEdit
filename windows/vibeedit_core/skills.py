@@ -354,7 +354,7 @@ def remove_skill(skills_dir, skill_id: str, confirm: bool = False) -> dict:
     state["disabled"] = sorted(disabled)
     _save_state(skills_dir, state)
     return {"removed": skill_id,
-            "note": "restore shipped skills from the repo if needed"}
+            "note": "khôi phục skill kèm sẵn từ repo nếu cần"}
 
 
 def propose_skill(skills_dir, skill_id: str, title: str,

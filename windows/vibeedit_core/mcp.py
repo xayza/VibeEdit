@@ -3175,7 +3175,7 @@ class MCPServer:
                 from .render import probe_media
                 meta = probe_media(abs_path)
             else:
-                warning = f"Media file not found on disk: {abs_path}"
+                warning = f"Không tìm thấy file media trên đĩa: {abs_path}"
             medium = proj.add_media(
                 path, kind=args.get("kind") or
                 ("video" if meta.get("width") else "audio"),

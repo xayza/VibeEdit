@@ -904,16 +904,21 @@ def _attach_duration_check(report: dict, output: str) -> None:
         file_s = float(probe_media(output).get("duration") or 0.0)
     except Exception as exc:  # noqa: BLE001 - probe is best-effort
         report["duration_check"] = {"warning": None,
-                                    "error": f"probe failed: {exc}"}
+                                    "error": f"probe thất bại: {exc}"}
         return
     timeline_s = float(report.get("duration") or 0.0)
     diff = file_s - timeline_s
     warning = None
     if abs(diff) > 1.0:
-        warning = (f"File duration {file_s:.2f}s differs from timeline "
-                   f"{timeline_s:.2f}s by {diff:+.2f}s — the export "
-                   f"may be out of sync; check the timeline before "
-                   f"publishing.")
+        # REVERTED in round 27: test_round22:467 asserts "differs"
+        # in this warning, so the English form stays (gate-1 miss:
+        # the scan checked the tail "may be out of sync" but not
+        # the middle word). The VIBEEDIT DURATION WARNING tag below
+        # stays English regardless, as a greppable marker.
+        warning = (f"Output duration {file_s:.2f}s differs from "
+                   f"timeline duration {timeline_s:.2f}s by "
+                   f"{diff:+.2f}s — may be out of sync; check the "
+                   f"timeline before publishing.")
         print(f"VIBEEDIT DURATION WARNING: {warning}", file=sys.stderr)
     report["duration_check"] = {"timeline_s": round(timeline_s, 3),
                                 "file_s": round(file_s, 3),
@@ -942,7 +947,7 @@ def _attach_output_durations(report: dict, output: str) -> None:
         data = json.loads(proc.stdout)
     except Exception as exc:  # noqa: BLE001 - probe is best-effort
         report["output_durations"] = {"video_s": None, "audio_s": None,
-                                      "error": f"probe failed: {exc}"}
+                                      "error": f"probe thất bại: {exc}"}
         return
     video_s = audio_s = None
     for stream in data.get("streams", []):
@@ -1054,8 +1059,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             dur_s = frames_to_seconds(trans["duration"], fmt["fps"])
             if dur_s > min(frames_to_seconds(prev_item["dur"], fmt["fps"]),
                            frames_to_seconds(item["dur"], fmt["fps"])):
-                raise ValueError("Transition duration exceeds the shorter "
-                                 "adjacent clip")
+                raise ValueError("Thời lượng transition vượt quá clip kề ngắn "
+                                 "hơn")
             boundaries.append((frames_to_seconds(item["at"], fmt["fps"]), dur_s))
 
     def adjust(time_s: float) -> float:
@@ -1411,8 +1416,8 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         trans_s = frames_to_seconds(trans["duration"], fmt["fps"])
         if trans_s > vchain_dur + 1e-6:
             raise ValueError(
-                "Transition duration exceeds the rendered output "
-                "so far for motion transition "
+                "Thời lượng transition vượt quá phần đã render tới giờ "
+                "cho transition motion "
                 f"{trans['kind']!r}")
         pre_dur = vchain_dur - trans_s
         post_dur = dur_s - trans_s
@@ -2077,7 +2082,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                                                fmt["fps"]))
             filters = _color_filters(item, lut_dir)
             if not filters:
-                skipped.append(f"adjustment {item['id']} (no colour set)")
+                skipped.append(f"adjustment {item['id']} (chưa đặt màu)")
                 continue
             timed = [f"{f}:enable='{_enable_window(start_adj, end_adj)}'"
                      for f in filters]
@@ -2096,7 +2101,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             medium = next((m for m in project["media"]
                            if m["id"] == item.get("media")), None)
             if medium is None:
-                skipped.append(f"overlay {item['id']} (no media)")
+                skipped.append(f"overlay {item['id']} (không có media)")
                 continue
             if medium.get("kind") == "image":
                 # Phase 8: overlay still images now render (previously

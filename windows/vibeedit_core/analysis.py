@@ -359,11 +359,15 @@ def decode_sound_levels(path: str) -> dict | None:
         if proc.stdout:
             proc.stdout.close()
         proc.wait(timeout=60)
-    if proc.returncode != 0:
-        err = proc.stderr.read().decode("utf-8", "replace") \
-            if proc.stderr else ""
-        raise RuntimeError(f"FFmpeg không giải mã được âm thanh của "
-                           f"{path}: {err.strip()[:300]}")
+    try:
+        if proc.returncode != 0:
+            err = proc.stderr.read().decode("utf-8", "replace") \
+                if proc.stderr else ""
+            raise RuntimeError(f"FFmpeg không giải mã được âm thanh của "
+                               f"{path}: {err.strip()[:300]}")
+    finally:
+        if proc.stderr:
+            proc.stderr.close()
     return meter.result()
 
 
@@ -561,8 +565,8 @@ def measure_picture(path: str, fps: float, total_frames: int,
             "frames": total_frames, "source": "original",
             "samples": samples, "candidates": candidates,
             "candidateFloor": CANDIDATE_FLOOR,
-            "narrowingNote": ("interval decode gave no frame pair; "
-                              "candidate kept at the sample frame"
+            "narrowingNote": ("giải mã theo khoảng không cho cặp khung hình nào; "
+                              "giữ candidate tại khung hình mẫu"
                               if vfr_fallback else None)}
 
 
@@ -591,11 +595,10 @@ def transcribe_words(path: str) -> tuple:
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        return [], ("faster-whisper is not installed on this "
-                    "machine, so no transcript was measured; "
-                    "install it with 'pip install faster-whisper' "
-                    "and remeasure. Sound and picture measurements "
-                    "are unaffected.")
+        return [], ("Chưa cài faster-whisper trên máy này nên không đo "
+                    "transcript; hãy cài bằng 'pip install faster-whisper' "
+                    "rồi đo lại. Các phép đo hình ảnh và âm thanh "
+                    "không bị ảnh hưởng.")
     try:
         model = WhisperModel("tiny", device="cpu", compute_type="int8")
         segments, _info = model.transcribe(
@@ -614,7 +617,7 @@ def transcribe_words(path: str) -> tuple:
                               "end": _round3(segment.end)})
         return [w for w in words if w["text"]], None
     except Exception as exc:
-        return [], f"Transcription failed and was left empty: {exc}"
+        return [], f"Phiên âm thất bại nên để trống: {exc}"
 
 # ------------------------------------------------------------------
 # Whole-media measurement.
@@ -658,8 +661,8 @@ def measure_media(path: str, fps: float | None = None,
             sound = decode_sound_levels(path)
         except Exception:
             sound = None
-    words, reason = ([], "no audio track, so there is nothing to "
-                     "transcribe") if not audio else transcribe_words(path)
+    words, reason = ([], "không có track audio nên không có gì để "
+                     "phiên âm") if not audio else transcribe_words(path)
     record = {
         "version": ANALYSIS_VERSION,
         "key": content_key(path),
@@ -805,12 +808,12 @@ def derive_analysis(record: dict, min_score: float = 0.1,
         else:
             summary = {"count": 0}
         picture_out = {
-            "units": "Source frames at fps. luma, spread, change, "
-                     "peak as in review.picture (fractions of full "
-                     "scale on a 24x24 grey thumbnail); sharpness: "
-                     "mean absolute Laplacian of a 256-pixel grey "
-                     "frame; colourfulness: Hasler-Susstrunk on a "
-                     "small RGB thumbnail.",
+            "units": "Khung hình nguồn tại fps. luma, spread, change, "
+                     "peak theo review.picture (tỉ lệ trên thumbnail "
+                     "xám 24x24); sharpness: Laplacian trị tuyệt đối "
+                     "trung bình của khung hình xám 256 pixel; "
+                     "colourfulness: Hasler-Susstrunk trên thumbnail "
+                     "RGB nhỏ.",
             "fps": fps, "interval": picture["interval"],
             "frames": picture["frames"],
             "candidateFloor": picture["candidateFloor"],
@@ -847,12 +850,12 @@ def derive_analysis(record: dict, min_score: float = 0.1,
         total = len(levels) * sound["window"]
         silent = sum(1 for v in levels if v <= SILENCE_DB)
         sound_out = {
-            "units": "dBFS. Levels are RMS over 0.1 s windows of "
-                     "all channels (not LUFS). floorDb, medianDb "
-                     "and loudDb are the 10th, 50th and 95th "
-                     "percentiles of all windows (digital silence "
-                     "reads -120). Active spans are sound over "
-                     "floorDb + activityDb, speech or not.",
+            "units": "dBFS. Các mức là RMS trên cửa sổ 0,1 s của "
+                     "mọi kênh (không phải LUFS). floorDb, medianDb "
+                     "và loudDb là phân vị thứ 10, 50 và 95 của "
+                     "mọi cửa sổ (lặng số đọc -120). Span đang hoạt "
+                     "động là âm thanh trên floorDb + activityDb, "
+                     "có phải lời nói hay không.",
             "window": sound["window"],
             "peakDb": _round3(sound["peakDb"]),
             "floorDb": _round3(floor),
@@ -1040,9 +1043,9 @@ def speech_map(sound: dict, words: list | None = None,
     cal_json["thresholdDb"] = threshold
     silent = sum(1 for v in levels if v <= SILENCE_DB) * window
     result: dict = {
-        "measuredOn": f"broadband RMS per {window} s window from "
-                      "media.analyze (dBFS); digital silence is "
-                      "quiet and left out of the calibration",
+        "measuredOn": f"RMS băng rộng trên mỗi cửa sổ {window} s từ "
+                      "media.analyze (dBFS); lặng số được coi là lặng "
+                      "và loại khỏi phép hiệu chuẩn",
         "seconds": _round3(total),
         "digitalSilenceSeconds": _round3(silent),
         "calibration": cal_json,
@@ -1066,19 +1069,19 @@ def speech_map(sound: dict, words: list | None = None,
         result["gaps"] = None
         if calibration is None:
             result["reason"] = (
-                "Too little sound, or a level that hardly "
-                "changes: no quiet and loud classes to split. "
-                "Pass thresholdDb to force one (just over -120 "
-                "splits sound from digital silence), or read "
-                "the transcript spans.")
+                "Quá ít âm thanh, hoặc mức âm gần như không đổi: "
+                "không tách được lớp lặng và lớp ồn. Truyền "
+                "thresholdDb để ép tách (chỉ trên -120 một chút "
+                "sẽ tách âm thanh khỏi lặng số), hoặc đọc các "
+                "span transcript.")
         else:
             result["reason"] = (
-                "Quiet and loud windows are closer than "
-                "minSeparationDb: the floor and the sound over "
-                "it do not separate, so no spans are given. "
-                "Pass thresholdDb to force one (just over -120 "
-                "splits sound from digital silence), or read "
-                "the transcript spans.")
+                "Các cửa sổ lặng và ồn gần nhau hơn "
+                "minSeparationDb: nền và âm thanh trên nền không "
+                "tách được nên không có span nào. Truyền "
+                "thresholdDb để ép tách (chỉ trên -120 một chút "
+                "sẽ tách âm thanh khỏi lặng số), hoặc đọc các "
+                "span transcript.")
     if words is not None:
         heard = _joined_spans(
             [(w["start"], w["end"]) for w in words], bridge_seconds)
@@ -1153,10 +1156,14 @@ def _decode_mono_8k_envelope(path: str) -> list:
         if proc.stdout:
             proc.stdout.close()
         proc.wait(timeout=120)
-    if proc.returncode != 0:
-        err = proc.stderr.read().decode("utf-8", "replace") \
-            if proc.stderr else ""
-        raise RuntimeError(f"FFmpeg không giải mã được {path} để đồng bộ: {err.strip()[:300]}")
+    try:
+        if proc.returncode != 0:
+            err = proc.stderr.read().decode("utf-8", "replace") \
+                if proc.stderr else ""
+            raise RuntimeError(f"FFmpeg không giải mã được {path} để đồng bộ: {err.strip()[:300]}")
+    finally:
+        if proc.stderr:
+            proc.stderr.close()
     return envelope
 
 
