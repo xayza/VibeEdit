@@ -483,7 +483,7 @@ TOOLS.extend([
     {"name": "vibeedit_agent_toggle_dock", "description": "Not available in this Windows build: no dock UI exists in this headless server; the web UI Agent dock is a separate browser view."},
     {"name": "vibeedit_agent_ask", "description": "Not available in this Windows build: in-app LLM chat is not present (parity-by-design: the original removed its model-API panel); use an external agent via MCP."},
     {"name": "vibeedit_agent_kit_check", "description": "Agent-kit status: kit folder, installed skills, installed kit version and releases channel (https://raw.githubusercontent.com/dongnguyenvie/bashcut-agent-kit/main/releases.json). Pass check_updates=true to compare against the channel (network); otherwise local only and newer is null."},
-    {"name": "vibeedit_agent_kit_install", "description": "Install agent-kit skills from a folder of .md files (or one .md file) into the kit folder; unsafe ids and existing skills are refused."},
+    {"name": "vibeedit_agent_kit_install", "description": "Install agent-kit skills from a folder of .md files, one .md file, a .zip bundle or a nested Claude-plugin folder (skills/<id>/SKILL.md) into the kit folder; unsafe ids and existing skills are refused. Folder skills install as their SKILL.md content under the flat <id>.md name."},
     {"name": "vibeedit_agent_kit_update", "description": "Update the agent kit from the signed releases channel: fetch releases.json, download the target archive, verify size, SHA-256 and the publisher Ed25519 signature, stage and validate its skills, then swap, keeping the old kit until the swap succeeds (restored on failure). Pass version for a specific release; already-current returns updated=false."},
     {"name": "vibeedit_agent_kit_later", "description": "Defer the agent-kit update offer: records later_until (7 days by default) in the kit state file, which agent_kit_check reports. No UI prompt exists in this headless server, so the record itself is the deferral."},
     {"name": "vibeedit_agent_status", "description": "Agent-kit status for this headless build: same data as agent_kit_check (kit folder, installed skills, installed version, releases channel); the original spec's per-tab/per-CLI setup state is not tracked here, and no terminal session exists."},
@@ -656,6 +656,8 @@ TOOLS.extend([
     {"name": "vibeedit_project_magnetic_set", "description": "Turn magnetic Main editing on or off (stored in project data)."},
     {"name": "vibeedit_transitions_renderability", "description": "List every known transition kind with an honest renders true/false flag."},
     {"name": "vibeedit_skills_search", "description": "Search the local skills store by substring over titles and bodies."},
+    {"name": "vibeedit_skills_import_plan", "description": "Preview a skill import from a .md file, a folder, a Claude-plugin folder (skills/<id>/SKILL.md) or a .zip of those, without writing anything: returns each skill's id, title, kind, file count, size and whether it already exists, plus safety warnings (zip-slip entries skipped, unsafe ids refused)."},
+    {"name": "vibeedit_skills_import", "description": "Install skills from a .md file, a folder, a Claude-plugin folder or a .zip (copy-only, never executes anything, no provenance header added, never auto-enables; existing skills are skipped unless overwrite=true; pass only=[...] to install just some previewed ids). Records source path + SHA-256 per skill in skills/IMPORT_MANIFEST.json."},
     {"name": "vibeedit_plugins_download", "description": "Download a plugin .zip bundle to a temp file (gated step before plugins_install; never installs or executes anything)."},
     {"name": "vibeedit_captions_transcribe", "description": "Transcribe a project media item with faster-whisper into a text track (clear error when faster-whisper is absent)."},
     {"name": "vibeedit_captions_generate", "description": "Transcribe a media item and return the generated SRT text."},
@@ -1470,6 +1472,8 @@ TOOL_SCHEMAS = {
     'vibeedit_skills_enable': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
     'vibeedit_skills_export': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
     'vibeedit_skills_get': {'type': 'object', 'properties': {'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
+    'vibeedit_skills_import': {'type': 'object', 'properties': {'only': {'type': 'array'}, 'overwrite': {'type': 'boolean'}, 'path': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['path']},
+    'vibeedit_skills_import_plan': {'type': 'object', 'properties': {'path': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['path']},
     'vibeedit_skills_list': {'type': 'object', 'properties': {'skills_dir': {'type': 'string'}}, 'required': []},
     'vibeedit_skills_propose': {'type': 'object', 'properties': {'body': {'type': 'string'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}, 'title': {'type': 'string'}}, 'required': ['body', 'skill']},
     'vibeedit_skills_remove': {'type': 'object', 'properties': {'confirm': {'type': 'boolean'}, 'skill': {'type': 'string'}, 'skills_dir': {'type': 'string'}}, 'required': ['skill']},
@@ -4931,6 +4935,16 @@ class MCPServer:
             from .skills import search_skills
             return {"skills": search_skills(args.get("skills_dir"),
                                             args.get("query", ""))}
+        if name == "vibeedit_skills_import_plan":
+            from .skill_import import plan_import
+            return plan_import(args["path"], args.get("skills_dir"))
+        if name == "vibeedit_skills_import":
+            from .skill_import import apply_import
+            return apply_import(args["path"],
+                                overwrite=bool(args.get("overwrite",
+                                                        False)),
+                                only=args.get("only"),
+                                skills_dir=args.get("skills_dir"))
         if name in ("vibeedit_vision_text", "vibeedit_vision_faces",
                     "vibeedit_vision_cutout", "vibeedit_image_cutout"):
             from .vision import VisionUnavailable, cutout as _cut, \
@@ -5703,12 +5717,33 @@ def handle(server: MCPServer, request: dict) -> dict | None:
     try:
         if method == "initialize":
             result = {"protocolVersion": "2024-11-05",
-                      "capabilities": {"tools": {}},
+                      "capabilities": {"tools": {}, "resources": {}},
                       "serverInfo": {"name": "vibeedit-mcp", "version": "0.1.0"}}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
             result = {"tools": TOOLS}
+        elif method == "resources/list":
+            # Round 23 (optional): let MCP clients discover skills
+            # without a tools/call. URIs are vibeedit-skill://<id>;
+            # this path never touches tools/*.
+            from .skills import list_skills
+            result = {"resources": [
+                {"uri": "vibeedit-skill://%s" % (entry["id"],),
+                 "name": entry["id"],
+                 "mimeType": "text/markdown"}
+                for entry in list_skills()]}
+        elif method == "resources/read":
+            params = request.get("params", {})
+            uri = params.get("uri", "")
+            if not uri.startswith("vibeedit-skill://"):
+                raise ValueError(
+                    "Unknown resource uri: %r" % (uri,))
+            from .skills import get_skill
+            skill_id = uri[len("vibeedit-skill://"):]
+            result = {"contents": [
+                {"uri": uri, "mimeType": "text/markdown",
+                 "text": get_skill(None, skill_id)}]}
         elif method == "tools/call":
             params = request.get("params", {})
             result = server.call(params["name"], params.get("arguments", {}))

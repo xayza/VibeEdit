@@ -1642,34 +1642,46 @@ def kit_install_skills(path: str, kit_dir=None) -> dict:
     lowercase-hyphenated names; existing skills are refused
     unless overwrite is passed via the file already existing
     check below (callers pass overwrite separately). Files are
-    copied, never executed."""
-    import shutil
+    copied, never executed.
 
+    Round 23: a .zip bundle and a nested Claude-plugin folder
+    (``skills/<id>/SKILL.md``) are accepted too — the old code
+    raised FileNotFoundError for zips (no .md at the top) and
+    ValueError for nested folders (no top-level .md files). Folder
+    skills install as their SKILL.md content under the flat
+    ``<id>.md`` name, matching the kit folder's flat layout; the
+    discovery (and its zip-slip/size guards) comes from
+    skill_import.plan_import, so one layout table serves both
+    install paths.
+    """
+    from .skill_import import _discover, _mark_exists, _read_source_bytes
     from .skills import _default_skills_dir, _SAFE_ID
     folder = kit_dir or _default_skills_dir()
     os.makedirs(folder, exist_ok=True)
-    if os.path.isfile(path) and path.endswith(".md"):
-        candidates = [path]
-    elif os.path.isdir(path):
-        candidates = [os.path.join(path, name)
-                      for name in sorted(os.listdir(path))
-                      if name.endswith(".md")]
-    else:
-        raise FileNotFoundError(f"Kit skill source not found: {path}")
+    # One discovery run serves both the listing and the copy
+    # sources (plan_import's public view strips the src handles).
+    candidates, _warnings = _discover(path)
+    _mark_exists(candidates, folder)
     if not candidates:
         raise ValueError("Kit skill source has no .md files")
     installed = []
     refused = []
     for src in candidates:
-        skill_id = os.path.basename(src)[:-3]
+        skill_id = src["id"]
         if not _SAFE_ID.match(skill_id):
             refused.append(skill_id)
             continue
         dest = os.path.join(folder, skill_id + ".md")
-        if os.path.exists(dest):
+        if src.get("exists") or os.path.exists(dest):
+            # Either form already owns this id (a folder-form skill
+            # would shadow a new flat file, so refuse, never stack).
             refused.append(skill_id)
             continue
-        shutil.copyfile(src, dest)
+        raw = _read_source_bytes(src, src["main_rel"])
+        tmp = dest + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(raw)
+        os.replace(tmp, dest)
         installed.append(skill_id)
     return {"kitFolder": folder, "installed": installed,
             "refused": refused}

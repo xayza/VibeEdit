@@ -220,7 +220,7 @@ class TestOverwrite(unittest.TestCase):
 
 class TestNewMcpTools(unittest.TestCase):
     def test_tool_count_is_123(self):
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("vibeedit_clip_color_eq",

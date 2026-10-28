@@ -1465,7 +1465,7 @@ The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout
 (`initialize`, `ping`, `tools/list`, `tools/call`). Point any
 MCP-compatible agent at it with the `vibeedit-mcp` server name.
 
-479 tools (359 real-operation tools and 120 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 6 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub.
+481 tools (429 real-operation tools and 52 check-and-error tools that raise a structured NOT_AVAILABLE error with the blocker and port path, never a fake success) — see `PARITY.md` for the current split. Round 3 verified by test that all 249 original CommandCatalog spec names have a registry name (dots/hyphens normalised, 6 via real aliases). Every real tool calls a real Project, export, store or backend operation; none is a stub. Round 23 added skill import (`vibeedit_skills_import_plan` / `vibeedit_skills_import`, from a .md file, a folder, a Claude-plugin folder or a .zip, copy-only) and folder-form skills (`<id>/SKILL.md` + `references/` + `kit/`) alongside the 21 flat skills; the Knowledge panel now lists skills as a clickable table with rendered markdown detail, a search box, a file-import preview/install flow, and a Claude Code sync button (see `PARITY.md` round 23).
 
 ## Tests
 

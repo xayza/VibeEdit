@@ -99,9 +99,9 @@ class TestRound19RegistryCounts(unittest.TestCase):
         honest = [t for t in TOOLS
                   if (t.get("description") or "").startswith(
                       "Not available")]
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52
-        self.assertEqual(len(TOOLS) - len(honest), 427)  # Round 22
+        self.assertEqual(len(TOOLS) - len(honest), 429)  # Round 23: 479 -> 481 (skills_import_plan/import)
 
     def test_converted_descriptions_not_honest(self):
         by_name = {t["name"]: t["description"] for t in TOOLS}
@@ -138,8 +138,8 @@ class TestRound19ShowAliases(Round19Case):
 
     def test_show_commands_count(self):
         out = self.server.call("vibeedit_show_commands", {})
-        self.assertEqual(out["count"], 479)
-        self.assertEqual(len(out["tools"]), 479)
+        self.assertEqual(out["count"], 481)
+        self.assertEqual(len(out["tools"]), 481)
 
     def test_show_assets_lists_real_media(self):
         out = self.server.call("vibeedit_show_assets", {})
@@ -944,6 +944,6 @@ class TestRound19RegistryFinal(unittest.TestCase):
                 if not t["description"].startswith("Not available")]
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(real), 427)  # Round 22: 425 -> 427
+        self.assertEqual(len(TOOLS), 481)
+        self.assertEqual(len(real), 429)  # Round 23: 479 -> 481 (skills_import_plan/import)
         self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52

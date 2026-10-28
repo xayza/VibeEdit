@@ -769,6 +769,26 @@ class State:
                 from .skills import propose_skill
                 result = propose_skill(None, op["skill"],
                                        op.get("title", ""), op["body"])
+            elif kind == "skills_import_plan":
+                # Round 23: preview only — plan_import writes nothing.
+                from .skill_import import plan_import
+                if not op.get("path"):
+                    raise ValueError(
+                        "Nhập skill cần đường dẫn nguồn (file .md, "
+                        "thư mục hoặc file .zip)")
+                result = plan_import(op["path"])
+            elif kind == "skills_import":
+                # Round 23: install only the preview's ticked rows
+                # (only=...); never auto-enables anything.
+                from .skill_import import apply_import
+                if not op.get("path"):
+                    raise ValueError(
+                        "Nhập skill cần đường dẫn nguồn (file .md, "
+                        "thư mục hoặc file .zip)")
+                result = apply_import(
+                    op["path"],
+                    overwrite=bool(op.get("overwrite", False)),
+                    only=op.get("only"))
             elif kind == "captions_transcribe":
                 from .transcribe import transcribe_media
                 medium = proj.media(op["media"])
@@ -904,6 +924,14 @@ class State:
             elif kind == "skills_search":
                 from .skills import search_skills
                 result = {"skills": search_skills(None, op.get("query", ""))}
+            elif kind == "skills_sync_claude":
+                # Round 23: export to <repo>/.claude/skills/<id>/
+                # SKILL.md (+ references/); target_dir overrides the
+                # derived default (tests use a temp dir).
+                from .skill_import import sync_claude
+                result = sync_claude(
+                    target_dir=op.get("target_dir"),
+                    overwrite=bool(op.get("overwrite", False)))
             elif kind == "vision_cutout_model":
                 from .vision import cutout_segmented as _seg
                 medium = proj.media(op["media"])

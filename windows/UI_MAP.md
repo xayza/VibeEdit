@@ -284,3 +284,25 @@ Chi tiết đúng hiện tại nằm ở `PARITY.md`, không phải mục này.
   trước vòng 15 nên đã cũ — skills hiện là 21 (không phải 4) và
   agent_kit_update/later đã thật từ vòng 15; xem PARITY vòng 19.
 
+
+## §13 — Vòng 23: panel Knowledge (bảng skill, markdown render, nhập, sync Claude)
+
+- Bảng skill (`#knowledgeSkillTable`) thay danh sách `<li>` cũ cho
+  nút "Liệt kê skill": cột id | tiêu đề | nguồn | bật/tắt, bấm
+  dòng mở chi tiết. Chi tiết (`#knowledgeDetail`) render markdown
+  bằng hàm nhỏ tự viết trong app.js (escape trước, rồi heading/
+  bold/italic/code/list/link), kèm Sao chép / Tắt-Bật / Xoá; nút
+  "Xem skill / bài học" cũ nay cũng render markdown cho skill
+  (fallback bài học giữ nguyên).
+- Tìm kiếm (`#knowledgeSearch` + `#btnKnowledgeSearch`) dùng op
+  `skills_search` và vẽ lại cùng bảng. Import nằm trong
+  `<details id="knowledgeImportDetails">`: input đường dẫn +
+  checkbox ghi đè + Xem trước (bảng id | tiêu đề | số file | KB |
+  "đã có", checkbox từng dòng, mặc định tick hết) + nút Cài chỉ
+  cài dòng được tick. Đồng bộ Claude Code (`#btnKnowledgeSyncClaude`)
+  gọi op `skills_sync_claude`, kết quả hiện ở
+  `#knowledgeSyncResult` kèm nhắc `/reload-skills`.
+- Ràng buộc kỹ thuật (đã gây hồi quy thật trong vòng): parser
+  shortcut vòng 20 coi `"` và backtick trong regex literal là mở
+  chuỗi/template — code mới tránh cả hai, xem comment trong
+  app.js quanh `escHtml`/`renderMarkdown`.

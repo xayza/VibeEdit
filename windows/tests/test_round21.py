@@ -173,9 +173,9 @@ class TestRound21RegistryCounts(unittest.TestCase):
     def test_counts(self):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         self.assertEqual(len(honest), 52)
-        self.assertEqual(len(TOOLS) - len(honest), 427)
+        self.assertEqual(len(TOOLS) - len(honest), 429)
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_agent_status",
                          "vibeedit_app_vibeedit_debug_log"):

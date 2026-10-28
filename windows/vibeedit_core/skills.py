@@ -75,7 +75,11 @@ def _resolve_dir(skills_dir):
 
 
 def _skill_path(skills_dir, skill_id):
-    """Return the .md path for skill_id, or raise ValueError if unsafe."""
+    """Return the .md path for skill_id, or raise ValueError if unsafe.
+
+    Flat-form path only (``<id>.md``); folder-form skills resolve
+    through :func:`_resolve_skill`.
+    """
     if not isinstance(skill_id, str) or not _SAFE_ID.match(skill_id):
         raise ValueError(
             "Invalid skill id %r: use a plain lowercase hyphenated name "
@@ -87,6 +91,46 @@ def _skill_path(skills_dir, skill_id):
         raise ValueError("Invalid skill id %r: escapes the skills directory"
                          % (skill_id,))
     return path
+
+
+def _resolve_skill(skills_dir, skill_id):
+    """Resolve a skill id to ``(kind, main_path, folder)`` or None.
+
+    Round 23 folder form: ``<id>/SKILL.md`` (+ ``references/`` and
+    ``kit/`` siblings) is a skill just like the flat ``<id>.md``.
+    When both forms exist for one id the folder form wins (it is
+    the newer canonical form); the flat file is then shadowed, never
+    listed twice. Raises ValueError for unsafe ids.
+    """
+    if not isinstance(skill_id, str) or not _SAFE_ID.match(skill_id):
+        raise ValueError(
+            "Invalid skill id %r: use a plain lowercase hyphenated name "
+            "with no path separators, extensions or '..'" % (skill_id,)
+        )
+    base = _resolve_dir(skills_dir)
+    folder = os.path.join(base, skill_id)
+    main = os.path.join(folder, "SKILL.md")
+    if os.path.isdir(folder) and os.path.isfile(main):
+        return ("folder", main, folder)
+    flat = os.path.join(base, skill_id + ".md")
+    if os.path.isfile(flat):
+        return ("flat", flat, None)
+    return None
+
+
+def _skill_files(skills_dir, skill_id):
+    """Relative file paths inside one skill (folder form only)."""
+    resolved = _resolve_skill(skills_dir, skill_id)
+    if resolved is None or resolved[0] != "folder":
+        return []
+    out = []
+    for root, dirs, names in os.walk(resolved[2]):
+        dirs[:] = sorted(d for d in dirs
+                         if d not in ("__pycache__", ".git"))
+        for name in sorted(names):
+            out.append(os.path.relpath(os.path.join(root, name),
+                                       resolved[2]))
+    return out
 
 
 def _parse_skill(text):
@@ -120,8 +164,13 @@ def _parse_skill(text):
 
 
 def list_skills(skills_dir=None):
-    """Return [{id, title, source}] for every .md file in skills_dir.
+    """Return [{id, title, source, enabled, kind}] for every skill.
 
+    Round 23: scans both the flat ``<id>.md`` files and the folder
+    form ``<id>/SKILL.md``. Subdirectories without a SKILL.md
+    (``references/`` and ``kit/`` live *inside* a skill folder, and
+    ``proposals/`` holds drafts) are never listed as skills, and a
+    skill present in both forms is listed once (folder form wins).
     Sorted by id. A missing directory yields an empty list (no skills
     installed yet is a normal state, not an error). Files that fail to
     decode are skipped rather than breaking the whole listing.
@@ -129,34 +178,58 @@ def list_skills(skills_dir=None):
     base = _resolve_dir(skills_dir)
     if not os.path.isdir(base):
         return []
-    out = []
+    disabled = _disabled_ids(base)
+    found = {}
     for name in sorted(os.listdir(base)):
-        if not name.endswith(".md"):
-            continue
-        skill_id = name[:-3]
-        if not _SAFE_ID.match(skill_id):
-            continue
-        try:
-            with open(os.path.join(base, name), "r",
-                      encoding="utf-8", errors="strict") as fh:
-                text = fh.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-        title, source = _parse_skill(text)
-        out.append({"id": skill_id, "title": title or skill_id,
-                    "source": source,
-                    "enabled": skill_id not in _disabled_ids(base)})
-    return out
+        full = os.path.join(base, name)
+        if os.path.isdir(full):
+            if not _SAFE_ID.match(name):
+                continue
+            main = os.path.join(full, "SKILL.md")
+            if not os.path.isfile(main):
+                continue
+            try:
+                with open(main, "r", encoding="utf-8",
+                          errors="strict") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            title, source = _parse_skill(text)
+            found[name] = {"id": name, "title": title or name,
+                           "source": source,
+                           "enabled": name not in disabled,
+                           "kind": "folder"}
+        elif name.endswith(".md"):
+            skill_id = name[:-3]
+            if not _SAFE_ID.match(skill_id):
+                continue
+            if skill_id in found:
+                continue
+            try:
+                with open(full, "r", encoding="utf-8",
+                          errors="strict") as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            title, source = _parse_skill(text)
+            found[skill_id] = {"id": skill_id,
+                               "title": title or skill_id,
+                               "source": source,
+                               "enabled": skill_id not in disabled,
+                               "kind": "flat"}
+    return [found[key] for key in sorted(found)]
 
 
 def get_skill(skills_dir, skill_id):
-    """Return the full markdown text of one skill.
+    """Return the full markdown text of one skill (either form).
 
     Raises ValueError for unsafe ids (``..``, separators, extensions)
     and FileNotFoundError when the skill does not exist.
     """
-    path = _skill_path(skills_dir, skill_id)
-    with open(path, "r", encoding="utf-8") as fh:
+    resolved = _resolve_skill(skills_dir, skill_id)
+    if resolved is None:
+        raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
+    with open(resolved[1], "r", encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -233,29 +306,51 @@ def set_skill_enabled(skills_dir, skill_id: str,
 
 def export_skill(skills_dir, skill_id: str, dest: str | None = None) -> dict:
     """Return a skill's content; when ``dest`` is given, also copy
-    the file there (parent dirs created). Nothing is invented: the
-    exported text is the stored file, verbatim."""
+    it there (parent dirs created). Nothing is invented: the
+    exported text is the stored file, verbatim. Folder-form skills
+    export their whole folder tree (SKILL.md + references/ + kit/)
+    to ``dest`` as a directory; flat skills copy the single .md.
+    """
+    import shutil
+    resolved = _resolve_skill(skills_dir, skill_id)
+    if resolved is None:
+        raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
+    kind, main_path, folder = resolved
     text = get_skill(skills_dir, skill_id)
     if dest is None:
-        return {"skill": skill_id, "content": text}
-    import shutil
+        out = {"skill": skill_id, "content": text, "kind": kind}
+        if kind == "folder":
+            out["files"] = _skill_files(skills_dir, skill_id)
+        return out
+    if kind == "folder":
+        if os.path.isfile(dest):
+            raise ValueError(
+                f"Cannot export folder skill {skill_id!r} onto a file")
+        shutil.copytree(folder, dest, dirs_exist_ok=True)
+        return {"skill": skill_id, "dest": dest, "kind": kind,
+                "files": _skill_files(skills_dir, skill_id)}
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-    shutil.copyfile(_skill_path(skills_dir, skill_id), dest)
-    return {"skill": skill_id, "dest": dest}
+    shutil.copyfile(main_path, dest)
+    return {"skill": skill_id, "dest": dest, "kind": kind}
 
 
 def remove_skill(skills_dir, skill_id: str, confirm: bool = False) -> dict:
-    """Delete a skill file. Requires explicit ``confirm`` (deletion
-    is irreversible except via git); shipped skills deleted this way
-    are gone until restored from the repo, which the return value
-    states plainly."""
+    """Delete a skill (flat file or whole folder). Requires explicit
+    ``confirm`` (deletion is irreversible except via git); shipped
+    skills deleted this way are gone until restored from the repo,
+    which the return value states plainly."""
     if not confirm:
         raise ValueError(
             f"Removing skill {skill_id!r} needs confirm: true")
-    path = _skill_path(skills_dir, skill_id)
-    if not os.path.isfile(path):
+    resolved = _resolve_skill(skills_dir, skill_id)
+    if resolved is None:
         raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
-    os.remove(path)
+    kind, _main, folder = resolved
+    import shutil
+    if kind == "folder":
+        shutil.rmtree(folder)
+    else:
+        os.remove(_skill_path(skills_dir, skill_id))
     state = _load_state(skills_dir)
     disabled = _disabled_ids(skills_dir)
     disabled.discard(skill_id)

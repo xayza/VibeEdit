@@ -623,3 +623,71 @@ test OK trên Linux VM).
   479, /api/info 200, rebind cùng cổng OK, tắt sạch) + GET trong lúc
   render <2 s; cây Swift không động, không merge. Kiểm chứng trực quan
   trên Windows thật vẫn để lại cho người dùng sau khi pull.
+
+## Vòng 23 — skill: store dạng thư mục, nhập từ file, xuất Claude Code
+
+- **MCP 481 = 429 thật + 52 honest:** thêm 2 công cụ mới
+  (`vibeedit_skills_import_plan`, `vibeedit_skills_import`, đều có
+  inputSchema thật: path bắt buộc, overwrite/only/skills_dir tùy
+  chọn); honest giữ nguyên 52, không có công cụ honest nào chuyển
+  đổi trong vòng này. Test cũ chỉ bump số đếm 479→481, 427→429
+  (xem báo cáo vòng).
+- **Store dạng thư mục (skills.py):** ngoài 21 skill phẳng hiện có
+  (đếm thật trên đĩa — người dùng nhớ là 23, số thật là 21),
+  `list_skills()` nay quét cả `<id>/SKILL.md` (+ `references/`,
+  `kit/` kề bên); `get`/`remove`/`export`/`search`/`enable` xử lý
+  cả hai dạng, giữ shape `{id, title, source, enabled}` và thêm
+  `kind` (`flat`/`folder`). Thư mục không có SKILL.md (kể cả
+  `proposals/`) không bao giờ liệt kê thành skill; một id có cả
+  hai dạng thì chỉ liệt kê một lần, dạng thư mục thắng.
+- **Nhập (vibeedit_core/skill_import.py):** `plan_import` chỉ xem
+  trước, không ghi gì (đọc entry zip trong bộ nhớ, đọc file
+  read-only); `apply_import` nhận 1 file `.md`, thư mục `.md`
+  phẳng, thư mục plugin Claude (`skills/<id>/SKILL.md`) và `.zip`
+  của các dạng đó. Chống zip-slip (bỏ entry `..`, tuyệt đối,
+  symlink, `.git`, `__pycache__`), giới hạn 50 MB/2000 entry (cả
+  dung lượng file zip và dung lượng giải nén), chỉ copy file
+  (không exec `.py`/`.js`, không tải mạng), SKILL.md copy nguyên
+  văn không thêm provenance header, id lấy theo tên thư mục (id
+  xấu → cảnh báo + không cài, không tự sửa tên), không động vào
+  `skills.json` (không tự bật skill sau khi cài), ghi nguồn vào
+  `skills/IMPORT_MANIFEST.json` (đường dẫn + sha256 file chính)
+  chỉ khi cài được ít nhất một skill. Server có op
+  `skills_import_plan`/`skills_import` (lỗi tiếng Việt) và op
+  `skills_sync_claude`; MCP có thêm 2 tool tương ứng và
+  `vibeedit_agent_kit_install` nay nhận cả `.zip` và thư mục lồng
+  nhau (trước đây FileNotFoundError/ValueError) — skill dạng thư
+  mục cài thành `<id>.md` phẳng trong kit folder, id đã có thì
+  từ chối như cũ.
+- **UI Knowledge:** nút "Liệt kê skill" nay vẽ bảng bấm được
+  (id | tiêu đề | nguồn | bật/tắt); bấm một dòng hiện markdown
+  đã render (renderer nhỏ tự viết, escape trước rồi mới đổi
+  heading/bold/code/list/link — không in JSON thô), kèm nút Sao
+  chép / Tắt-Bật / Xoá; ô tìm kiếm dùng op `skills_search`;
+  `<details>` "Nhập skill từ file (.md / .zip)" có input đường
+  dẫn + checkbox ghi đè + Xem trước (bảng id | tiêu đề | số file
+  | KB | "đã có") + nút Cài chỉ cài các dòng được tick. Toàn bộ
+  text tiếng Việt. Lưu ý kỹ thuật: parser shortcut vòng 20 coi ký
+  tự `"` và backtick trong regex literal là mở chuỗi/template và
+  lệch mask cả file về sau (đã làm mất listener phím tắt lớn) —
+  code mới tránh cả hai (code-span dùng `new RegExp`, escape
+  ngoặc kép dùng split/join), có comment ghi rõ trong app.js.
+- **Xuất Claude Code (op `skills_sync_claude` + nút UI):** sinh
+  `<gốc repo>/.claude/skills/<id>/SKILL.md` cho từng skill (dạng
+  thư mục chứa SKILL.md, file phẳng `.md` Claude bỏ qua), copy
+  kèm `references/` nếu có (không copy `kit/` nội bộ); file đích
+  khác nội dung store thì coi là sửa tay, không ghi đè trừ khi
+  `overwrite=true`; không xóa gì trong thư mục đích; trả về id đã
+  ghi + nhắc chạy `/reload-skills`. Op nhận `target_dir` tường
+  minh (test dùng thư mục tạm); default suy từ vị trí checkout,
+  không hardcode ổ D:. Tùy chọn MCP `resources/list` +
+  `resources/read` (URI `vibeedit-skill://<id>`) đã làm, không
+  động đường `tools/*`.
+- **Chưa kiểm chứng thật:** file
+  `C:\Users\daoho\Downloads\thanh-hai-learn-ai-2d-studio.zip`
+  không có trên máy này nên bước acceptance với file thật (cài đủ
+  5 skill, `make-2d-video/references/style-bible.md` tồn tại) chỉ
+  chạy được trên Windows của người dùng sau khi pull; ở đây kiểm
+  chứng bằng zip giả lập cùng cấu trúc (5 skill plugin, có
+  style-bible.md) và đạt. Kiểm chứng trực quan UI trên Windows
+  thật vẫn để lại cho người dùng sau khi pull.

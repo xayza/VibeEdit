@@ -127,6 +127,11 @@
 <h3>Kiến thức &amp; Kỹ năng</h3>
 <p>Kiến thức của agent sống trong dữ liệu của project này (bài học, sự thật, tùy chọn, khẳng định, đề xuất); skill sống trong <code>windows/skills/</code>. Không có gì ở đây tự bịa nội dung — mọi bài học, sự thật và nội dung skill đều là chữ bạn gõ hoặc chữ đã lưu sẵn.</p>
 <button type="button" id="btnKnowledgeSkills" class="secondary">Liệt kê skill</button><button type="button" id="btnKnowledgeLessons" class="secondary">Liệt kê bài học</button>
+<div id="knowledgeSkillTable"></div>
+<label>Tìm skill <input id="knowledgeSearch" placeholder="gõ từ cần tìm trong tiêu đề hoặc nội dung…"></label>
+<button type="button" id="btnKnowledgeSearch" class="secondary">Tìm skill</button>
+<button type="button" id="btnKnowledgeSyncClaude" class="secondary">Đồng bộ sang Claude Code</button>
+<div id="knowledgeSyncResult"></div>
 <label>ID skill / bài học <input id="knowledgeId" placeholder="timeline-editing"></label>
 <button type="button" id="btnKnowledgeGet" class="secondary">Xem skill / bài học</button>
 <button type="button" id="btnKnowledgeSkillDisable" class="secondary">Tắt skill</button><button type="button" id="btnKnowledgeSkillEnable" class="secondary">Bật skill</button>
@@ -146,6 +151,16 @@
 <button type="submit" class="primary">Thêm bài học</button>
 </form>
 <div id="knowledgeResult"></div><ul id="knowledgeList"></ul>
+<div id="knowledgeDetail"></div>
+<details id="knowledgeImportDetails">
+<summary>Nhập skill từ file (.md / .zip)</summary>
+<label>Đường dẫn nguồn <input id="knowledgeImportPath" placeholder="C:\Users\daoho\Downloads\skill.zip hoặc thư mục skill…"></label>
+<label><input type="checkbox" id="knowledgeImportOverwrite"> Ghi đè skill đã có</label>
+<button type="button" id="btnKnowledgeImportPreview" class="secondary">Xem trước</button>
+<div id="knowledgeImportPreview"></div>
+<button type="button" id="btnKnowledgeImportInstall" class="primary">Cài các skill đã tick</button>
+<div id="knowledgeImportResult"></div>
+</details>
 </section>
 <section class="panel tool-panel" data-panel="vision" hidden>
 <h3>Vision</h3>

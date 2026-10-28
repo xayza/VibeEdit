@@ -141,7 +141,7 @@ class TestMcpIntegrationTools(unittest.TestCase):
     def test_registry_counts(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py)

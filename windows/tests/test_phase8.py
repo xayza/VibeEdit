@@ -158,7 +158,7 @@ class TestReviewAndMcp(unittest.TestCase):
 
     def test_mcp_count_and_new_tools(self):
         names = [t["name"] for t in TOOLS]
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare): 144 -> 478
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         for name in ("vibeedit_transition_preview", "vibeedit_review_get",
                      "vibeedit_overlay_items", "vibeedit_clip_position_set",
                      "vibeedit_clip_scale_set", "vibeedit_clip_opacity_set",

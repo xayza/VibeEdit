@@ -140,7 +140,7 @@ class TestOriginalNameAliases(unittest.TestCase):
     def test_alias_tools_are_unique_and_dispatch(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(names), 479)
+        self.assertEqual(len(names), 481)
         self.assertIn("vibeedit_beats_detect", names)
         self.assertIn("vibeedit_clip_speed_curve", names)
         self.assertIn("vibeedit_transcript_words", names)

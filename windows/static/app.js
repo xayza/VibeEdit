@@ -1968,13 +1968,87 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const out = (id, text) => { const el = $(id); if (el) el.textContent = text; };
   // Round 22: panel actions also overwrite the status toast.
   const show = async (fn) => { try { await fn(); setStatus("Xong — kết quả ở panel Knowledge."); } catch (err) { out("knowledgeResult", err.message); setStatus(err.message, true); } };
+  // Round 23: safe tiny markdown renderer (escape first, then
+  // headings/bold/italic/code/lists/links) so skill detail shows
+  // rendered markdown, never raw JSON.
+  // NOTE: no quote character inside a /.../ literal here: the
+  // round-20 show_shortcuts parser treats a quote in a regex as a
+  // string opener and then mis-masks the rest of the file (same
+  // class of bug as backticks in a regex, see renderMarkdown).
+  const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split('"').join("&quot;");
+  const renderMarkdown = (md) => {
+    // NOTE: the code-span pattern is built with RegExp, not a
+    // /.../ literal: backticks inside a regex literal confuse the
+    // round-20 show_shortcuts parser's template-literal scanner and
+    // silently drop later keydown listeners from the shortcut map.
+    const codeSpan = new RegExp("`([^`]+)`", "g");
+    const inline = (t) => t.replace(codeSpan, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    let html = "", inList = false;
+    const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+    for (const line of escHtml(md).split("\n")) {
+      const m = line.match(/^(#{1,3})\s+(.*)$/);
+      if (m) { closeList(); const lvl = m[1].length; html += `<h${lvl + 2}>${inline(m[2])}</h${lvl + 2}>`; continue; }
+      if (/^[-*]\s+/.test(line)) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inline(line.replace(/^[-*]\s+/, ""))}</li>`; continue; }
+      if (!line.trim()) { closeList(); continue; }
+      closeList(); html += `<p>${inline(line)}</p>`;
+    }
+    closeList();
+    return html;
+  };
+  const skillEnabled = {};
+  const renderSkillTable = (skills) => {
+    const box = $("knowledgeSkillTable"); if (!box) return;
+    if (!skills.length) { box.innerHTML = "Chưa có skill nào."; return; }
+    box.innerHTML = `<table class="skill-table"><thead><tr><th>ID</th><th>Tiêu đề</th><th>Nguồn</th><th>Bật/tắt</th></tr></thead><tbody>` +
+      skills.map((s) => { skillEnabled[s.id] = s.enabled !== false; return `<tr data-skill-row="${escHtml(s.id)}"><td>${escHtml(s.id)}</td><td>${escHtml(s.title || s.id)}</td><td>${escHtml(s.source || "")}</td><td>${s.enabled === false ? "Tắt" : "Bật"}</td></tr>`; }).join("") + `</tbody></table>`;
+    box.querySelectorAll("[data-skill-row]").forEach((row) => row.addEventListener("click", () => showSkillDetail(row.dataset.skillRow)));
+  };
+  const renderSkillDetail = (id, text) => {
+    const box = $("knowledgeDetail"); if (!box) return;
+    box.innerHTML = `<h4>${escHtml(id)}</h4>${renderMarkdown(text)}<div><button type="button" class="secondary" data-skill-copy="1">Sao chép</button> <button type="button" class="secondary" data-skill-toggle="1">Tắt / Bật</button> <button type="button" class="danger" data-skill-delete="1">Xoá</button></div>`;
+    const copyBtn = box.querySelector("[data-skill-copy]");
+    if (copyBtn) copyBtn.addEventListener("click", async () => { try { await navigator.clipboard.writeText(text); setStatus("Đã sao chép nội dung skill."); } catch (err) { setStatus(err.message, true); } });
+    const toggleBtn = box.querySelector("[data-skill-toggle]");
+    if (toggleBtn) toggleBtn.addEventListener("click", () => show(async () => {
+      await post({ op: skillEnabled[id] === false ? "skills_enable" : "skills_disable", skill: id });
+      const l = await post({ op: "skills_list" }); renderSkillTable(l.result.skills || []);
+      out("knowledgeResult", `Skill ${id} đã ${skillEnabled[id] === false ? "bật" : "tắt"}.`);
+    }));
+    const delBtn = box.querySelector("[data-skill-delete]");
+    if (delBtn) delBtn.addEventListener("click", () => show(async () => {
+      const confirmBox = $("knowledgeRemoveConfirm");
+      if (!confirmBox || !confirmBox.checked) { out("knowledgeResult", "Tick ô xác nhận xóa trước khi xóa skill."); return; }
+      await post({ op: "skills_remove", skill: id, confirm: true });
+      const l = await post({ op: "skills_list" }); renderSkillTable(l.result.skills || []);
+      out("knowledgeResult", `Skill ${id} đã xóa.`);
+    }));
+  };
+  const showSkillDetail = async (id) => {
+    try {
+      const d = await post({ op: "skills_get", skill: id });
+      renderSkillDetail(id, d.result.skill || "");
+    } catch (err) { out("knowledgeResult", err.message); setStatus(err.message, true); }
+  };
   const ks = $("btnKnowledgeSkills");
   if (ks) ks.addEventListener("click", () => show(async () => {
     const d = await post({ op: "skills_list" });
-    const list = $("knowledgeList");
     const skills = d.result.skills || d.skills || [];
-    if (list) list.innerHTML = skills.map((s) => `<li>${s.id || s.name || JSON.stringify(s)}${s.title ? " — " + s.title : ""}${s.enabled === false ? " (disabled)" : ""}</li>`).join("") || "<li>No skills found.</li>";
+    renderSkillTable(skills);
     out("knowledgeResult", `Skills: ${skills.length}.`);
+  }));
+  const ksearch = $("btnKnowledgeSearch");
+  if (ksearch) ksearch.addEventListener("click", () => show(async () => {
+    const q = $("knowledgeSearch") ? $("knowledgeSearch").value : "";
+    const d = await post({ op: "skills_search", query: q });
+    const skills = d.result.skills || d.skills || [];
+    renderSkillTable(skills);
+    out("knowledgeResult", `Tìm thấy ${skills.length} skill.`);
+  }));
+  const ksc = $("btnKnowledgeSyncClaude");
+  if (ksc) ksc.addEventListener("click", () => show(async () => {
+    const d = await post({ op: "skills_sync_claude" });
+    const box = $("knowledgeSyncResult");
+    if (box) box.textContent = `Đã ghi: ${(d.result.written || []).join(", ") || "(không có)"}; bỏ qua: ${(d.result.skipped || []).map((s) => s.id + " (" + s.reason + ")").join(", ") || "(không có)"}. ${d.result.note || ""}`;
   }));
   const kl = $("btnKnowledgeLessons");
   if (kl) kl.addEventListener("click", () => show(async () => {
@@ -1988,8 +2062,10 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   if (kg) kg.addEventListener("click", () => show(async () => {
     const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill / lesson id first."); return; }
     try {
+      // Round 23: skill detail renders markdown, never raw JSON.
       const d = await post({ op: "skills_get", skill: id });
-      out("knowledgeResult", `Skill ${id}: ${JSON.stringify(d.result.skill || d.result)}`);
+      renderSkillDetail(id, d.result.skill || "");
+      out("knowledgeResult", `Skill ${id} — xem nội dung đã render ở bên dưới.`);
     } catch (err) {
       const d = await post({ op: "knowledge", action: "get", lesson: id });
       out("knowledgeResult", `Lesson ${id}: ${JSON.stringify(d.result)}`);
@@ -2011,6 +2087,32 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     const confirmBox = $("knowledgeRemoveConfirm");
     if (!confirmBox || !confirmBox.checked) { out("knowledgeResult", "Tick the confirm checkbox first — skill remove is irreversible except via git."); return; }
     await post({ op: "skills_remove", skill: id, confirm: true }); out("knowledgeResult", `Skill ${id} removed.`);
+  }));
+  // Round 23: skill import preview (ticked rows only) + install.
+  const kip = $("btnKnowledgeImportPreview");
+  if (kip) kip.addEventListener("click", () => show(async () => {
+    const pathEl = $("knowledgeImportPath");
+    const path = pathEl ? pathEl.value.trim() : "";
+    if (!path) { out("knowledgeImportResult", "Nhập đường dẫn nguồn trước."); return; }
+    const d = await post({ op: "skills_import_plan", path });
+    const skills = d.result.skills || [];
+    const box = $("knowledgeImportPreview"); if (!box) return;
+    if (!skills.length) { box.innerHTML = "Không tìm thấy skill nào trong nguồn này."; return; }
+    box.innerHTML = `<table class="skill-table"><thead><tr><th></th><th>ID</th><th>Tiêu đề</th><th>Số file</th><th>KB</th><th>Đã có</th></tr></thead><tbody>` +
+      skills.map((s) => `<tr><td><input type="checkbox" data-import-skill="${escHtml(s.id)}" checked></td><td>${escHtml(s.id)}</td><td>${escHtml(s.title || s.id)}</td><td>${s.file_count}</td><td>${s.total_kb}</td><td>${s.exists ? "Đã có" : ""}</td></tr>`).join("") + `</tbody></table>` +
+      ((d.result.warnings || []).length ? `<p>${escHtml(d.result.warnings.join(" "))}</p>` : "");
+    out("knowledgeImportResult", `Xem trước: ${skills.length} skill.`);
+  }));
+  const kii = $("btnKnowledgeImportInstall");
+  if (kii) kii.addEventListener("click", () => show(async () => {
+    const pathEl = $("knowledgeImportPath");
+    const path = pathEl ? pathEl.value.trim() : "";
+    if (!path) { out("knowledgeImportResult", "Nhập đường dẫn nguồn trước."); return; }
+    const only = [...document.querySelectorAll("[data-import-skill]:checked")].map((c) => c.dataset.importSkill);
+    const owEl = $("knowledgeImportOverwrite");
+    const d = await post({ op: "skills_import", path, overwrite: !!(owEl && owEl.checked), only });
+    out("knowledgeImportResult", `Đã cài: ${(d.result.installed || []).join(", ") || "(không có)"}; bỏ qua: ${(d.result.skipped || []).map((s) => s.id + " (" + s.reason + ")").join(", ") || "(không có)"}.`);
+    const l = await post({ op: "skills_list" }); renderSkillTable(l.result.skills || []);
   }));
   const ksf = $("knowledgeSaveForm");
   if (ksf) ksf.addEventListener("submit", (e) => { e.preventDefault(); show(async () => {

@@ -298,7 +298,7 @@ class TestMCPPhase7(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_tool_count_is_90(self):
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare): 144 -> 478
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
 

@@ -390,7 +390,7 @@ class TestMcpPhase4(unittest.TestCase):
 
     def test_tool_count(self):
         # Phase 7: 78 Phase 6 tools + 12 Phase 7 tools = 90.
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         names = {t["name"] for t in TOOLS}
         for name in ("vibeedit_otio_import", "vibeedit_karaoke_add",
                      "vibeedit_karaoke_get", "vibeedit_karaoke_export_ass",

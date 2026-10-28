@@ -189,8 +189,8 @@ class TestRound13ServerSmoke(unittest.TestCase):
                 self.assertIn("compareWipe", home)
                 with urllib.request.urlopen(base + "/api/mcp-tools") as resp:
                     tools = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(tools["count"], 479)
-                self.assertEqual(len(tools["tools"]), 479)
+                self.assertEqual(tools["count"], 481)
+                self.assertEqual(len(tools["tools"]), 481)
                 with urllib.request.urlopen(base + "/api/info") as resp:
                     self.assertEqual(resp.status, 200)
                     info = json.loads(resp.read().decode("utf-8"))
@@ -211,6 +211,6 @@ class TestRound13Audit(unittest.TestCase):
         honest = sum(1 for t in TOOLS
                      if t.get("description", "").startswith(
                          "Not available"))
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         self.assertEqual(honest, 52)  # Round 22: 54 -> 52
-        self.assertEqual(len(TOOLS) - honest, 427)
+        self.assertEqual(len(TOOLS) - honest, 429)

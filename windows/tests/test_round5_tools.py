@@ -143,7 +143,7 @@ class TestRound5McpTools(unittest.TestCase):
     def test_registry_counts_round5(self):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         # Round 5: 132 -> 120 (12 tools became real, listed below).

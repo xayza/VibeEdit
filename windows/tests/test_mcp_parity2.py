@@ -517,7 +517,7 @@ class TestRegistry(unittest.TestCase):
         names = [t["name"] for t in TOOLS]
         self.assertEqual(len(TOOLS), len(names))
         self.assertEqual(len(set(names)), len(names))
-        self.assertEqual(len(TOOLS), 479)  # Round 4: 478 -> 479 (app_update_prepare)
+        self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         for tool in TOOLS:
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS

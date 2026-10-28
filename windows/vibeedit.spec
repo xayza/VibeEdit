@@ -83,6 +83,7 @@ a = Analysis(
         "vibeedit_core.round9",
         "vibeedit_core.round15",
         "vibeedit_core.server",
+        "vibeedit_core.skill_import",
         "vibeedit_core.skills",
         "vibeedit_core.thumbnail",
         "vibeedit_core.transcribe",

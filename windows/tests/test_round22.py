@@ -193,9 +193,9 @@ class TestRound22RegistryCounts(unittest.TestCase):
     def test_counts(self):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         self.assertEqual(len(honest), 52)
-        self.assertEqual(len(TOOLS) - len(honest), 427)
+        self.assertEqual(len(TOOLS) - len(honest), 429)
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_agent_terminals",
                          "vibeedit_app_vibeedit_automation_clients"):
@@ -719,7 +719,7 @@ class TestRound22InputSchema(unittest.TestCase):
     rule, which outranks the brief's shorthand 'every tool non-empty'."""
 
     def test_every_tool_has_schema_shape(self):
-        self.assertEqual(len(TOOLS), 479)
+        self.assertEqual(len(TOOLS), 481)
         for tool in TOOLS:
             schema = tool.get("inputSchema")
             self.assertIsInstance(schema, dict, tool["name"])
@@ -734,7 +734,7 @@ class TestRound22InputSchema(unittest.TestCase):
     def test_nonempty_and_empty_counts(self):
         nonempty = [t for t in TOOLS if t["inputSchema"]["properties"]]
         empty = [t for t in TOOLS if not t["inputSchema"]["properties"]]
-        self.assertEqual(len(nonempty), 270)
+        self.assertEqual(len(nonempty), 272)
         self.assertEqual(len(empty), 209)
 
     def test_markers_add_schema_exact(self):

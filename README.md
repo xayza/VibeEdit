@@ -57,8 +57,8 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
 
 ## Current status (honest, full-parity round 22; UI round 19)
 
-- **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **427
+- **MCP: 481 tools** (live count from the app's `/api/mcp-tools`
+  endpoint; the number in docs goes stale as tools are added): **429
   real-operation tools and 52 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
@@ -80,7 +80,12 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   synchronous export (now background jobs), MCP notification responses,
   inputSchema for all 479 tools (270 non-empty, 209 genuinely empty),
   and the Agent dock copy button (now the real absolute command);
-  what remains genuinely unported is listed honestly in
+  round 23 added folder-form skills, skill import from file/folder/
+  plugin-folder/.zip (copy-only, preview + manifest), a Knowledge
+  panel rework (clickable skill table, rendered markdown detail,
+  search, import preview/install, Claude Code sync) and MCP
+  resources for skills, taking the registry to 481 tools (429 real,
+  52 honest); what remains genuinely unported is listed honestly in
   `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +
