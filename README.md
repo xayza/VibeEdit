@@ -55,11 +55,11 @@ code and data are preserved. When that step comes, it must, in order:
 Until then: no move, rename, or delete inside `VibeEdit/` or
 `BashCut-main` for the Windows port.
 
-## Current status (honest, full-parity round 20; UI round 19)
+## Current status (honest, full-parity round 21; UI round 19)
 
 - **MCP: 479 tools** (live count from the app's `/api/mcp-tools`
-  endpoint; the number in docs goes stale as tools are added): **423
-  real-operation tools and 56 check-and-error tools** that raise a
+  endpoint; the number in docs goes stale as tools are added): **425
+  real-operation tools and 54 check-and-error tools** that raise a
   structured `NOT_AVAILABLE` error with the blocker and the port path,
   never a fake success. Round 3 verified by test that all 249 original CommandCatalog
   spec names have a registry name (dots/hyphens normalised, 6 via
@@ -69,7 +69,9 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   (13 show_* dialog aliases, agent_quick_edit, and 3 session-state
   tools ui_select/ui_seek/context_get); round 20 converted 3 more
   (show_shortcuts parsed from app.js at runtime, ui_frame/ui_frames
-  rendered with FFmpeg); what remains genuinely
+  rendered with FFmpeg); round 21 converted 2 more (agent_status as
+  agent_kit_check data per the original spec, app_vibeedit_debug_log
+  reading a real file-backed MCP invocation log); what remains genuinely
   unported is listed honestly in `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +

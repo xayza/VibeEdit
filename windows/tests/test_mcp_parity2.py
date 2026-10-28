@@ -424,7 +424,8 @@ HONEST_SAMPLE = [
     "vibeedit_agent_toggle_dock", "vibeedit_agent_ask",
     # Round 15: agent_kit_update/later left (now real); their real
     # behaviour is covered by tests/test_round15.py.
-    "vibeedit_agent_status", "vibeedit_agent_setup", "vibeedit_agent_setup_show",
+    # Round 21: agent_status left (now real, kit_check data).
+    "vibeedit_agent_setup", "vibeedit_agent_setup_show",
     "vibeedit_agent_restart_tab", "vibeedit_agent_show_changes",
     # Round 19: agent_quick_edit left (now real, alias of timeline_apply).
     "vibeedit_agent_dismiss_changes", "vibeedit_agent_undo_changes", "vibeedit_agent_detach",
@@ -479,7 +480,8 @@ HONEST_SAMPLE = [
     "vibeedit_clip_send_to_agent",
     
     "vibeedit_app_vibeedit", "vibeedit_app_vibeedit_automation_clients",
-    "vibeedit_app_vibeedit_debug_log", "vibeedit_platforms_get",
+    # Round 21: debug_log left (now real, file-backed MCP log).
+    "vibeedit_platforms_get",
     # Round 19: context_get left (now real session/project snapshot).
     "vibeedit_source_toggle_playback", "vibeedit_timeline_header_compact",
     "vibeedit_chat_stop", "vibeedit_view_compare", "vibeedit_view_safe_area",
@@ -518,7 +520,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 56)  # Round 20: 59 -> 56, show_shortcuts/ui_frame/ui_frames became real (see tests/test_round20.py)
+        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54, agent_status/debug_log became real (see tests/test_round21.py)
 
 
 if __name__ == "__main__":

@@ -251,8 +251,8 @@ class TestRound20RegistryCounts(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(honest), 56)
-        self.assertEqual(len(TOOLS) - len(honest), 423)
+        self.assertEqual(len(honest), 54)  # Round 21: 56 -> 54
+        self.assertEqual(len(TOOLS) - len(honest), 425)  # Round 21
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_show_shortcuts", "vibeedit_ui_frame",
                          "vibeedit_ui_frames"):

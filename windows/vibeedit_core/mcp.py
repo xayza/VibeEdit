@@ -486,7 +486,7 @@ TOOLS.extend([
     {"name": "vibeedit_agent_kit_install", "description": "Install agent-kit skills from a folder of .md files (or one .md file) into the kit folder; unsafe ids and existing skills are refused."},
     {"name": "vibeedit_agent_kit_update", "description": "Update the agent kit from the signed releases channel: fetch releases.json, download the target archive, verify size, SHA-256 and the publisher Ed25519 signature, stage and validate its skills, then swap, keeping the old kit until the swap succeeds (restored on failure). Pass version for a specific release; already-current returns updated=false."},
     {"name": "vibeedit_agent_kit_later", "description": "Defer the agent-kit update offer: records later_until (7 days by default) in the kit state file, which agent_kit_check reports. No UI prompt exists in this headless server, so the record itself is the deferral."},
-    {"name": "vibeedit_agent_status", "description": "Not available in this Windows build: no agent terminal session is managed by this headless server."},
+    {"name": "vibeedit_agent_status", "description": "Agent-kit status for this headless build: same data as agent_kit_check (kit folder, installed skills, installed version, releases channel); the original spec's per-tab/per-CLI setup state is not tracked here, and no terminal session exists."},
     {"name": "vibeedit_agent_setup", "description": "Not available in this Windows build: no agent terminal setup exists in this headless server."},
     {"name": "vibeedit_agent_setup_show", "description": "Not available in this Windows build: no agent setup view exists in this headless server."},
     {"name": "vibeedit_agent_restart_tab", "description": "Not available in this Windows build: no agent tab exists in this headless server."},
@@ -643,7 +643,7 @@ TOOLS.extend([
     {"name": "vibeedit_speech_rate", "description": "Measure speaking rate from transcript words (analysis-record words, or caption words for the timeline): syllables for Vietnamese, characters for CJK, else words; per-phrase p10/p50/p90, overall and articulation. Voice takes carry no text, so no voice rate is fabricated."},
     {"name": "vibeedit_app_vibeedit", "description": "Not available in this Windows build: no app-level automation client exists in this headless server."},
     {"name": "vibeedit_app_vibeedit_automation_clients", "description": "Not available in this Windows build: no app-level automation clients exist in this headless server."},
-    {"name": "vibeedit_app_vibeedit_debug_log", "description": "Not available in this Windows build: no app debug log is kept by this headless server."},
+    {"name": "vibeedit_app_vibeedit_debug_log", "description": "MCP server debug log for this headless build: lines this server actually wrote to its debug-log file (ISO time + tool name per invocation, except debug-log reads themselves; arguments are never recorded), byte-capped like the original's rotation; empty with a note when no lines exist yet; the web server's HTTP log is not included."},
     {"name": "vibeedit_platforms_get", "description": "Not available in this Windows build: no platform-client registry exists in this headless server."},
     {"name": "vibeedit_context_get", "description": "Live editor context snapshot for this headless build: project name/rev, session playhead, selection, zoom, source marks/frame, track/item counts, duration and markers — all read from the open project and the server session, never invented."},
     {"name": "vibeedit_source_toggle_playback", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
@@ -1321,6 +1321,11 @@ class MCPServer:
         "vibeedit_show_updates": "vibeedit_app_update_check",
         "vibeedit_show_sections": "vibeedit_markers_list",
         "vibeedit_agent_quick_edit": "vibeedit_timeline_apply",
+        # Round 21 alias: the original agent.status spec is the agent
+        # kit's folder/version/skills (+ per-tab/per-CLI setup state,
+        # not tracked here) — not a terminal session — so its headless
+        # content is exactly agent_kit_check's data.
+        "vibeedit_agent_status": "vibeedit_agent_kit_check",
     }
 
     def _touch_agent_status(self) -> None:
@@ -1345,9 +1350,61 @@ class MCPServer:
         except Exception:
             pass
 
+    # -- Round 21: file-backed MCP debug log -----------------------
+    # Mirrors the original's DebugLog design (one shared plain-text
+    # file, byte-capped rotation, VIBEEDIT_DEBUG_LOG_PATH override)
+    # for this headless build: one line per MCP tool invocation
+    # (ISO time + resolved tool name). Arguments are NEVER recorded
+    # (they may carry user content); the web server's HTTP log is a
+    # separate process and is not included. Best effort only: logging
+    # must never break a tool call.
+    _DEBUG_LOG_MAX_BYTES = 256 * 1024
+    _DEBUG_LOG_KEEP_BYTES = 128 * 1024
+
+    def _debug_log_path(self) -> str:
+        import os as _os
+        import tempfile
+        override = _os.environ.get("VIBEEDIT_DEBUG_LOG_PATH")
+        if override:
+            return override
+        return _os.path.join(tempfile.gettempdir(), "vibeedit-debug.log")
+
+    def _trim_debug_log(self, path: str) -> None:
+        import os as _os
+        try:
+            if _os.path.getsize(path) <= self._DEBUG_LOG_MAX_BYTES:
+                return
+            with open(path, "rb") as fh:
+                data = fh.read()
+            tail = data[-self._DEBUG_LOG_KEEP_BYTES:]
+            cut = tail.find(b"\n")
+            if cut >= 0:
+                tail = tail[cut + 1:]
+            with open(path, "wb") as fh:
+                fh.write(tail)
+        except Exception:
+            pass
+
+    def _log_call(self, resolved_name: str) -> None:
+        # Debug-log reads themselves are not logged: a read tool must
+        # not pollute the log it reads, and this keeps the "no lines
+        # yet" case reachable on a fresh path.
+        if resolved_name == "vibeedit_app_vibeedit_debug_log":
+            return
+        try:
+            import datetime as _dt
+            stamp = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            path = self._debug_log_path()
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"{stamp} {resolved_name}\n")
+            self._trim_debug_log(path)
+        except Exception:
+            pass
+
     def call(self, name: str, args: dict) -> dict:
         name = self.ALIASES.get(name, name)
         self._touch_agent_status()
+        self._log_call(name)
         if name in self.DESTRUCTIVE_TOOLS and self.path:
             try:
                 write_backup(self.path)
@@ -4543,6 +4600,7 @@ class MCPServer:
                     "vibeedit_agent_kit_install",
                     "vibeedit_agent_kit_update",
                     "vibeedit_agent_kit_later",
+                    "vibeedit_app_vibeedit_debug_log",
                     "vibeedit_plugins_overlays",
                     "vibeedit_plugins_set_overlays",
                     "vibeedit_plugins_actions", "vibeedit_plugins_view",
@@ -4722,6 +4780,28 @@ class MCPServer:
                     raise ValueError(
                         "agent_kit_later: days must be an integer") from None
                 return _r15.kit_later(args.get("kit_dir"), days=days)
+            if name == "vibeedit_app_vibeedit_debug_log":
+                # Round 21: read back exactly the lines this server
+                # wrote (see _log_call); never invent lines.
+                import os as _os
+                try:
+                    wanted = int(args.get("lines", 100))
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "debug_log: lines must be an int") from None
+                if wanted < 1 or wanted > 1000:
+                    raise ValueError(
+                        "debug_log: lines must be between 1 and 1000")
+                path = self._debug_log_path()
+                if not _os.path.isfile(path):
+                    return {"path": path, "lines": [], "total": 0,
+                            "note": "no log lines yet"}
+                with open(path, encoding="utf-8",
+                          errors="replace") as fh:
+                    all_lines = fh.read().splitlines()
+                return {"path": path,
+                        "lines": all_lines[-wanted:],
+                        "total": len(all_lines)}
             if name == "vibeedit_plugins_overlays":
                 return list_plugin_overlays(args.get("plugin"), pdir)
             if name == "vibeedit_plugins_set_overlays":
