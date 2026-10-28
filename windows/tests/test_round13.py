@@ -212,5 +212,5 @@ class TestRound13Audit(unittest.TestCase):
                      if t.get("description", "").startswith(
                          "Not available"))
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(honest, 52)  # Round 22: 54 -> 52
-        self.assertEqual(len(TOOLS) - honest, 429)
+        self.assertEqual(honest, 49)  # Round 22: 54 -> 52; Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)
+        self.assertEqual(len(TOOLS) - honest, 432)

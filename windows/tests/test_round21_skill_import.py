@@ -407,8 +407,8 @@ class TestMCPTools(StoreBase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(len(honest), 52)
-        self.assertEqual(len(TOOLS) - len(honest), 429)
+        self.assertEqual(len(honest), 49)
+        self.assertEqual(len(TOOLS) - len(honest), 432)
         by_name = {t["name"]: t for t in TOOLS}
         for name in ("vibeedit_skills_import_plan",
                      "vibeedit_skills_import"):

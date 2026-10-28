@@ -73,7 +73,8 @@ class TestRound22AutomationClients(unittest.TestCase):
 
 class TestRound22StillHonest(unittest.TestCase):
     def test_all_remaining_honest_tools_raise(self):
-        # All 52 remaining honest tools, with reasons re-checked
+        # All 49 remaining honest tools, with reasons re-checked
+        # (round 24: chat_status/ui_dialog/voice_clone_list left, now real empty-by-design)
         # against current code (not copied) in this round:
         # - agent_open/open_claude/open_codex/open_shell: actions that
         #   open a tab in a managed terminal; no terminal is managed
@@ -157,7 +158,6 @@ class TestRound22StillHonest(unittest.TestCase):
                 "vibeedit_chat_detach",
                 "vibeedit_chat_reset",
                 "vibeedit_chat_send",
-                "vibeedit_chat_status",
                 "vibeedit_chat_stop",
                 "vibeedit_chat_transcript",
                 "vibeedit_clip_send_to_agent",
@@ -174,7 +174,6 @@ class TestRound22StillHonest(unittest.TestCase):
                 "vibeedit_timeline_header_compact",
                 "vibeedit_ui_action",
                 "vibeedit_ui_actions",
-                "vibeedit_ui_dialog",
                 "vibeedit_ui_respond",
                 "vibeedit_ui_view",
                 "vibeedit_view_compare",
@@ -183,7 +182,6 @@ class TestRound22StillHonest(unittest.TestCase):
                 "vibeedit_view_library_pane",
                 "vibeedit_view_safe_area",
                 "vibeedit_voice_clone_add",
-                "vibeedit_voice_clone_list",
                 "vibeedit_voice_clone_remove"):
             with self.assertRaises(ValueError, msg=name):
                 server.call(name, {})
@@ -194,8 +192,8 @@ class TestRound22RegistryCounts(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(len(honest), 52)
-        self.assertEqual(len(TOOLS) - len(honest), 429)
+        self.assertEqual(len(honest), 49)
+        self.assertEqual(len(TOOLS) - len(honest), 432)
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_agent_terminals",
                          "vibeedit_app_vibeedit_automation_clients"):
@@ -511,8 +509,12 @@ class TestRound22BackgroundExport(unittest.TestCase):
             return json.loads(resp.read())
 
     def test_get_project_fast_during_background_render(self):
+        # Round 24: render() gained a cancel= token; the fake tracks
+        # the production signature (it ignores the token: these tests
+        # cover background responsiveness, not killing — see
+        # test_round24.py for the real kill tests).
         def slow_render(data, folder, out, preset=None, normalize_audio=False,
-                        export_preset=None):
+                        export_preset=None, cancel=None):
             time.sleep(2.5)
             return {"output": out, "duration": 1.0,
                     "width": 320, "height": 180}
@@ -541,8 +543,12 @@ class TestRound22BackgroundExport(unittest.TestCase):
     def test_cancel_never_publishes(self):
         done = threading.Event()
 
+        # Round 24: render() gained a cancel= token; the fake tracks
+        # the production signature (it ignores the token: these tests
+        # cover background responsiveness, not killing — see
+        # test_round24.py for the real kill tests).
         def slow_render(data, folder, out, preset=None, normalize_audio=False,
-                        export_preset=None):
+                        export_preset=None, cancel=None):
             time.sleep(2.0)
             done.set()
             return {"output": out, "duration": 1.0,
@@ -714,8 +720,9 @@ class TestRound22InputSchema(unittest.TestCase):
     """MCP supplement (b): every tool carries an inputSchema derived from
     its handler code. Honest deviation, stated plainly: 209 tools have
     EMPTY properties because their handlers genuinely read no arguments
-    (157 zero-arg real tools + 52 honest tools that raise before reading
-    anything). Inventing a property for them would break the no-invention
+    (157 zero-arg real tools + 49 honest tools that raise before reading
+    anything + 3 real tools with empty schemas: the round-24
+    empty-by-design conversions, which read no arguments either). Inventing a property for them would break the no-invention
     rule, which outranks the brief's shorthand 'every tool non-empty'."""
 
     def test_every_tool_has_schema_shape(self):
@@ -791,7 +798,7 @@ class TestRound22InputSchema(unittest.TestCase):
     def test_honest_tools_have_empty_schema(self):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 52)
+        self.assertEqual(len(honest), 49)
         for tool in honest:
             self.assertEqual(tool["inputSchema"]["properties"], {},
                              tool["name"])

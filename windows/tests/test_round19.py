@@ -42,11 +42,12 @@ CONVERTED_17 = [
 ]
 
 STILL_HONEST = [
-    "vibeedit_voice_clone_add", "vibeedit_voice_clone_list",
+    # Round 24: voice_clone_list/ui_dialog/chat_status left (now real, empty-by-design).
+    "vibeedit_voice_clone_add",
     "vibeedit_voice_clone_remove", "vibeedit_image_generate",
     "vibeedit_library_generate", "vibeedit_app_update",
     "vibeedit_chat_send", "vibeedit_chat_command",
-    "vibeedit_chat_status", "vibeedit_agent_ask", "vibeedit_chat_stop",
+    "vibeedit_agent_ask", "vibeedit_chat_stop",
     "vibeedit_plugins_setup", "vibeedit_clip_send_to_agent",
     "vibeedit_acme_voice_fast",
     # Round 20: ui_frame/ui_frames left (now real, FFmpeg timeline frames).
@@ -54,7 +55,7 @@ STILL_HONEST = [
     "vibeedit_view_compare", "vibeedit_view_safe_area",
     # Round 20: show_shortcuts left (now real, parsed from app.js).
     "vibeedit_show_settings",
-    "vibeedit_ui_action", "vibeedit_ui_dialog",
+    "vibeedit_ui_action",
     # Round 22: agent_terminals/automation_clients left (now real).
     "vibeedit_agent_open",
     "vibeedit_agent_toggle_dock", "vibeedit_app_vibeedit",
@@ -100,8 +101,8 @@ class TestRound19RegistryCounts(unittest.TestCase):
                   if (t.get("description") or "").startswith(
                       "Not available")]
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52
-        self.assertEqual(len(TOOLS) - len(honest), 429)  # Round 23: 479 -> 481 (skills_import_plan/import)
+        self.assertEqual(len(honest), 49)  # Round 22: 54 -> 52; Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)
+        self.assertEqual(len(TOOLS) - len(honest), 432)  # Round 23: 479 -> 481 (skills_import_plan/import); Round 24: 429 -> 432 (voice_clone_list/ui_dialog/chat_status empty-by-design)
 
     def test_converted_descriptions_not_honest(self):
         by_name = {t["name"]: t["description"] for t in TOOLS}
@@ -945,5 +946,5 @@ class TestRound19RegistryFinal(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(len(real), 429)  # Round 23: 479 -> 481 (skills_import_plan/import)
-        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52
+        self.assertEqual(len(real), 432)  # Round 23: 479 -> 481 (skills_import_plan/import); Round 24: 429 -> 432 (voice_clone_list/ui_dialog/chat_status empty-by-design)
+        self.assertEqual(len(honest), 49)  # Round 22: 54 -> 52; Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)

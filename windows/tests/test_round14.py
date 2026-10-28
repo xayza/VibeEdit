@@ -140,7 +140,7 @@ class TestRound14AgentStatus(unittest.TestCase):
         real = sum(1 for t in TOOLS
                    if not t.get("description", "").startswith("Not available"))
         self.assertEqual((len(TOOLS), real, len(TOOLS) - real),
-                         (481, 429, 52))  # Round 23: 479/427 -> 481/429 (skills_import_plan/import)
+                         (481, 432, 49))  # Round 23: 479/427 -> 481/429 (skills_import_plan/import); Round 24: 429/52 -> 432/49 (3 empty-by-design conversions)
 
 
 if __name__ == "__main__":

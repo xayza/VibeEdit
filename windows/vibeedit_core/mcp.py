@@ -502,7 +502,7 @@ TOOLS.extend([
     {"name": "vibeedit_chat_attach", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_chat_detach", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_chat_reset", "description": "Not available in this Windows build: no chat session exists in this headless server."},
-    {"name": "vibeedit_chat_status", "description": "Not available in this Windows build: no chat session exists in this headless server."},
+    {"name": "vibeedit_chat_status", "description": "Chat agents in this headless build: the original lists chat agents in the agent dock (plugins with the agent.chat capability); this headless server has no dock, and its plugin manifests carry hooks, not an agent.chat capability field, while registry plugins are macOS-only and never executed, so the list is always empty."},
     {"name": "vibeedit_chat_transcript", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_show_about", "description": "About dialog content for this headless build: same data as app_version (MCP server, Python and project-schema versions); no dialog window exists here."},
     {"name": "vibeedit_show_commands", "description": "Commands dialog content for this headless build: same list as mcp_tools_list (tools + count); no dialog window exists here."},
@@ -520,7 +520,7 @@ TOOLS.extend([
     {"name": "vibeedit_show_agent_kit", "description": "Agent-kit dialog content for this headless build: same data as agent_kit_check (kit folder, installed skills, installed version, releases channel); no dialog window exists here."},
     {"name": "vibeedit_show_doctor", "description": "Doctor dialog content for this headless build: same data as doctor_run (Python/FFmpeg/FFprobe environment check); no dialog window exists here."},
     {"name": "vibeedit_ui_action", "description": "Not available in this Windows build: no live UI session exists for this headless server to act on."},
-    {"name": "vibeedit_ui_dialog", "description": "Not available in this Windows build: no live UI session exists for this headless server to show a dialog in."},
+    {"name": "vibeedit_ui_dialog", "description": "Open dialogs in this headless build: the original reads open dialogs (alerts, file panels, sheets), topmost last; this headless server has no window and no dialog UI, so the list is always empty. Dialogs in the web UI live in the browser, not in this server."},
     {"name": "vibeedit_ui_view", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
     {"name": "vibeedit_ui_select", "description": "Set the server session selection to the given timeline item ids (validated against the open project; unknown ids raise); with no items argument, returns the current selection. Selection is session state, reset on open; clip_backdrop defaults to it."},
     {"name": "vibeedit_ui_seek", "description": "Set the server session playhead to an absolute frame (frame int, clamped at 0); returns the new frame. Same session playhead the playhead_* step tools move."},
@@ -543,7 +543,7 @@ TOOLS.extend([
     {"name": "vibeedit_app_update_later", "description": "Defer an update: record that a version should be offered again only after remind_after (now + remind_in_days, default 7); stored in updater.json next to vibeedit_core, no channel needed."},
     {"name": "vibeedit_app_update_skip", "description": "Skip an update: record a version in updater.json so it is never offered again; stored next to vibeedit_core, no channel needed."},
     {"name": "vibeedit_voice_clone_add", "description": "Not available in this Windows build: voice cloning needs a cloning provider model and none is available here (generation via Edge/Piper is wired; cloning is not)."},
-    {"name": "vibeedit_voice_clone_list", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
+    {"name": "vibeedit_voice_clone_list", "description": "Saved voice clones in this headless build: always empty — no cloning provider model is available here, so no clone can be created or stored. Voiceover takes are not clones; see voice_check for the generation backends."},
     {"name": "vibeedit_voice_clone_remove", "description": "Not available in this Windows build: no saved voice clones exist because no cloning provider model is available here."},
     {"name": "vibeedit_voice_synthesize", "description": "Synthesize text to a WAV with Edge TTS or Piper and add it as project media (clear error when the chosen backend is absent)."},
     {"name": "vibeedit_voice_speak", "description": "Synthesize a voice take (alias of voice_synthesize; measurement against the script is a separate transcribe step)."},
@@ -1374,7 +1374,7 @@ TOOL_SCHEMAS = {
     'vibeedit_plugins_bundles': {'type': 'object', 'properties': {}, 'required': []},
     'vibeedit_plugins_download': {'type': 'object', 'properties': {'dest': {'type': 'string'}, 'url': {'type': 'string'}}, 'required': ['url']},
     'vibeedit_plugins_hooks': {'type': 'object', 'properties': {}, 'required': []},
-    'vibeedit_plugins_install': {'type': 'object', 'properties': {'overwrite': {'type': 'boolean'}, 'registry_plugin': {'type': 'string'}, 'registry_version': {'type': 'string'}, 'source': {'type': 'string'}, 'source_label': {'type': 'string'}}, 'required': ['source']},
+    'vibeedit_plugins_install': {'type': 'object', 'properties': {'overwrite': {'type': 'boolean'}, 'registry_plugin': {'type': 'string'}, 'registry_version': {'type': 'string'}, 'source': {'type': 'string'}, 'source_label': {'type': 'string'}}, 'required': []},
     'vibeedit_plugins_invoke': {'type': 'object', 'properties': {'hook': {'type': 'string'}, 'item': {'type': 'string'}, 'item_id': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}}, 'required': ['hook']},
     'vibeedit_plugins_list': {'type': 'object', 'properties': {}, 'required': []},
     'vibeedit_plugins_option': {'type': 'object', 'properties': {'option': {'type': 'string'}, 'plugin': {'type': 'string'}, 'plugin_id': {'type': 'string'}, 'value': {'type': 'string'}}, 'required': []},
@@ -1546,7 +1546,11 @@ TOOL_SCHEMAS = {
     'vibeedit_ui_frames': {'type': 'object', 'properties': {'count': {'type': 'integer'}, 'times': {'type': 'array'}, 'times_s': {'type': 'array'}}, 'required': []},
     'vibeedit_ui_respond': {'type': 'object', 'properties': {}, 'required': []},
     'vibeedit_ui_seek': {'type': 'object', 'properties': {'frame': {'type': 'integer'}}, 'required': ['frame']},
-    'vibeedit_ui_select': {'type': 'object', 'properties': {'items': {'type': 'string'}}, 'required': ['items']},
+    # Round 24: items is OPTIONAL here (no items -> current selection,
+    # see the handler); the round-22 AST extraction marked it required
+    # from the later args["items"] indexing and was wrong. Required
+    # lists describe what the handler demands, not what it indexes.
+    'vibeedit_ui_select': {'type': 'object', 'properties': {'items': {'type': 'string'}}, 'required': []},
     'vibeedit_ui_view': {'type': 'object', 'properties': {}, 'required': []},
     'vibeedit_variants_create': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
     'vibeedit_variants_diff': {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
@@ -1938,6 +1942,28 @@ class MCPServer:
 
     def call(self, name: str, args: dict) -> dict:
         name = self.ALIASES.get(name, name)
+        # Round 24: missing required arguments fail fast as
+        # ValueError naming the missing keys, before any state is
+        # touched (no disk reload, no backup, no log line for a call
+        # that never ran). Previously handlers indexed args directly
+        # and the caller got a bare KeyError ("'at'"). TOOL_SCHEMAS
+        # required lists are derived from exactly those direct
+        # indexings (args["k"] -> required, args.get("k") ->
+        # optional), so this check cannot reject a call the handler
+        # would have accepted; honest tools have empty schemas, so
+        # they still reach their NOT_AVAILABLE error unchanged.
+        if not isinstance(args, dict):
+            raise ValueError(
+                f"{name}: arguments must be an object, got "
+                f"{type(args).__name__}")
+        schema = TOOL_SCHEMAS.get(name)
+        if schema is not None:
+            missing = [k for k in schema.get("required", [])
+                       if k not in args]
+            if missing:
+                raise ValueError(
+                    f"{name}: missing required argument(s): "
+                    f"{', '.join(missing)}")
         self._touch_agent_status()
         self._log_call(name)
         # Round 22 P0: reload-before-write. Every MCP call first
@@ -4972,6 +4998,14 @@ class MCPServer:
             except VisionUnavailable as exc:
                 raise ValueError(f"NOT_AVAILABLE: vision backend missing: {exc}")
         if name == "vibeedit_plugins_install":
+            # Round 24: source is required ONLY on the local path;
+            # the registry path takes registry_plugin instead, so the
+            # schema cannot list source as required. Neither given
+            # still fails as ValueError, never a bare KeyError.
+            if not args.get("registry_plugin") and not args.get("source"):
+                raise ValueError(
+                    "plugins_install needs source (local folder/.zip) "
+                    "or registry_plugin (verified registry release)")
             if args.get("registry_plugin"):
                 # Round 15: verified registry install. The caller's
                 # explicit install command is the approval in
@@ -5156,6 +5190,9 @@ class MCPServer:
                     "vibeedit_agent_terminals",
                     "vibeedit_app_vibeedit_automation_clients",
                     "vibeedit_app_vibeedit_debug_log",
+                    "vibeedit_voice_clone_list",
+                    "vibeedit_ui_dialog",
+                    "vibeedit_chat_status",
                     "vibeedit_plugins_overlays",
                     "vibeedit_plugins_set_overlays",
                     "vibeedit_plugins_actions", "vibeedit_plugins_view",
@@ -5350,6 +5387,26 @@ class MCPServer:
                 # this headless server has no such socket and no
                 # client registry, so the list is always empty.
                 return {"clients": []}
+            if name == "vibeedit_voice_clone_list":
+                # Round 24: empty by design, same precedent as
+                # agent_terminals (round 22): no cloning provider
+                # model exists in this build, so no clone can be
+                # created or stored (voice.py deliberately
+                # implements no cloning). Voiceover takes are not
+                # clones and are listed elsewhere.
+                return {"clones": []}
+            if name == "vibeedit_ui_dialog":
+                # Round 24: empty by design: the headless server
+                # has no window, so it never has an open dialog;
+                # the web UI's dialogs live in the browser.
+                return {"dialogs": []}
+            if name == "vibeedit_chat_status":
+                # Round 24: empty by design: chat agents are plugins
+                # with the agent.chat capability; the port's plugin
+                # manifests carry hooks, not capabilities, and
+                # registry plugins are macOS-only and never
+                # executed, so no chat agent can exist here.
+                return {"agents": []}
             if name == "vibeedit_app_vibeedit_debug_log":
                 # Round 21: read back exactly the lines this server
                 # wrote (see _log_call); never invent lines.
@@ -5746,7 +5803,13 @@ def handle(server: MCPServer, request: dict) -> dict | None:
                  "text": get_skill(None, skill_id)}]}
         elif method == "tools/call":
             params = request.get("params", {})
-            result = server.call(params["name"], params.get("arguments", {}))
+            if not isinstance(params, dict):
+                raise ValueError("tools/call requires params to be an object")
+            tool_name = params.get("name")
+            if not isinstance(tool_name, str) or not tool_name:
+                raise ValueError(
+                    "tools/call requires params.name to be a tool name")
+            result = server.call(tool_name, params.get("arguments", {}))
         else:
             raise ValueError(f"Unknown method: {method}")
         return {"jsonrpc": "2.0", "id": req_id, "result": result}

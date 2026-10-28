@@ -251,8 +251,8 @@ class TestRound20RegistryCounts(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 481)
-        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52
-        self.assertEqual(len(TOOLS) - len(honest), 429)  # Round 23: 479 -> 481 (skills_import_plan/import)
+        self.assertEqual(len(honest), 49)  # Round 22: 54 -> 52; Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)
+        self.assertEqual(len(TOOLS) - len(honest), 432)  # Round 23: 479 -> 481 (skills_import_plan/import); Round 24: 429 -> 432 (voice_clone_list/ui_dialog/chat_status empty-by-design)
         names = {t["name"] for t in TOOLS}
         for now_real in ("vibeedit_show_shortcuts", "vibeedit_ui_frame",
                          "vibeedit_ui_frames"):

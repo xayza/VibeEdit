@@ -36,7 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .project import (Project, load_project, save_project, new_project,
                       find_project_file, PROJECT_FILENAME,
                       write_backup, unique_media_name, migrate_fps_units)
-from .render import render, probe_media
+from .render import RenderCancel, RenderCancelled, render, probe_media
 
 
 def _source_base() -> str:
@@ -167,6 +167,10 @@ class State:
         # state.lock briefly. Guarded by their own lock, never by
         # state.lock, so status reads stay fast during a render.
         self.export_jobs: dict[str, dict] = {}
+        # Round 24: one cancel token per job, kept OUT of the job
+        # dict so job dicts stay JSON-serializable for the status
+        # endpoint (a token object in the dict would break _send_json).
+        self.export_tokens: dict[str, RenderCancel] = {}
         self.export_lock = threading.Lock()
         self.export_seq = 0
         self.project, self.path = self._load_or_create()
@@ -219,11 +223,12 @@ class State:
 
         ``data`` must already be a snapshot (deep copy): the worker
         renders without state.lock, so later edits must not mutate
-        the data being rendered. Cancelling only stops publication:
-        a render already inside FFmpeg keeps running to completion
-        in the background, but its output is never published as the
-        latest export (a render-pipeline cancel token that kills a
-        running FFmpeg process is follow-up work, not faked here).
+        the data being rendered. Cancelling (round 24) SIGKILLs the
+        running FFmpeg process via the job's RenderCancel token and
+        removes the partial output file; a job that already reached
+        "publishing" keeps the old semantics (a late cancel can no
+        longer divert it, and the cancel response then honestly
+        reports done).
         """
         with self.export_lock:
             self.export_seq += 1
@@ -232,15 +237,34 @@ class State:
                          "preset": preset, "output": out,
                          "error": None, "report": None}
             self.export_jobs[job_id] = job
+            token = RenderCancel()
+            self.export_tokens[job_id] = token
+
+        def _remove_partial() -> None:
+            try:
+                if os.path.isfile(out):
+                    os.remove(out)
+            except Exception:  # noqa: BLE001 - best effort cleanup
+                pass
 
         def _run() -> None:
             try:
                 report = render(data, folder, out, preset=preset,
                                 normalize_audio=normalize,
-                                export_preset=export_preset)
+                                export_preset=export_preset,
+                                cancel=token)
+            except RenderCancelled:
+                with self.export_lock:
+                    job["status"] = "cancelled"
+                    job["killed"] = token.killed
+                _remove_partial()
+                return
             except Exception as exc:  # noqa: BLE001 - reported on job
                 with self.export_lock:
                     if job["status"] == "cancelled":
+                        # A failed render that was also cancelled:
+                        # never publish, and drop the partial file.
+                        _remove_partial()
                         return
                     job["status"] = "error"
                     job["error"] = str(exc)
@@ -277,13 +301,26 @@ class State:
             return dict(latest)
 
     def cancel_export_job(self, job_id: str) -> dict | None:
-        """Mark a running job cancelled; its output is never published."""
+        """Cancel a running job AND terminate its FFmpeg process.
+
+        Round 24: previously this only flipped the status, so a
+        render already inside FFmpeg kept running to completion in
+        the background (its output was never published, but the
+        process, CPU time and disk writes continued). Now the job's
+        cancel token SIGKILLs the FFmpeg process; the worker then
+        removes the partial output file. A job that already reached
+        "publishing" keeps the old semantics: the cancel response
+        honestly reports done.
+        """
         with self.export_lock:
             job = self.export_jobs.get(job_id)
             if job is None:
                 return None
             if job["status"] == "running":
                 job["status"] = "cancelled"
+                token = self.export_tokens.get(job_id)
+                if token is not None:
+                    token.request()
             return dict(job)
 
     def save(self) -> None:

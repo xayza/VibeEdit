@@ -144,7 +144,7 @@ class TestMcpIntegrationTools(unittest.TestCase):
         self.assertEqual(len(TOOLS), 481)  # Round 23: 479 -> 481 (skills_import_plan/import)
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py)
+        self.assertEqual(len(honest), 49)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py); Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)
         for new in ("vibeedit_clip_link_audio",
                     "vibeedit_project_magnetic_get",
                     "vibeedit_project_magnetic_set",

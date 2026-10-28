@@ -691,3 +691,108 @@ test OK trên Linux VM).
   chứng bằng zip giả lập cùng cấu trúc (5 skill plugin, có
   style-bible.md) và đạt. Kiểm chứng trực quan UI trên Windows
   thật vẫn để lại cho người dùng sau khi pull.
+
+## Vòng 24 — audit honest + hardening từ vòng 22
+
+- **MCP 481 = 432 thật + 49 honest:** tổng không đổi, 3 công cụ
+  honest chuyển thật theo dạng rỗng-by-design (tiền lệ vòng 22
+  agent_terminals/automation_clients): `voice_clone_list` trả
+  `{"clones": []}` (không có provider model clone nào nên không
+  clone nào có thể được tạo hay lưu; take voiceover không phải
+  clone), `ui_dialog` trả `{"dialogs": []}` (server headless không
+  có cửa sổ nên không bao giờ có dialog mở; dialog của web UI nằm
+  ở trình duyệt), `chat_status` trả `{"agents": []}` (chat agent là
+  plugin có capability agent.chat; manifest của port chỉ mang hooks,
+  không có trường capability, còn plugin registry chỉ chạy trên
+  macOS và không bao giờ được thực thi ở đây). Mô tả của cả ba ghi
+  rõ "always empty" và lý do. 49 công cụ còn lại vẫn honest, lý do
+  từng nhóm được pin trong `tests/test_round24.py`
+  (STILL_HONEST_REASONS): session/tab/dock, chat trong app (quyết
+  định sản phẩm: không làm chat trong app), ghi vào môi trường
+  agent ngoài (setup/tools_install), change record không tồn tại,
+  playback engine không có, state chỉ ở trình duyệt, provider/model
+  không tồn tại, và dữ liệu bịa (platforms_get, show_settings,
+  app_vibeedit — cấm bịa theo brief).
+- **Sửa schema ui_select:** schema vòng 22 ghi items là bắt buộc,
+  nhưng handler vòng 19 trả selection hiện tại khi không truyền
+  items; schema nay ghi required [] cho đúng hành vi thật (kèm
+  comment). Đây là sửa schema, không phải sửa test.
+- **Hardening hasAudio (render.py):** record media thiếu hasAudio
+  (mặc định cũ là True) hoặc True cũ cho file không có audio stream
+  từng làm chết toàn bộ export với lỗi FFmpeg "Stream specifier
+  ':a' matches no streams". Nay render probe file thật (ffprobe,
+  lazy, cache theo đường dẫn đã resolve) tại cả 3 chỗ phát audio:
+  main, overlay và vòng extra-audio (vòng này trước đây phát `[i:a]`
+  vô điều kiện). Probe chỉ làm câm tiếng không có thật, không bao
+  giờ bịa tiếng record ghi là không có: record False và image
+  short-circuit False không cần probe; probe lỗi giữ nguyên giá trị
+  record để probe hỏng không phá render đang chạy tốt. Kiểm chứng:
+  record không probe cho file câm nay render OK (trước đó lỗi 234),
+  record không probe cho file có tiếng giữ tiếng thật (mean_volume
+  -24 dB), record đã probe không đổi, record False + file có tiếng
+  vẫn câm, file câm trên track music render OK.
+- **Hủy export giết FFmpeg thật (render.py + server.py):** token
+  `RenderCancel` mới; FFmpeg cuối chạy bằng Popen (stderr ra file
+  tạm vì FFmpeg ghi progress liên tục, pipe sẽ đầy và kẹt render)
+  với vòng poll 0,2 s; `cancel_export_job` gọi token.request()
+  (SIGKILL tiến trình nếu đang chạy, hoặc gài để giết ngay khi
+  spawn); worker bắt `RenderCancelled`, ghi `killed` vào job, xóa
+  file xuất dở và không bao giờ publish. Token giữ riêng khỏi job
+  dict để job vẫn serialize JSON được. Kiểm chứng: render 1080p
+  30 s (36 s không hủy trên VM) bị hủy sau ~1 s thì dọn xong trong
+  0,2 s, returncode -9 (SIGKILL), `killed` True, `last_export`
+  vẫn None, file dở đã xóa. Xuất thường qua job vẫn publish bình
+  thường (test).
+- **Audit DOM nhập media:** tester đếm 3 control nhập, nhưng chỉ
+  có ĐÚNG MỘT control nhìn thấy được là `#importDropzone`; input
+  file và nút submit mang class `visually-hidden` (1 px, clip) và
+  chỉ tồn tại để dropzone mở picker bằng code (input
+  display:none thì không `.click()` được). Không có label, không
+  có chữ "Choose File", không có control nhìn thấy thứ hai. Vòng
+  này KHÔNG đổi UI (test pin sự thật này + chuỗi subtext tiếng Anh
+  giữ nguyên verbatim theo test khóa); báo cáo ghi rõ đây là đếm
+  nhầm node DOM, không phải 3 control nhìn thấy.
+- **Lỗi thiếu tham số bắt buộc:** `MCPServer.call` nay kiểm tra
+  required của TOOL_SCHEMAS ngay sau resolve alias, trước mọi side
+  effect (không reload đĩa, không backup, không ghi log cho cuộc
+  gọi chưa chạy) và raise ValueError ghi tên các key thiếu
+  (`markers_add {} -> "missing required argument(s): at, text"`,
+  trước đây là KeyError trần `"'at'"`); `handle()` tools/call cũng
+  báo rõ khi thiếu tên tool. Required của schema suy đúng từ
+  indexing trực tiếp của handler (`args["k"]` bắt buộc,
+  `args.get("k")` tùy chọn) nên kiểm tra này không từ chối cuộc gọi
+  handler chấp nhận được — ngoại trừ hai trường hợp đã sửa trong
+  vòng: ui_select (xem trên) và plugins_install (schema vòng 22 ghi
+  source bắt buộc, nhưng đường registry chỉ cần registry_plugin;
+  schema nay required [] kèm guard trong handler: không source và
+  không registry_plugin vẫn raise ValueError rõ, không KeyError).
+  Sau sửa plugins_install, toàn bộ required còn lại đã được rà
+  soát hệ thống: 19 trường hợp required cũng xuất hiện dạng .get()
+  trong handler đều là guard-then-raise (vẫn bắt buộc thật), và
+  quét branch-on-optional (media/frame/proposal/check/item) chỉ
+  còn plugins_install là đường rẽ hai đầu vào thật — không còn
+  trường hợp schema bắt buộc thừa nào khác. Công cụ honest có
+  schema rỗng nên vẫn ra lỗi NOT_AVAILABLE như cũ.
+- **Thay đổi test cũ (chỉ bảo trì số đếm + gỡ tên honest, ngoại lệ
+  duy nhất ghi rõ dưới):** bump 429→432, 52→49 tại test_round13,
+  test_round14 (tuple), test_round19 (2 chỗ + STILL_HONEST), 
+  test_round20, test_round21, test_round21_skill_import,
+  test_round22 (2 chỗ + comment), test_round9,
+  test_integration_parity, test_round2_parity, test_round5_tools,
+  test_mcp_parity2 (bổ sung 1 chỗ đếm honest bị sót); gỡ đúng 3 tên
+  đã chuyển thật khỏi test_mcp_parity2, test_round19,
+  test_round21, test_round22. NGOẠI LỆ NGOÀI BẢO TRÌ SỐ ĐẾM (cần
+  parent duyệt): 2 mock `slow_render` trong test_round22.py
+  (background export) được thêm tham số `cancel=None` vì
+  `render()` nay nhận token hủy — mock cũ không nhận tham số này
+  nên mọi job đều rơi vào trạng thái error (TypeError); assertion
+  của 2 test đó không đổi, chỉ fake bám theo chữ ký production
+  mới. Không có cách nào khác mà không nhét introspection vào
+  production để chiều mock.
+- **Kiểm chứng:** py_compile các file chạm tới, node --check không
+  cần (không chạm static), nhóm mục tiêu + full suite (xem báo cáo
+  vòng), giá trị khóa vòng 18 còn nguyên, cây Swift không động,
+  không merge, 21 skill phẳng không đổi, `skills.json` không đổi
+  ngữ nghĩa, render.py/export không đổi ngoài 2 hardening trên.
+  Kiểm chứng trực quan trên Windows thật vẫn để lại cho người dùng
+  sau khi pull.

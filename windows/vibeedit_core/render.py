@@ -812,7 +812,8 @@ def export_preset_info(name: str, project_width: int,
 
 def render(project: dict, folder: str, output: str, preset: str = "full",
            normalize_audio: bool = False, ducking: bool | None = None,
-           export_preset: str | None = None) -> dict:
+           export_preset: str | None = None,
+           cancel: "RenderCancel | None" = None) -> dict:
     """Render the project with FFmpeg. Returns a report dict.
 
     ``preset``: "full" (project resolution, fast preset) or "draft"
@@ -824,18 +825,75 @@ def render(project: dict, folder: str, output: str, preset: str = "full",
     LRA=11) applied to the final mixed audio.
     ``ducking``: None = use the project's audio.ducking setting;
     True/False forces music ducking on/off for this render only.
+    ``cancel``: a RenderCancel token; when requested, the running
+    FFmpeg process is terminated and RenderCancelled is raised
+    (the caller removes any partial output).
     """
     import tempfile
     lut_dir = tempfile.mkdtemp(prefix="vibeedit-lut-")
     try:
         report = _render_inner(project, folder, output, preset,
                                normalize_audio, lut_dir, ducking,
-                               export_preset)
+                               export_preset, cancel)
         _attach_duration_check(report, output)
         return report
     finally:
         import shutil
         shutil.rmtree(lut_dir, ignore_errors=True)
+
+
+class RenderCancelled(Exception):
+    """A render stopped because its RenderCancel token was requested."""
+
+
+class RenderCancel:
+    """Cancel token for a running render (round 24).
+
+    The export worker hands one to render(); cancel_export_job calls
+    request(), which SIGKILLs the FFmpeg process if it is already
+    running, or arms the token so register() kills it the moment it
+    spawns. ``killed`` is True exactly when a process was actually
+    terminated, so tests and the job report can prove the process
+    stopped rather than merely being unpublished.
+    """
+
+    def __init__(self) -> None:
+        import threading
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self._proc = None
+        self.killed = False
+        self.returncode = None
+
+    def request(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+            else:
+                with self._lock:
+                    self.killed = True
+
+    def register(self, proc) -> None:
+        with self._lock:
+            self._proc = proc
+            cancelled = self._cancelled
+        if cancelled and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+            else:
+                with self._lock:
+                    self.killed = True
+
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
 
 
 def _attach_duration_check(report: dict, output: str) -> None:
@@ -876,7 +934,10 @@ def _attach_duration_check(report: dict, output: str) -> None:
 def _render_inner(project: dict, folder: str, output: str, preset: str,
                   normalize_audio: bool, lut_dir: str,
                   ducking_override: bool | None = None,
-                  export_preset: str | None = None) -> dict:
+                  export_preset: str | None = None,
+                  cancel: "RenderCancel | None" = None) -> dict:
+    if cancel is not None and cancel.is_cancelled():
+        raise RenderCancelled("export cancelled before rendering")
     fmt = project["format"]
     width, height = int(fmt["width"]), int(fmt["height"])
     fps = fps_value(fmt["fps"])
@@ -906,6 +967,37 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
 
     def media_fps(medium: dict) -> float:
         return fps_value(medium.get("fps", fmt["fps"]))
+
+    _audio_probe_cache: dict[str, bool] = {}
+
+    def has_audio_stream(medium: dict) -> bool:
+        """Round 24: does this media's file truly carry an audio
+        stream? The record's hasAudio is only a cached probe result:
+        MCP/OTIO/legacy records can lack it (the call sites used to
+        default a missing value to True) or carry a stale True, and
+        emitting [i:a] for a streamless file fails the WHOLE export
+        with FFmpeg "Stream specifier ':a' matches no streams". The
+        file is ground truth, probed lazily once per render and
+        cached by resolved path. The probe can only silence audio
+        that isn't there, never invent audio the record says is
+        absent: a record that says False, and an image, short-circuit
+        to False without probing, and a failed probe (missing file,
+        no ffprobe) keeps the record's value so a bad probe never
+        changes a working render — the later FFmpeg error then names
+        the real problem.
+        """
+        if not medium.get("hasAudio", True):
+            return False
+        if medium.get("kind") == "image":
+            return False
+        path = media_path(medium["id"])
+        if path not in _audio_probe_cache:
+            try:
+                _audio_probe_cache[path] = bool(
+                    probe_media(path).get("hasAudio", False))
+            except Exception:  # noqa: BLE001 - keep record value
+                _audio_probe_cache[path] = True
+        return _audio_probe_cache[path]
 
     tracks = {t["id"]: t for t in project["tracks"]}
     main = next((t for t in project["tracks"]
@@ -1865,7 +1957,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                        if m["id"] == item["media"]), None)
         label = next_label("aseg")
         if medium is None or medium.get("kind") == "image" \
-                or not medium.get("hasAudio", True):
+                or not has_audio_stream(medium):
             filter_parts.append(
                 f"anullsrc=r=48000:cl=stereo:d={dur_s:.3f}[{label}]")
             return label, dur_s
@@ -2184,7 +2276,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                     f"[{out_label}]")
                 current = out_label
                 overlay_count += 1
-            if medium.get("hasAudio", True):
+            if has_audio_stream(medium):
                 # Phase 3: overlay audio renders at its timeline
                 # position, like main-track audio (delayed + padded).
                 oa_filters = [
@@ -2327,6 +2419,14 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 continue
             if medium.get("kind") == "video" and track.get("role") == "dialogue":
                 continue
+            # Round 24: this loop used to emit [i:a] for every
+            # item unconditionally, so a streamless file on an
+            # audio track failed the whole export the same way
+            # the main/overlay sites did; skip it instead (its
+            # delayed/padded siblings are independent, so skipping
+            # shifts nothing).
+            if not has_audio_stream(medium):
+                continue
             start_s = frames_to_seconds(item["at"], fmt["fps"])
             dur_s = frames_to_seconds(item["dur"], fmt["fps"])
             src = media_path(item["media"])
@@ -2430,14 +2530,50 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         cmd += ["-map", audio_map, "-c:a", "aac", "-b:a", "160k", "-shortest"]
     cmd += [output]
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
-    # Phase 7: explicit UTF-8 decoding (see probe_media above) — the
-    # Windows locale codepage would otherwise mojibake any
-    # non-ASCII text (e.g. Vietnamese) in FFmpeg's error output.
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    if proc.returncode != 0:
+    # Round 24: the final FFmpeg runs under Popen (not
+    # subprocess.run) so a cancel token can actually terminate it.
+    # FFmpeg writes progress to stderr continuously, so stderr goes
+    # to a temp file — a pipe would fill and stall the render — and
+    # only its tail is kept for the failure message, exactly as
+    # before. Phase 7: explicit UTF-8 decoding (see probe_media
+    # above) — the Windows locale codepage would otherwise mojibake
+    # any non-ASCII text (e.g. Vietnamese) in FFmpeg's error output.
+    import tempfile as _tempfile
+    err_file = _tempfile.TemporaryFile(mode="w+", encoding="utf-8",
+                                       errors="replace")
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                            stderr=err_file)
+    if cancel is not None:
+        cancel.register(proc)
+    try:
+        while True:
+            try:
+                returncode = proc.wait(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if cancel is not None and cancel.is_cancelled():
+                    try:
+                        proc.kill()
+                    except Exception:  # noqa: BLE001 - already gone
+                        pass
+                    else:
+                        cancel.killed = True
+                    proc.wait()
+                    cancel.returncode = proc.returncode
+                    raise RenderCancelled(
+                        "export cancelled while FFmpeg was running")
+    finally:
+        err_file.seek(0)
+        err_text = err_file.read()
+        err_file.close()
+    if cancel is not None and cancel.is_cancelled():
+        # Cancel arrived just as FFmpeg exited on its own: the
+        # output must not be reported as a success.
+        cancel.returncode = proc.returncode
+        raise RenderCancelled("export cancelled")
+    if returncode != 0:
         raise RuntimeError(
-            f"FFmpeg failed ({proc.returncode}): {proc.stderr[-2000:]}")
+            f"FFmpeg failed ({returncode}): {err_text[-2000:]}")
     return {
         "output": output, "preset": preset,
         "export_preset": export_preset,

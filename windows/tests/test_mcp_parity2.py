@@ -433,20 +433,20 @@ HONEST_SAMPLE = [
     "vibeedit_agent_tools_install",
     "vibeedit_chat_send", "vibeedit_chat_command", "vibeedit_chat_commands",
     "vibeedit_chat_attach", "vibeedit_chat_detach", "vibeedit_chat_reset",
-    "vibeedit_chat_status", "vibeedit_chat_transcript",
+    "vibeedit_chat_transcript",
     # Round 20: show_shortcuts left (now real, parsed from app.js).
     "vibeedit_show_settings",
     # Round 19: show_about/commands/plugins/review/history/sections/
     # batch/export/export_progress/updates/assets/agent_kit/doctor
     # left (now real: dialog-content aliases of the data tools).
-    "vibeedit_ui_action", "vibeedit_ui_dialog", "vibeedit_ui_view",
+    "vibeedit_ui_action", "vibeedit_ui_view",
     # Round 19: ui_select/ui_seek left (now real session state ops).
     # Round 20: ui_frame/ui_frames left (now real, FFmpeg timeline frames).
     "vibeedit_ui_respond", "vibeedit_ui_actions",
     "vibeedit_playback_toggle", "vibeedit_playback_stop",
     "vibeedit_playback_shuttle_forward", "vibeedit_playback_shuttle_back",
     "vibeedit_view_fullscreen", "vibeedit_view_inspector_pane", "vibeedit_view_library_pane",
-    "vibeedit_app_update",         "vibeedit_voice_clone_add", "vibeedit_voice_clone_list", "vibeedit_voice_clone_remove",
+    "vibeedit_app_update",         "vibeedit_voice_clone_add", "vibeedit_voice_clone_remove",
     # Round 3: generation (synthesize/speak/lines/use/fit/place) is
     # real now, so those names left this honest-error sample; only
     # cloning (no provider model) stays honest.
@@ -522,7 +522,7 @@ class TestRegistry(unittest.TestCase):
             self.assertTrue(tool["description"], tool["name"])
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
-        self.assertEqual(len(honest), 52)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py)
+        self.assertEqual(len(honest), 49)  # Round 22: 54 -> 52, agent_terminals/automation_clients became real (see tests/test_round22.py); Round 24: 52 -> 49 (voice_clone_list/ui_dialog/chat_status empty-by-design)
 
 
 if __name__ == "__main__":
