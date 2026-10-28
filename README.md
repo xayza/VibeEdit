@@ -90,8 +90,14 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   49 honest), made export probe real audio streams before emitting
   [i:a], made export cancel SIGKILL the running FFmpeg process, and
   clarified missing-argument errors to ValueError naming the keys;
-  what remains genuinely unported is listed honestly in
-  `windows/PARITY.md`.
+  round 25 added a cross-process project file lock (O_CREAT|O_EXCL,
+  stdlib-only, so simultaneous web + MCP writes serialize instead of
+  losing one update; long-running tools run outside the lock by
+  design) and export-report diagnostics (exact FFmpeg command, filter
+  graph, -shortest flag, audio map, per-clip source-vs-project fps,
+  and ffprobe-measured output video/audio durations, plus a Review
+  panel diagnostics line); what remains genuinely unported is listed
+  honestly in `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +
   playhead, Export CTA gradient softened to #0e7490→#be185d, clip

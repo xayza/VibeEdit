@@ -1261,6 +1261,22 @@ $("btnReview").addEventListener("click", async () => {
       lines.push(`Last export duration: ${data.last_export_report.duration}s, skipped: ${(data.skipped || []).join(", ") || "none"}, warnings: ${(data.warnings || []).join("; ") || "none"}.`);
     else
       lines.push("Chưa có bản xuất nên không có mục nào bị bỏ qua để báo cáo.");
+    /* Round 25: export diagnostics summary. The full FFmpeg command,
+       filter graph, and per-clip fps list live in the report itself
+       (returned by /api/review as last_export_report and by the MCP
+       export tools); the panel shows the short version: measured
+       video/audio durations side by side, whether -shortest was
+       used, and any clip whose source fps differs from project fps
+       (the shape of the old 330s video/audio split). */
+    const rep25 = data.last_export_report;
+    if (rep25 && rep25.output_durations) {
+      const od = rep25.output_durations;
+      const vs = od.video_s === null || od.video_s === undefined ? "?" : od.video_s;
+      const as = od.audio_s === null || od.audio_s === undefined ? "?" : od.audio_s;
+      const mism = (rep25.clip_fps || []).filter((c) => c.source_fps_known && Math.abs(c.source_fps - c.project_fps) > 0.01).map((c) => c.media + ": " + c.source_fps + "≠" + c.project_fps);
+      const unknown = (rep25.clip_fps || []).filter((c) => !c.source_fps_known).length;
+      lines.push("Chẩn đoán xuất: video " + vs + "s / audio " + as + "s (đo từ file xuất); -shortest: " + (rep25.shortest ? "có" : "không") + "; clip lệch fps: " + (mism.join(", ") || "không có") + (unknown ? "; không rõ fps: " + unknown + " clip" : "") + ". Lệnh FFmpeg đầy đủ nằm trong báo cáo xuất.");
+    }
     box.textContent = lines.join(" ");
     setStatus("Đã làm mới review.");
   } catch (err) { box.textContent = "Review failed: " + err.message; setStatus(err.message, true); }

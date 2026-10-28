@@ -28,6 +28,7 @@ from .project import (Project, load_project, save_project, find_project_file,
                       write_backup, migrate_fps_units,
                       source_span_to_project_frames,
                       PROJECT_FILENAME)
+from .filelock import ProjectFileLock
 
 TOOLS = [
     {"name": "vibeedit_project_get",
@@ -1829,6 +1830,29 @@ class MCPServer:
         "vibeedit_music_replace", "vibeedit_outcomes_import",
         "vibeedit_library_import_pack", "vibeedit_image_disclose"})
 
+    # Round 25: tools that must NOT hold the project file lock.
+    # Renders and frame extraction run for seconds to minutes and
+    # never write the project file (they only set in-memory
+    # last_export or render to a temp dir); transcription writes the
+    # project but only after a minutes-long model run; network tools
+    # (kit/plugin/update downloads) likewise never write the project
+    # file. Holding the lock across any of them would wedge web
+    # writes for the whole operation, so they keep the round-22
+    # behaviour (refresh first, unlocked) and only a truly
+    # overlapping locked write could still win over their save.
+    # project_open is excluded separately in call(): it loads a new
+    # path (and only ever migration-saves a file being opened).
+    LONG_RUNNING_TOOLS = frozenset({
+        "vibeedit_export_start", "vibeedit_export_preset",
+        "vibeedit_export_normalized", "vibeedit_export_ducked",
+        "vibeedit_export_preview", "vibeedit_ui_frame",
+        "vibeedit_ui_frames",
+        "vibeedit_captions_transcribe", "vibeedit_media_transcribe",
+        "vibeedit_captions_generate",
+        "vibeedit_agent_kit_update", "vibeedit_plugins_install",
+        "vibeedit_plugins_download", "vibeedit_app_update_check",
+        "vibeedit_app_update_download", "vibeedit_app_update_prepare"})
+
     # Round 3 aliases: original spec names that map to an existing
     # real handler (see the TOOLS entries above). Applied before
     # dispatch so the orphan-scan test and every caller see the
@@ -1966,6 +1990,21 @@ class MCPServer:
                     f"{', '.join(missing)}")
         self._touch_agent_status()
         self._log_call(name)
+        # Round 25: serialize the read-modify-write critical section
+        # across processes (see filelock.py). _call_inner refreshes
+        # first and saves right after mutating, and the lock makes
+        # that sequence atomic against the web server's locked
+        # writes — the true-simultaneous race round 22 left open.
+        # Long-running tools and project_open run unlocked (see
+        # LONG_RUNNING_TOOLS); a call with no project open has no
+        # lock file to take and fails in _call_inner as before.
+        if (self.path is None or name in self.LONG_RUNNING_TOOLS
+                or name == "vibeedit_project_open"):
+            return self._call_inner(name, args)
+        with ProjectFileLock(self.path):
+            return self._call_inner(name, args)
+
+    def _call_inner(self, name: str, args: dict) -> dict:
         # Round 22 P0: reload-before-write. Every MCP call first
         # picks up a newer disk file (web app edits) so a later
         # save cannot silently discard them. Handlers save

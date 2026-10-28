@@ -836,6 +836,7 @@ def render(project: dict, folder: str, output: str, preset: str = "full",
                                normalize_audio, lut_dir, ducking,
                                export_preset, cancel)
         _attach_duration_check(report, output)
+        _attach_output_durations(report, output)
         return report
     finally:
         import shutil
@@ -929,6 +930,42 @@ def _attach_duration_check(report: dict, output: str) -> None:
                                 "file_s": round(file_s, 3),
                                 "diff_s": round(diff, 3),
                                 "warning": warning}
+
+
+def _attach_output_durations(report: dict, output: str) -> None:
+    """Round 25: ffprobe the finished file's VIDEO and AUDIO stream
+    durations side by side.
+
+    The round-22 duration_check compares the container duration with
+    the timeline, which cannot show a video/audio split: the user's
+    330s file had video 330.16s against audio 226.86s while the
+    container duration alone looked like one number. Stream durations
+    make that split visible in the report itself. A missing stream
+    (or a failed probe) yields None plus an error note, never an
+    invented number, and never fails the render.
+    """
+    try:
+        proc = subprocess.run(
+            [find_tool("ffprobe"), "-v", "quiet", "-print_format",
+             "json", "-show_streams", "-show_format", output],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", check=True)
+        data = json.loads(proc.stdout)
+    except Exception as exc:  # noqa: BLE001 - probe is best-effort
+        report["output_durations"] = {"video_s": None, "audio_s": None,
+                                      "error": f"probe failed: {exc}"}
+        return
+    video_s = audio_s = None
+    for stream in data.get("streams", []):
+        try:
+            dur = float(stream["duration"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if stream.get("codec_type") == "video" and video_s is None:
+            video_s = round(dur, 3)
+        elif stream.get("codec_type") == "audio" and audio_s is None:
+            audio_s = round(dur, 3)
+    report["output_durations"] = {"video_s": video_s, "audio_s": audio_s}
 
 
 def _render_inner(project: dict, folder: str, output: str, preset: str,
@@ -2574,6 +2611,33 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
     if returncode != 0:
         raise RuntimeError(
             f"FFmpeg failed ({returncode}): {err_text[-2000:]}")
+    # Round 25 export diagnostics: what the user (and the next
+    # 330s-style investigation) needs without re-running anything.
+    # clip_fps pairs every video item's recorded source fps with the
+    # project fps, so a 59.94-into-29.97 case is visible at a glance;
+    # a missing record fps is reported as unknown, never silently
+    # replaced by the project fps (the render itself falls back to
+    # the project fps for such records — see media_fps — which is
+    # exactly the masking behaviour that hid the old zoompan bug).
+    # Images carry no fps and are not fps-mismatch candidates.
+    media_by_id = {m["id"]: m for m in project.get("media", [])}
+    clip_fps = []
+    for track in project.get("tracks", []):
+        if track.get("kind") != "video":
+            continue
+        for item in track.get("items", []):
+            medium = media_by_id.get(item.get("media"))
+            if medium is None or medium.get("kind") == "image":
+                continue
+            rec = medium.get("fps")
+            clip_fps.append({
+                "item": item.get("id"), "track": track.get("id"),
+                "media": medium.get("id"),
+                "source_fps": fps_value(rec) if rec is not None else None,
+                "source_fps_known": rec is not None,
+                "project_fps": fps,
+                "effective_fps": fps_value(rec) if rec is not None else fps,
+            })
     return {
         "output": output, "preset": preset,
         "export_preset": export_preset,
@@ -2589,6 +2653,14 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         "warnings": warnings, "skipped": skipped,
         "segments": segment_count,
         "transitions": len(boundaries),
+        # Round 25 diagnostics (report-only, never affect output):
+        # the exact FFmpeg invocation, the full filter graph, whether
+        # -shortest truncated the audio, and the audio map used.
+        "ffmpeg_command": cmd,
+        "filter_complex": filter_complex,
+        "shortest": "-shortest" in cmd,
+        "audio_map": audio_map or None,
+        "clip_fps": clip_fps,
     }
 
 

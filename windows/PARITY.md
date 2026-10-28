@@ -796,3 +796,110 @@ test OK trên Linux VM).
   ngữ nghĩa, render.py/export không đổi ngoài 2 hardening trên.
   Kiểm chứng trực quan trên Windows thật vẫn để lại cho người dùng
   sau khi pull.
+
+## Vòng 25 — Khóa file project liên tiến trình + chẩn đoán báo cáo xuất
+
+- **Vấn đề khóa (nối vòng 22):** vòng 22 sửa trường hợp ghi xen kẽ
+  tuần tự (MCP sửa rồi web sửa, hoặc ngược lại, đều sống nhờ
+  refresh_from_disk khi disk rev > RAM rev). Trường hợp còn lại là
+  ghi THẬT SỰ đồng thời: cả hai cùng đọc rev N, cùng sửa, cùng ghi
+  rev N+1 — một bên mất lặng. `save_project()` vốn đã nguyên tử
+  (file tạm + os.replace) nên file không bao giờ rách, nhưng ghi
+  nguyên tử không làm cho cả chuỗi đọc-sửa-ghi thành nguyên tử.
+  Bằng chứng fail-before (tái hiện trực tiếp): hai bản sao Project
+  cùng đọc rev 1, một bên thêm marker A rồi lưu, bên kia thêm
+  marker B rồi lưu — kết quả chỉ còn marker B, rev 2.
+- **Thiết kế khóa (module mới `vibeedit_core/filelock.py`, chỉ
+  stdlib):** file khóa `<project>.lock` tạo bằng O_CREAT|O_EXCL nên
+  chạy được cả Windows lẫn Linux, không dùng fcntl (chỉ POSIX) hay
+  msvcrt (chỉ Windows). Mọi đường ghi project đều giữ khóa suốt
+  đoạn [refresh, sửa, lưu, tăng rev]: phía web là `State.apply`
+  (trừ op transcribe), các endpoint /api/undo, /api/redo, /api/save,
+  /api/plugin, /api/voiceover/record, /api/media/upload; phía MCP là
+  `MCPServer.call` (trừ các tool chạy dài, xem dưới). Khóa CHỈ giữ
+  quanh đoạn ngắn — không bao giờ giữ qua render, xuất, phiên âm
+  hay gọi mạng, nên một lần xuất dài không bao giờ kẹt đường ghi.
+  Hết thời gian chờ (mặc định 10s) thì báo lỗi to, rõ ràng
+  (ProjectLockTimeout, nêu tên file khóa) — không bao giờ ghi đè
+  lặng. Khóa quá 60s tuổi được coi là mồ côi (tiến trình giữ đã
+  chết) và bị thu hồi, nên app không kẹt vĩnh viễn; 60s vượt xa mọi
+  đoạn tới hạn thật (lưu JSON chỉ vài mili-giây). File khóa mang
+  token pid+uuid, lúc thả chỉ xóa khi nội dung còn khớp, nên bên bị
+  đánh cắp khóa do quá tuổi không xóa được khóa của chủ mới. Khóa
+  không tái nhập: cùng luồng lấy hai lần sẽ hết timeout và báo lỗi
+  to thay vì deadlock lặng — không đường code nào trong app tái
+  nhập khóa.
+- **Các tool chạy dài ngoài khóa (MCPServer.LONG_RUNNING_TOOLS):**
+  các tool xuất/render (`export_start/preset/normalized/ducked/
+  preview`, `ui_frame/ui_frames` — render ra thư mục tạm, không ghi
+  file project), các tool phiên âm (`captions_transcribe`,
+  `media_transcribe`, `captions_generate` — ghi project nhưng chỉ
+  sau lần chạy model dài), các tool mạng (`agent_kit_update`,
+  `plugins_install/download`, `app_update_check/download/prepare`
+  — không ghi file project). Chúng giữ hành vi vòng 22 (refresh
+  trước, không khóa); chỉ trường hợp chồng lắp thật sự với một lần
+  ghi có khóa mới còn last-writer-wins. `project_open` cũng ngoài
+  khóa (chỉ đọc, trừ lần lưu migration một lần duy nhất của file
+  cũ khi mở); `project_create` nhắm tới thư mục mới nên không cần
+  khóa. Lưu migration một lần khi mở project (State._load_or_create
+  / open_project) vẫn nằm ngoài khóa — đường cũ, chỉ kích hoạt với
+  file tiền-vòng-19.
+- **Hành vi đã đổi cần biết:** validation tham số bắt buộc vẫn chạy
+  trước khi lấy khóa (lỗi fail-fast không phải chờ timeout);
+  endpoint /api/plugin nay lấy snapshot undo SAU khi refresh (trước
+  đây lấy trước cả khi kiểm tra hook), nên gọi plugin lỗi hook
+  không còn để lại snapshot rác trên ngăn undo.
+- **Chẩn đoán báo cáo xuất (report-only, không đổi output):**
+  báo cáo xuất nay mang `ffmpeg_command` (lệnh FFmpeg đầy đủ dạng
+  danh sách), `filter_complex` (toàn bộ đồ thị lọc),
+  `shortest` (có dùng -shortest không), `audio_map` (map audio đã
+  dùng, hoặc null), `clip_fps` (mỗi clip video: id item/track/media,
+  source_fps từ record — None kèm source_fps_known=false khi record
+  không có fps, project_fps, effective_fps mà render đã dùng), và
+  `output_durations` (video_s/audio_s đo bằng ffprobe trên từng
+  stream của file xuất, None khi không đo được, kèm error note —
+  không bao giờ bịa số, không bao giờ làm hỏng lần xuất vì lỗi dò).
+  Panel Review hiện thêm một dòng chẩn đoán: thời lượng video /
+  audio đo từ file, cờ -shortest, các clip lệch fps (nguồn ≠
+  project) và số clip không rõ fps. Lệnh FFmpeg đầy đủ nằm trong
+  dict báo cáo (trả về qua /api/review dạng last_export_report, qua
+  /api/export/status, và qua các tool MCP export) — panel chỉ hiện
+  bản tóm tắt vì lệnh đầy đủ thường dài hàng KB.
+- **Câu hỏi 330s giờ cần gì:** không cần tái hiện từ trí nhớ nữa —
+  chỉ cần một lần xuất mới rồi đọc báo cáo: dòng chẩn đoán cho thấy
+  ngay video/audio có lệch không, clip nào mang fps nguồn khác fps
+  project, và có -shortest không; lệnh đầy đủ trong báo cáo cho
+  phép truy vết tiếp nếu vẫn lệch.
+- **Không đổi số đếm:** không tool mới, không tool nào chuyển thật
+  — registry vẫn 481 = 432 thật + 49 honest, và vòng này KHÔNG sửa
+  file test cũ nào (test mới tự pin số đếm; nếu assertion đếm cũ
+  nào hỏng vì lý do khác, đó là việc cần báo, không sửa lặng).
+- **Kiểm chứng:** 11 test mới trong tests/test_round25.py (khóa cơ
+  bản/timeout/stale/thả khi lỗi/validation trước khóa; 2 luồng ×
+  (MCP markers_add + web add_text) và 3 tiến trình × markers_add
+  đều không mất cập nhật, rev đơn điệu đúng tổng số op; báo cáo
+  có đủ chẩn đoán; cảnh báo lệch thời lượng vẫn nổ với trường hợp
+  cố tình lệch; số đếm 481=432/49), py_compile các file chạm tới,
+  node --check static/app.js, show_shortcuts vẫn 30 (5 listener —
+  bài học vòng 23: sửa app.js phải kiểm tra lại parser), giá trị
+  khóa vòng 18 còn nguyên, cây Swift không động, không merge, 21
+  skill phẳng không đổi, `skills.json` không đổi ngữ nghĩa, nhóm
+  mục tiêu + full suite (xem báo cáo vòng). Kiểm chứng trực quan
+  trên Windows thật vẫn để lại cho người dùng sau khi pull.
+- **Sửa sau lần chạy full suite đầu (quan trọng — trạng thái cuối
+  mới xanh):** lần chạy đầu báo 1 error + 1 failure, cả hai đều do
+  vòng này và đều đã sửa tận gốc. (1) `vibeedit_plan_apply` điều
+  phối sang `vibeedit_timeline_apply` qua `MCPServer.call` ngay
+  trong lúc đang giữ khóa — khóa không tái nhập ban đầu làm lần gọi
+  trong chờ hết timeout 10s rồi lỗi. Sửa: khóa nay tái nhập theo
+  luồng (registry per-thread: cùng luồng lấy lại chỉ tăng đếm, file
+  chỉ bị xóa khi lần giữ ngoài cùng thả; luồng khác vẫn chờ trên
+  file; registry còn chặn việc thu hồi khóa stale của luồng đang
+  sống trong cùng tiến trình). Test hồi quy
+  test_same_thread_reentry_deepens pin hành vi này, và test timeout
+  được sửa cho đúng (bên tranh khóa phải là luồng khác, vì cùng
+  luồng nay cố tình tái nhập). (2) `vibeedit.spec` thiếu hidden
+  import cho module mới `vibeedit_core.filelock` nên test spec báo
+  thiếu — đã thêm vào đúng thứ tự alphabet, và test spec nay pass.
+  Sau hai sửa này, full suite phải chạy lại từ đầu mới được coi là
+  xanh (xem báo cáo vòng).

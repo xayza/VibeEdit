@@ -37,6 +37,7 @@ from .project import (Project, load_project, save_project, new_project,
                       find_project_file, PROJECT_FILENAME,
                       write_backup, unique_media_name, migrate_fps_units)
 from .render import RenderCancel, RenderCancelled, render, probe_media
+from .filelock import ProjectFileLock
 
 
 def _source_base() -> str:
@@ -323,6 +324,19 @@ class State:
                     token.request()
             return dict(job)
 
+    def project_lock(self) -> ProjectFileLock:
+        """Round 25: cross-process lock for this project's file.
+
+        The web server's threading lock (state.lock) serializes only
+        threads inside this process; an external MCP agent is a
+        separate process and needs the file lock. Every project write
+        path holds this across [refresh, mutate, save] so two writers
+        serialize instead of racing (both reading rev N and writing
+        rev N+1, losing one update). Never held across renders,
+        exports, transcription, or network calls — see apply().
+        """
+        return ProjectFileLock(self.path)
+
     def save(self) -> None:
         # Autosave itself creates no backup; only the first save
         # after opening a project does (see backup_before_change).
@@ -514,11 +528,31 @@ class State:
         "set_project", "close_gaps"})
 
     def apply(self, op: dict) -> dict:
+        # Round 25: serialize the read-modify-write critical section
+        # across processes. refresh_from_disk() inside the lock is
+        # what closes the true-simultaneous race: two writers can no
+        # longer both read rev N, mutate, and write rev N+1. The one
+        # exception is the transcribe op, which runs for minutes;
+        # holding the file lock across it would wedge MCP writers for
+        # the whole transcription, so it keeps the round-22 behaviour
+        # (refresh first, unlocked) — the sequential case stays
+        # covered, and only a truly overlapping locked write could
+        # still win over a transcription save.
+        if op.get("op") == "transcribe":
+            return self._apply_inner(op)
+        with self.project_lock():
+            return self._apply_inner(op)
+
+    def _apply_inner(self, op: dict) -> dict:
         # Round 22 P0: reload-before-write. An external writer (MCP
         # agent) may have advanced the disk file since this State
         # loaded it; applying on top of stale RAM and then saving
         # would silently discard the agent's edits. Refresh first
         # so the op lands on the newest disk state (rev monotonic).
+        # Callers hold project_lock() around this (except the
+        # transcribe bypass in apply()), so the refresh, the
+        # mutation, and the save at the end are one atomic section
+        # against other processes.
         self.refresh_from_disk()
         proj = self.project
         if op.get("op") == "srt_export":
@@ -1513,23 +1547,30 @@ def make_handler(state: State):
                         # Round 22 P0: an external writer invalidates
                         # the undo stack (refresh clears it), so a
                         # stale snapshot can never overwrite newer
-                        # disk state.
-                        state.refresh_from_disk()
-                        if not state.undo_stack:
-                            raise ValueError("Nothing to undo")
-                        state.redo_stack.append(state.project.snapshot())
-                        state.project.restore(state.undo_stack.pop())
-                        state.save()
+                        # disk state. Round 25: refresh, restore, and
+                        # save are one locked section, so a concurrent
+                        # writer cannot slip in between them.
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            if not state.undo_stack:
+                                raise ValueError("Nothing to undo")
+                            state.redo_stack.append(
+                                state.project.snapshot())
+                            state.project.restore(state.undo_stack.pop())
+                            state.save()
                         self._send_json({"ok": True, **self._project_view()})
                     elif parsed.path == "/api/redo":
                         self._read_json()
                         # Round 22 P0: same stale-stack guard as undo.
-                        state.refresh_from_disk()
-                        if not state.redo_stack:
-                            raise ValueError("Nothing to redo")
-                        state.undo_stack.append(state.project.snapshot())
-                        state.project.restore(state.redo_stack.pop())
-                        state.save()
+                        # Round 25: locked with the refresh and save.
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            if not state.redo_stack:
+                                raise ValueError("Nothing to redo")
+                            state.undo_stack.append(
+                                state.project.snapshot())
+                            state.project.restore(state.redo_stack.pop())
+                            state.save()
                         self._send_json({"ok": True, **self._project_view()})
                     elif parsed.path == "/api/save":
                         # Phase 2: explicit save for Ctrl+S. Every
@@ -1540,8 +1581,12 @@ def make_handler(state: State):
                         self._read_json()
                         # Round 22 P0: a plain re-save of stale RAM
                         # must never overwrite a newer disk file.
-                        state.refresh_from_disk()
-                        state.save()
+                        # Round 25: refresh and save are one locked
+                        # section, so a concurrent writer cannot land
+                        # between them.
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            state.save()
                         self._send_json({"ok": True, **self._project_view()})
                     elif parsed.path == "/api/batch":
                         from .export_ops import batch_export
@@ -1584,24 +1629,32 @@ def make_handler(state: State):
                     elif parsed.path == "/api/plugin":
                         from .plugins import apply_plugin, load_plugins
                         body = self._read_json()
-                        state.undo_stack.append(state.project.snapshot())
-                        if len(state.undo_stack) > 50:
-                            state.undo_stack.pop(0)
-                        state.redo_stack.clear()
-                        try:
-                            info = load_plugins().get(body["plugin"], {})
-                            hook = next((k for k, v in info.items()
-                                         if callable(v)), None)
-                            if not hook:
-                                raise ValueError(
-                                    f"Plugin {body['plugin']!r} has no hook")
-                            item = apply_plugin(state.project,
-                                                body["plugin"], hook,
-                                                body["item"])
-                            state.save()
-                        except Exception:
-                            state.project.restore(state.undo_stack.pop())
-                            raise
+                        info = load_plugins().get(body["plugin"], {})
+                        hook = next((k for k, v in info.items()
+                                     if callable(v)), None)
+                        if not hook:
+                            raise ValueError(
+                                f"Plugin {body['plugin']!r} has no hook")
+                        # Round 25: refresh, snapshot, apply, and save
+                        # are one locked section (see apply()). The
+                        # snapshot is taken after the refresh, so a
+                        # failed apply restores the newest state, and
+                        # a missing hook no longer leaves a junk
+                        # snapshot on the undo stack.
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            state.undo_stack.append(state.project.snapshot())
+                            if len(state.undo_stack) > 50:
+                                state.undo_stack.pop(0)
+                            state.redo_stack.clear()
+                            try:
+                                item = apply_plugin(state.project,
+                                                    body["plugin"], hook,
+                                                    body["item"])
+                                state.save()
+                            except Exception:
+                                state.project.restore(state.undo_stack.pop())
+                                raise
                         self._send_json({"ok": True, "item": item})
                     elif parsed.path == "/api/stats":
                         self._read_json()
@@ -1654,11 +1707,15 @@ def make_handler(state: State):
                         with open(dest, "wb") as fh:
                             fh.write(payload)
                         info = probe_media(dest)
-                        medium = state.project.add_media(
-                            f"media/{safe}", kind="audio",
-                            **{k: v for k, v in info.items() if k in
-                               ("duration", "hasAudio")})
-                        state.save()
+                        # Round 25: refresh, add, and save are one
+                        # locked section (see apply()).
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            medium = state.project.add_media(
+                                f"media/{safe}", kind="audio",
+                                **{k: v for k, v in info.items() if k in
+                                   ("duration", "hasAudio")})
+                            state.save()
                         self._send_json({"ok": True, "media": medium})
                     elif parsed.path == "/api/media/upload":
                         length = int(self.headers.get("Content-Length") or 0)
@@ -1682,31 +1739,37 @@ def make_handler(state: State):
                         # differs, so dedupe does not affect it).
                         import hashlib
                         digest = hashlib.sha256(payload).hexdigest()
-                        existing = _find_media_by_sha256(
-                            state.project, state.project_dir, digest)
-                        if existing is not None:
-                            # Persist any hash backfills from the
-                            # lookup, then reuse without writing.
-                            state.save()
-                            self._send_json({"ok": True,
-                                             "media": existing,
-                                             "reused": True})
-                        else:
-                            safe = unique_media_name(
-                                media_dir, _safe_upload_name(filename))
-                            dest = os.path.join(media_dir, safe)
-                            with open(dest, "wb") as fh:
-                                fh.write(payload)
-                            info = probe_media(dest)
-                            kind = "video" if info.get("width") else "audio"
-                            medium = state.project.add_media(
-                                f"media/{safe}", kind=kind,
-                                sha256=digest,
-                                **{k: v for k, v in info.items() if k in
-                                   ("width", "height", "fps", "frames",
-                                    "duration", "hasAudio")})
-                            state.save()
-                            self._send_json({"ok": True, "media": medium})
+                        # Round 25: refresh, dedupe/add, and save are
+                        # one locked section (see apply()).
+                        with state.project_lock():
+                            state.refresh_from_disk()
+                            existing = _find_media_by_sha256(
+                                state.project, state.project_dir, digest)
+                            if existing is not None:
+                                # Persist any hash backfills from the
+                                # lookup, then reuse without writing.
+                                state.save()
+                                result = {"ok": True, "media": existing,
+                                          "reused": True}
+                            else:
+                                safe = unique_media_name(
+                                    media_dir, _safe_upload_name(filename))
+                                dest = os.path.join(media_dir, safe)
+                                with open(dest, "wb") as fh:
+                                    fh.write(payload)
+                                info = probe_media(dest)
+                                kind = ("video" if info.get("width")
+                                        else "audio")
+                                medium = state.project.add_media(
+                                    f"media/{safe}", kind=kind,
+                                    sha256=digest,
+                                    **{k: v for k, v in info.items()
+                                       if k in
+                                       ("width", "height", "fps", "frames",
+                                        "duration", "hasAudio")})
+                                state.save()
+                                result = {"ok": True, "media": medium}
+                        self._send_json(result)
                     else:
                         self._send_json({"error": "Not found"}, 404)
             except (ValueError, KeyError, FileNotFoundError, RuntimeError) as exc:

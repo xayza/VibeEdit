@@ -73,6 +73,7 @@ a = Analysis(
         "vibeedit_core.beats",
         "vibeedit_core.cuts",
         "vibeedit_core.export_ops",
+        "vibeedit_core.filelock",
         "vibeedit_core.karaoke",
         "vibeedit_core.knowledge",
         "vibeedit_core.mcp",
