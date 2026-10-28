@@ -58,14 +58,14 @@ def _find(lessons: list, lesson_id: str) -> dict:
     for lesson in lessons:
         if lesson.get("id") == lesson_id:
             return lesson
-    raise KeyError(f"Unknown lesson: {lesson_id!r}")
+    raise KeyError(f"Bài học không rõ: {lesson_id!r}")
 
 
 def _find_proposal(proposals: list, proposal_id: str) -> dict:
     for proposal in proposals:
         if proposal.get("id") == proposal_id:
             return proposal
-    raise KeyError(f"Unknown proposal: {proposal_id!r}")
+    raise KeyError(f"Proposal không rõ: {proposal_id!r}")
 
 
 # -- lessons ---------------------------------------------------------
@@ -74,7 +74,7 @@ def add_lesson(data: dict, text: str, title: str | None = None) -> dict:
     """Add a lesson in ``proposed`` status. Text is caller-supplied;
     empty text is refused, never replaced with invented content."""
     if not str(text).strip():
-        raise ValueError("Lesson text must not be empty")
+        raise ValueError("Nội dung bài học không được để trống")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -96,7 +96,7 @@ def get_lesson(data: dict, lesson_id: str) -> dict:
 
 def update_lesson(data: dict, lesson_id: str, text: str) -> dict:
     if not str(text).strip():
-        raise ValueError("Lesson text must not be empty")
+        raise ValueError("Nội dung bài học không được để trống")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -145,7 +145,7 @@ def reject_lesson(data: dict, lesson_id: str) -> dict:
 
 def set_fact(data: dict, key: str, value: str) -> dict:
     if not str(key).strip():
-        raise ValueError("Fact key must not be empty")
+        raise ValueError("Khóa fact không được để trống")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -161,7 +161,7 @@ def facts(data: dict) -> dict:
 
 def set_pref(data: dict, key: str, value: str) -> dict:
     if not str(key).strip():
-        raise ValueError("Pref key must not be empty")
+        raise ValueError("Khóa pref không được để trống")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -177,7 +177,7 @@ def prefs(data: dict) -> dict:
 
 def set_claim(data: dict, key: str, statement: str) -> dict:
     if not str(key).strip():
-        raise ValueError("Claim key must not be empty")
+        raise ValueError("Khóa claim không được để trống")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -214,7 +214,7 @@ def split_memo(data: dict) -> dict:
     memo = knowledge.get("memo", "")
     parts = [p.strip() for p in str(memo).split("\n\n") if p.strip()]
     if not parts:
-        raise ValueError("Memo is empty; nothing to split")
+        raise ValueError("Memo rỗng; không có gì để tách")
 
     def _do():
         added = []
@@ -236,7 +236,7 @@ def propose(data: dict, kind: str, content) -> dict:
     verbatim and only applied on approve."""
     if kind not in ("lesson", "fact", "pref", "claim"):
         raise ValueError(
-            "Proposal kind must be lesson, fact, pref or claim")
+            "Kind của proposal phải là lesson, fact, pref hoặc claim")
     knowledge = ensure_knowledge(data)
 
     def _do():
@@ -262,15 +262,14 @@ def approve_proposal(data: dict, proposal_id: str) -> dict:
         proposal = _find_proposal(knowledge["proposals"], proposal_id)
         if proposal["status"] != "pending":
             raise ValueError(
-                f"Proposal {proposal_id!r} is already "
-                f"{proposal['status']}")
+                f"Proposal {proposal_id!r} đã là {proposal['status']}")
         proposal["status"] = "approved"
         content = proposal["content"]
         if proposal["kind"] == "lesson":
             text = content if isinstance(content, str) else \
                 content.get("text", "")
             if not str(text).strip():
-                raise ValueError("Lesson proposal has no text")
+                raise ValueError("Proposal bài học không có nội dung")
             lesson = {"id": _new_id("lesson"), "title": "",
                       "text": str(text), "status": "active"}
             knowledge["lessons"].append(lesson)
@@ -295,8 +294,7 @@ def reject_proposal(data: dict, proposal_id: str) -> dict:
         proposal = _find_proposal(knowledge["proposals"], proposal_id)
         if proposal["status"] != "pending":
             raise ValueError(
-                f"Proposal {proposal_id!r} is already "
-                f"{proposal['status']}")
+                f"Proposal {proposal_id!r} đã là {proposal['status']}")
         proposal["status"] = "rejected"
         return proposal
 
@@ -323,12 +321,12 @@ def revert(data: dict, steps: int = 1) -> dict:
     ago, using the stored snapshots. Reverting is itself recorded
     (without a snapshot, so it cannot be reverted twice over)."""
     if steps < 1:
-        raise ValueError("steps must be at least 1")
+        raise ValueError("steps phải ít nhất bằng 1")
     knowledge = ensure_knowledge(data)
     hist = knowledge.get("history", [])
     if len(hist) < steps:
         raise ValueError(
-            f"Only {len(hist)} knowledge mutations to revert")
+            f"Chỉ {len(hist)} mutation knowledge để hoàn tác")
     target = hist[-steps]["before"]
     knowledge.clear()
     knowledge.update(copy.deepcopy(target))
@@ -346,11 +344,11 @@ def migrate(data: dict) -> dict:
     legacy = data.pop("knowledge_notes", None)
     if legacy is None:
         return {"migrated": False,
-                "reason": "no legacy knowledge_notes present"}
+                "reason": "không có knowledge_notes cũ"}
     if knowledge.get("memo"):
         data["knowledge_notes"] = legacy
         return {"migrated": False,
-                "reason": "memo already set; legacy notes left in place"}
+                "reason": "memo đã đặt; giữ nguyên các ghi chú cũ"}
     knowledge["memo"] = str(legacy)
     knowledge.setdefault("history", []).append(
         {"action": "migrate", "detail": "knowledge_notes -> memo"})

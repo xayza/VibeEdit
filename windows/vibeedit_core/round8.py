@@ -142,8 +142,7 @@ def _motion_time(point: dict, dur_frames: int, fps) -> int:
     if "t" in point:
         return int(round(float(point["t"]) * dur_frames))
     raise ValueError(
-        "Motion keyframe needs 't' (fraction), 's' (seconds) or "
-        "'frame'")
+        "Keyframe motion cần 't' (phân số), 's' (giây) hoặc 'frame'")
 
 
 def _motion_value(prop: str, value):
@@ -155,7 +154,7 @@ def _motion_value(prop: str, value):
         if "height" in value:
             return target, 0.5 + float(value["height"])
         raise ValueError(
-            f"Motion value for {prop!r} must carry 'width' or 'height'")
+            f"Giá trị motion cho {prop!r} phải mang 'width' hoặc 'height'")
     return target, float(value)
 
 
@@ -165,18 +164,18 @@ def motion_keys_to_windows(keys: dict, dur_frames: int, fps) -> list[dict]:
     by_frame: dict[int, dict] = {}
     for prop, points in keys.items():
         if prop not in _MOTION_PROP_MAP:
-            raise ValueError(f"Unknown motion property: {prop!r}")
+            raise ValueError(f"Thuộc tính motion không rõ: {prop!r}")
         if not isinstance(points, list):
             raise ValueError(
-                f"Motion keyframes for {prop!r} must be a list")
+                f"Keyframe motion cho {prop!r} phải là danh sách")
         for point in points:
             if not isinstance(point, dict) or "value" not in point:
                 raise ValueError(
-                    f"Motion keyframe for {prop!r} needs a 'value'")
+                    f"Keyframe motion cho {prop!r} cần có 'value'")
             at = _motion_time(point, dur_frames, fps)
             if not 0 <= at <= dur_frames:
                 raise ValueError(
-                    "Motion keyframe time must fall inside the item")
+                    "Thời gian keyframe motion phải nằm trong mục")
             target, value = _motion_value(prop, point["value"])
             by_frame.setdefault(at, {"at": at})[target] = value
     return [by_frame[at] for at in sorted(by_frame)]
@@ -191,9 +190,7 @@ def apply_motion(proj, item_id: str, preset=None, keyframes=None,
     with a pointer to clip_reframe instead of being faked."""
     if focus is not None or within is not None:
         raise ValueError(
-            "clip.motion focus framing needs the viewer band that "
-            "stays visible (a live viewer value); use clip_reframe "
-            "for a stored reframe window instead")
+            "clip.motion focus framing cần dải viewer vẫn hiển thị (giá trị viewer trực tiếp); dùng clip_reframe cho cửa sổ reframe đã lưu")
     _, item = proj.item(item_id)
     dur = int(item["dur"])
     fps = fps_value(proj.data["format"]["fps"])
@@ -207,8 +204,7 @@ def apply_motion(proj, item_id: str, preset=None, keyframes=None,
         spec = MOTION_PRESETS.get(preset)
         if spec is None:
             raise ValueError(
-                f"Unknown motion preset: {preset!r} "
-                f"(known: {', '.join(sorted(MOTION_PRESETS))}, none)")
+                f"Preset motion không rõ: {preset!r} (đã biết: {', '.join(sorted(MOTION_PRESETS))}, không có)")
         frames = motion_keys_to_windows(spec["keys"], dur, fps)
         proj.set_keyframes(item_id, frames)
         item["motion_preset"] = preset
@@ -218,17 +214,16 @@ def apply_motion(proj, item_id: str, preset=None, keyframes=None,
                 "title": spec["title"], "rev": proj.rev}
     if keyframes is None:
         raise ValueError(
-            "clip.motion needs a preset or keyframes JSON")
+            "clip.motion cần preset hoặc JSON keyframes")
     if isinstance(keyframes, str):
         try:
             keyframes = json.loads(keyframes)
         except json.JSONDecodeError as exc:
             raise ValueError(
-                f"clip.motion keyframes are not valid JSON: {exc}") from exc
+                f"keyframes clip.motion không phải JSON hợp lệ: {exc}") from exc
     if not isinstance(keyframes, dict):
         raise ValueError(
-            "clip.motion keyframes must be an object "
-            "{property: [{t|s|frame, value}]}")
+            "keyframes clip.motion phải là object {property: [{t|s|frame, value}]}")
     frames = motion_keys_to_windows(keyframes, dur, fps)
     proj.set_keyframes(item_id, frames)
     item["motion_preset"] = "custom"
@@ -260,7 +255,7 @@ def change_framing(proj, item_id: str) -> dict:
     the rendered frame, not just stored state."""
     _, item = proj.item(item_id)
     if "media" not in item:
-        raise ValueError("change-framing applies to media clips only")
+        raise ValueError("change-framing chỉ áp dụng cho clip media")
     current = item.get("reframePreset")
     ids = [p["id"] for p in REFRAME_PRESETS]
     nxt = REFRAME_PRESETS[0] if current not in ids else \
@@ -289,17 +284,16 @@ def music_replace(proj, media_id=None, library_id=None,
         entry = next((e for e in proj.data.get("library", [])
                       if e["id"] == library_id), None)
         if entry is None:
-            raise KeyError(f"Unknown library item: {library_id}")
+            raise KeyError(f"Mục thư viện không rõ: {library_id}")
         media_id = (entry.get("item") or {}).get("media")
         if not media_id:
             raise ValueError(
-                "Library item is not an audio clip and cannot "
-                "replace the music bed")
+                "Mục thư viện không phải clip audio nên không thay được nhạc nền")
     if media_id is None:
-        raise ValueError("music.replace needs media or library")
+        raise ValueError("music.replace cần media hoặc library")
     medium = proj.media(media_id)
     if medium.get("kind") != "audio" and not medium.get("hasAudio"):
-        raise ValueError("music.replace needs an audio media")
+        raise ValueError("music.replace cần media audio")
     music_tracks = [t for t in proj.data["tracks"]
                     if t.get("role") == "music"]
     clips = []
@@ -309,7 +303,7 @@ def music_replace(proj, media_id=None, library_id=None,
                 clips.append((track, item))
     if not clips:
         raise ValueError(
-            "music.replace needs existing Music-track clips to span")
+            "music.replace cần các clip track Music có sẵn để phủ")
     clips.sort(key=lambda ti: int(ti[1]["at"]))
     first_track, first = clips[0]
     span_start = int(first["at"])
@@ -327,7 +321,7 @@ def music_replace(proj, media_id=None, library_id=None,
         new_dur = int(round(float(medium["duration"])
                             * fps_value(proj.data["format"]["fps"])))
     if new_dur <= 0:
-        raise ValueError("Replacement media has no usable duration")
+        raise ValueError("Media thay thế không có thời lượng dùng được")
     added = []
     at = span_start
     looped = False
@@ -419,7 +413,7 @@ def narration_windows(proj, min_seconds: float = 1.0,
     media-level mix render of the original's `levels` flag); the
     window list itself is computed from real timeline data."""
     if min_seconds <= 0:
-        raise ValueError("narration.windows needs min_seconds > 0")
+        raise ValueError("narration.windows cần min_seconds > 0")
     fps = fps_value(proj.data["format"]["fps"])
     total_s = proj.duration_seconds()
     words = timeline_words(proj)
@@ -514,7 +508,7 @@ def _normalise_curve(payload) -> tuple[list[dict], dict]:
     if isinstance(payload, str):
         rows = list(csv.DictReader(io.StringIO(payload)))
         if not rows:
-            raise ValueError("outcomes CSV has no rows")
+            raise ValueError("CSV outcomes không có dòng nào")
         t_key = next((k for k in rows[0]
                       if k and ("position" in k.lower()
                                 or k.lower().strip() in
@@ -523,8 +517,7 @@ def _normalise_curve(payload) -> tuple[list[dict], dict]:
                       if k and "retention" in k.lower()), None)
         if t_key is None or r_key is None:
             raise ValueError(
-                "outcomes CSV needs a time/position column and a "
-                "retention column")
+                "CSV outcomes cần cột time/position và cột retention")
         curve = []
         for row in rows:
             try:
@@ -541,7 +534,7 @@ def _normalise_curve(payload) -> tuple[list[dict], dict]:
         curve = []
         for point in payload:
             if not isinstance(point, dict):
-                raise ValueError("outcomes curve points must be objects")
+                raise ValueError("điểm curve outcomes phải là object")
             if "t" in point:
                 curve.append({"t": float(point["t"]),
                               "retention": float(point["retention"])})
@@ -550,7 +543,7 @@ def _normalise_curve(payload) -> tuple[list[dict], dict]:
                               "retention": float(point["retention"])})
             else:
                 raise ValueError(
-                    "outcomes curve point needs 't' or 'position'")
+                    "điểm curve outcomes cần 't' hoặc 'position'")
         return curve, totals
     if isinstance(payload, dict):
         totals = dict(payload.get("totals") or {})
@@ -558,8 +551,7 @@ def _normalise_curve(payload) -> tuple[list[dict], dict]:
         curve, _ = _normalise_curve(raw)
         return curve, totals
     raise ValueError(
-        "outcomes payload must be JSON {curve, totals}, a list of "
-        "points, or CSV text")
+        "payload outcomes phải là JSON {curve, totals}, danh sách điểm, hoặc text CSV")
 
 
 def import_outcomes(proj, export_id: str, payload) -> dict:
@@ -568,10 +560,10 @@ def import_outcomes(proj, export_id: str, payload) -> dict:
     per export; the Windows port stores the same records in the
     project, so they ride save/backup/undo). Re-import replaces."""
     if not export_id:
-        raise ValueError("outcomes.import needs an export id")
+        raise ValueError("outcomes.import cần export id")
     curve, totals = _normalise_curve(payload)
     if not curve:
-        raise ValueError("outcomes.import found no curve points")
+        raise ValueError("outcomes.import không tìm thấy điểm curve nào")
     store = proj.data.setdefault("outcomes", {})
     store[export_id] = {"curve": curve, "totals": totals}
     proj._bump()
@@ -614,8 +606,7 @@ def map_outcomes(proj, export_id: str, window_seconds: float = 5.0) -> dict:
     record = store.get(export_id)
     if record is None:
         raise KeyError(
-            f"No imported outcomes for export {export_id!r}; "
-            "run outcomes.import first")
+            f"Không có outcomes đã import cho export {export_id!r}; hãy chạy outcomes.import trước")
     curve = record["curve"]
     totals = record.get("totals") or {}
     time_based = "t" in curve[0]
@@ -714,7 +705,7 @@ def append_run_entry(proj, kind: str, fields: dict | None = None) -> dict:
     if not isinstance(kind, str) or not 1 <= len(kind) <= 40 \
             or kind == "gate":
         raise ValueError(
-            "run.append kind must be 1-40 characters and not 'gate'")
+            "kind của run.append phải dài 1–40 ký tự và không phải 'gate'")
     entry: dict = {"kind": kind}
     entry.update(fields)
     if kind == "stage":
@@ -724,7 +715,7 @@ def append_run_entry(proj, kind: str, fields: dict | None = None) -> dict:
             entry["unverified"] = True
         if status == "skipped" and not fields.get("reason"):
             raise ValueError(
-                "run.append stage skipped needs a reason")
+                "run.append stage skipped cần lý do")
         if stage == "review" and status == "done":
             plan = proj.data.get("plan") or {}
             stages = plan.get("stages") or {}
@@ -835,35 +826,32 @@ def describe_media(proj, media_id: str, shots, append: bool = False) -> dict:
     each needs at least one fact field. Replaces unless append."""
     medium = proj.media(media_id)
     if not isinstance(shots, list) or not shots:
-        raise ValueError("media.describe needs a non-empty shots list")
+        raise ValueError("media.describe cần danh sách shots không rỗng")
     cleaned = []
     for shot in shots:
         if not isinstance(shot, dict):
-            raise ValueError("media.describe shots must be objects")
+            raise ValueError("shots của media.describe phải là object")
         try:
             start = float(shot["start"])
             end = float(shot["end"])
         except (KeyError, TypeError, ValueError):
             raise ValueError(
-                "media.describe shots need numeric start and end") from None
+                "shots của media.describe cần start và end dạng số") from None
         if not 0 <= start < end:
             raise ValueError(
-                "media.describe shot needs 0 <= start < end")
+                "shot của media.describe cần 0 <= start < end")
         if not any(k in shot for k in _DESCRIBE_FACTS):
             raise ValueError(
-                "media.describe shots need at least one fact "
-                "(size, angle, move, direction, subjects, tags, "
-                "people, onScreenText, confidence, bestMoment, "
-                "looked or note)")
+                "shots của media.describe cần ít nhất một fact (size, angle, move, direction, subjects, tags, people, onScreenText, confidence, bestMoment, looked hoặc note)")
         if "confidence" in shot:
             conf = float(shot["confidence"])
             if not 0 <= conf <= 1:
-                raise ValueError("media.describe confidence must be 0..1")
+                raise ValueError("confidence của media.describe phải trong 0..1")
         cleaned.append(dict(shot))
     cleaned.sort(key=lambda s: s["start"])
     for prev, nxt in zip(cleaned, cleaned[1:]):
         if nxt["start"] < prev["end"]:
-            raise ValueError("media.describe shots may not overlap")
+            raise ValueError("shots của media.describe không được chồng lấn")
     store = proj.data.setdefault("media_descriptions", {})
     if append and media_id in store:
         merged = sorted(store[media_id]["shots"] + cleaned,
@@ -871,8 +859,7 @@ def describe_media(proj, media_id: str, shots, append: bool = False) -> dict:
         for prev, nxt in zip(merged, merged[1:]):
             if nxt["start"] < prev["end"]:
                 raise ValueError(
-                    "media.describe appended shots overlap existing "
-                    "shots")
+                    "shots thêm vào của media.describe chồng lấn shots có sẵn")
         store[media_id] = {"shots": merged, "describedBy": "caller"}
     else:
         store[media_id] = {"shots": cleaned, "describedBy": "caller"}
@@ -1121,9 +1108,7 @@ def speech_rate(proj, media_id=None, unit=None) -> dict:
                               "end": float(w["end"])})
         if not words:
             raise ValueError(
-                "speech.rate needs a transcript for this media: "
-                "run media_analyze (faster-whisper) so the media "
-                "carries transcript words")
+                "speech.rate cần transcript cho media này: hãy chạy media_analyze (faster-whisper) để media mang theo từ transcript")
         rates = _phrase_rates(words, 0.5, unit)
         per_media.append({"media": media_id, "unit": unit,
                           "words": len(words),
@@ -1156,10 +1141,7 @@ def speech_rate(proj, media_id=None, unit=None) -> dict:
                               "phraseRates": rates})
     return {"perMedia": per_media, "unit": unit,
             "voices": {"available": False,
-                       "reason": "Synthesised voice takes in this "
-                                 "build do not store their text, so "
-                                 "no voice rate is computed for them "
-                                 "rather than fabricated."}}
+                       "reason": "Take giọng đọc tổng hợp trong bản build này không lưu text nên không tính voice rate cho chúng thay vì bịa ra."}}
 
 
 # ---------------------------------------------------------------------------
@@ -1192,7 +1174,7 @@ def image_style(proj, style=None, references=None, seed=None,
     if seed is not None:
         seed = int(seed)
         if seed < 0:
-            raise ValueError("image.style seed must be >= 0")
+            raise ValueError("seed của image.style phải >= 0")
         lock["seed"] = seed
         changed = True
     if disclosure is not None:
@@ -1230,7 +1212,7 @@ def image_disclose(proj, text=None) -> dict:
                            if t.get("role") == "captions"
                            and t["kind"] == "text"), None)
     if captions_track is None:
-        raise ValueError("No captions text track exists")
+        raise ValueError("Chưa có track chữ phụ đề nào")
     clips = []
     for track in proj.data["tracks"]:
         if track["kind"] != "video":
@@ -1306,7 +1288,7 @@ def export_pack(proj, output: str, pack=None, kind=None) -> dict:
                    if _library_kind(e) == kind]
     if os.path.exists(output) and os.listdir(output):
         raise ValueError(
-            "library.export-pack output must be a new or empty folder")
+            "đầu ra library.export-pack phải là thư mục mới hoặc rỗng")
     os.makedirs(output, exist_ok=True)
     files_dir = os.path.join(output, "files")
     os.makedirs(files_dir, exist_ok=True)
@@ -1359,13 +1341,13 @@ def import_pack(proj, path: str, replace: bool = False) -> dict:
     unless replace saves them as new versions (a fresh id with
     version bumped). Zip entries are traversal-checked."""
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Pack not found: {path}")
+        raise FileNotFoundError(f"Không tìm thấy pack: {path}")
     import tempfile
     tmp = None
     folder = path
     if os.path.isfile(path):
         if not zipfile.is_zipfile(path):
-            raise ValueError("Pack file must be a .zip of a pack")
+            raise ValueError("File pack phải là .zip của một pack")
         tmp = tempfile.mkdtemp(prefix="vibeedit-pack-")
         with zipfile.ZipFile(path) as zf:
             for info in zf.infolist():
@@ -1374,11 +1356,10 @@ def import_pack(proj, path: str, replace: bool = False) -> dict:
                 name = info.filename.replace("\\", "/")
                 if name.startswith("/") or ".." in name.split("/"):
                     raise ValueError(
-                        f"Pack zip entry escapes its folder: "
-                        f"{info.filename!r}")
+                        f"Entry zip pack thoát khỏi thư mục của nó: {info.filename!r}")
                 if info.file_size > _MAX_PACK_BYTES:
                     raise ValueError(
-                        f"Pack zip entry too large: {info.filename!r}")
+                        f"Entry zip pack quá lớn: {info.filename!r}")
                 dest = os.path.join(tmp, name)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with zf.open(info) as src, open(dest, "wb") as dst:
@@ -1394,13 +1375,12 @@ def import_pack(proj, path: str, replace: bool = False) -> dict:
     else:
         pack_path = os.path.join(folder, "pack.json")
     if not os.path.isfile(pack_path):
-        raise ValueError("Pack folder has no pack.json")
+        raise ValueError("Thư mục pack không có pack.json")
     with open(pack_path, encoding="utf-8") as fh:
         pack = json.load(fh)
     if not isinstance(pack, dict) or not isinstance(
             pack.get("items"), list):
-        raise ValueError("pack.json must be an object with an "
-                         "'items' list")
+        raise ValueError("pack.json phải là object có danh sách 'items'")
     library = proj.data.setdefault("library", [])
     existing = {e["id"] for e in library}
     added = []
@@ -1449,21 +1429,20 @@ def analyze_library_item(proj, entry_id: str, media_path=None) -> dict:
     entry = next((e for e in proj.data.get("library", [])
                   if e["id"] == entry_id), None)
     if entry is None:
-        raise KeyError(f"Unknown library item: {entry_id}")
+        raise KeyError(f"Mục thư viện không rõ: {entry_id}")
     if media_path is None:
         item = entry.get("item") or {}
         medium = next((m for m in proj.data["media"]
                        if m["id"] == item.get("media")), None)
         if medium is None:
             raise ValueError(
-                "Library item has no resolvable media file to "
-                "measure; pass media_path")
+                "Mục thư viện không có file media giải quyết được để đo; hãy truyền media_path")
         rel = medium.get("path") or ""
         media_path = rel if os.path.isabs(rel) else os.path.join(
             proj.folder, rel)
     if not os.path.isfile(media_path):
         raise FileNotFoundError(
-            f"Audio file not found: {media_path}")
+            f"Không tìm thấy file audio: {media_path}")
     from .analysis import decode_sound_levels, probe_tech
     from .render import find_tool
     tech = probe_tech(media_path)
@@ -1572,7 +1551,7 @@ def brand_pose_image(proj, brand: str, pose: str, image=None,
     an image.generate provider and stays unavailable; this is the
     image path only."""
     if not pose:
-        raise ValueError("library.brand-pose needs a pose name")
+        raise ValueError("library.brand-pose cần tên pose")
     if image is None and media_id is not None:
         medium = proj.media(media_id)
         rel = medium.get("path") or ""
@@ -1580,14 +1559,13 @@ def brand_pose_image(proj, brand: str, pose: str, image=None,
             proj.folder, rel)
     if image is None or not os.path.isfile(image):
         raise FileNotFoundError(
-            "library.brand-pose needs an existing image file or "
-            "media id")
+            "library.brand-pose cần file ảnh có sẵn hoặc media id")
     from .vision import cutout
     brand_dir = os.path.join(proj.folder, "brand")
     os.makedirs(brand_dir, exist_ok=True)
     safe_pose = re.sub(r"[^A-Za-z0-9_-]+", "-", pose).strip("-")
     if not safe_pose:
-        raise ValueError("Pose name has no usable characters")
+        raise ValueError("Tên pose không có ký tự dùng được")
     sticker = os.path.join(brand_dir, f"{safe_pose}.png")
     cutout(image, sticker)
     kit = proj.data.setdefault("brand", {})
@@ -1663,7 +1641,7 @@ def kit_install_skills(path: str, kit_dir=None) -> dict:
     candidates, _warnings = _discover(path)
     _mark_exists(candidates, folder)
     if not candidates:
-        raise ValueError("Kit skill source has no .md files")
+        raise ValueError("Nguồn skill kit không có file .md nào")
     installed = []
     refused = []
     for src in candidates:

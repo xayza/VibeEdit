@@ -102,13 +102,13 @@ def defer_update(version: str, remind_in_days: int = 7) -> dict:
     """
     version = str(version or "").strip()
     if not version:
-        raise ValueError("defer_update needs a version")
+        raise ValueError("defer_update cần version")
     try:
         days = int(remind_in_days)
     except (TypeError, ValueError) as exc:
-        raise ValueError("remind_in_days must be an integer") from exc
+        raise ValueError("remind_in_days phải là số nguyên") from exc
     if days < 0:
-        raise ValueError("remind_in_days must be >= 0")
+        raise ValueError("remind_in_days phải >= 0")
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     record = {"version": version,
               "deferred_at": now.isoformat().replace("+00:00", "Z"),
@@ -130,7 +130,7 @@ def skip_update(version: str) -> dict:
     """
     version = str(version or "").strip()
     if not version:
-        raise ValueError("skip_update needs a version")
+        raise ValueError("skip_update cần version")
     state = _read_state()
     skipped = [v for v in state.get("skipped_versions", [])
                if isinstance(v, str)]
@@ -175,9 +175,7 @@ def check_latest(channel: str | None = None) -> dict:
     url = channel or get_channel()
     if not url:
         raise UpdaterUnavailable(
-            "No updater channel is configured: set "
-            "VIBEEDIT_RELEASES_URL to a real VibeEdit releases API "
-            "URL first.")
+            "Chưa cấu hình kênh updater: hãy đặt VIBEEDIT_RELEASES_URL thành URL API releases VibeEdit thật trước.")
     request = urllib.request.Request(
         url, headers={"User-Agent": "VibeEdit-updater",
                       "Accept": "application/vnd.github+json"})
@@ -186,7 +184,7 @@ def check_latest(channel: str | None = None) -> dict:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
         raise UpdaterUnavailable(
-            f"Could not read the releases channel {url}: {exc}"
+            f"Không đọc được kênh releases {url}: {exc}"
         ) from exc
     if isinstance(payload, list) and payload:
         latest = payload[0]
@@ -209,9 +207,7 @@ def check_latest(channel: str | None = None) -> dict:
                 "update_available": version != CURRENT_VERSION,
                 "assets": payload.get("assets", [])}
     raise UpdaterUnavailable(
-        f"The releases channel {url} did not return a recognisable "
-        "release list (expected a GitHub releases array or a "
-        "{'version': ...} object).")
+        f"Kênh releases {url} không trả về danh sách release nhận dạng được (mong đợi mảng releases GitHub hoặc object {{'version': ...}}).")
 
 
 def download_release(url: str, dest: str,
@@ -237,12 +233,11 @@ def download_release(url: str, dest: str,
                 total += len(chunk)
     except Exception as exc:
         raise UpdaterUnavailable(
-            f"Could not download {url}: {exc}") from exc
+            f"Không tải được {url}: {exc}") from exc
     actual = digest.hexdigest()
     if sha256 and actual != sha256.lower():
         raise UpdaterUnavailable(
-            f"Download SHA-256 mismatch for {url}: expected "
-            f"{sha256}, got {actual}; the file is not trusted")
+            f"SHA-256 tải về không khớp cho {url}: mong đợi {sha256}, nhận được {actual}; file không đáng tin")
     return {"path": dest, "bytes": total, "sha256": actual}
 
 

@@ -1279,7 +1279,7 @@ $("btnReview").addEventListener("click", async () => {
     }
     box.textContent = lines.join(" ");
     setStatus("Đã làm mới review.");
-  } catch (err) { box.textContent = "Review failed: " + err.message; setStatus(err.message, true); }
+  } catch (err) { box.textContent = "Review thất bại: " + err.message; setStatus(err.message, true); }
 });
 $("btnTransitionPreview").addEventListener("click", async () => {
   const found = selectedId ? findItem(selectedId) : null;
@@ -1505,19 +1505,19 @@ $("btnTransitionPreview").addEventListener("click", async () => {
         track = d.result;
       }
       await api("/api/project", { op: "add_clip", media: $("voiceMedia").value, track: track.id, at: Number($("voiceAt").value), dur: null });
-      $("voiceResult").textContent = "Voiceover take added to the Voiceover track.";
+      $("voiceResult").textContent = "Đã thêm take voiceover vào track Voiceover.";
       setStatus("Đã thêm take voiceover."); await load();
-    } catch (err) { $("voiceResult").textContent = "Voiceover take failed: " + err.message; setStatus(err.message, true); }
+    } catch (err) { $("voiceResult").textContent = "Tạo take voiceover thất bại: " + err.message; setStatus(err.message, true); }
   });
   const cloneBtn = $("btnVoiceClone");
   if (cloneBtn) cloneBtn.addEventListener("click", async () => {
     const file = $("voiceRefFile") && $("voiceRefFile").files[0];
-    if (!file) { const msg = "Choose a reference audio file first. Note: voice cloning is not available in this Windows port yet."; $("voiceResult").textContent = msg; setStatus(msg, true); return; }
+    if (!file) { const msg = "Chọn file audio mẫu trước. Lưu ý: bản Windows này chưa có clone voice."; $("voiceResult").textContent = msg; setStatus(msg, true); return; }
     const fd = new FormData(); fd.append("file", file);
     const res = await fetch("/api/media/upload", { method: "POST", body: fd });
     const data = await res.json();
-    if (!res.ok) { $("voiceResult").textContent = "Upload failed: " + data.error; setStatus("Upload thất bại: " + data.error, true); return; }
-    $("voiceResult").textContent = "Reference audio imported as media (" + data.media.path + "). Voice cloning is not available yet — place it on the Voiceover track with the form below.";
+    if (!res.ok) { $("voiceResult").textContent = "Upload thất bại: " + data.error; setStatus("Upload thất bại: " + data.error, true); return; }
+    $("voiceResult").textContent = "Đã import audio mẫu thành media (" + data.media.path + "). Chưa có clone voice — đặt nó lên track Voiceover bằng form bên dưới.";
     setStatus("Đã import audio mẫu."); await load();
   });
   const genBtn = $("btnVoiceGenerate");
@@ -1571,9 +1571,9 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     }
   });
   const fitBtn = $("btnPreviewFit");
-  if (fitBtn && wrap) fitBtn.addEventListener("click", () => { wrap.classList.toggle("fit-contain"); setStatus(wrap.classList.contains("fit-contain") ? "Preview fit: contain." : "Preview fit: default."); });
+  if (fitBtn && wrap) fitBtn.addEventListener("click", () => { wrap.classList.toggle("fit-contain"); setStatus(wrap.classList.contains("fit-contain") ? "Xem trước: vừa khung." : "Xem trước: mặc định."); });
   const safeBtn = $("btnPreviewSafe"), safe = $("safeAreaOverlay");
-  if (safeBtn && safe) safeBtn.addEventListener("click", () => { safe.hidden = !safe.hidden; setStatus(safe.hidden ? "Safe-area guide hidden." : "Safe-area guide shown (display guide only, not a render setting)."); });
+  if (safeBtn && safe) safeBtn.addEventListener("click", () => { safe.hidden = !safe.hidden; setStatus(safe.hidden ? "Đã ẩn hướng dẫn safe area." : "Đã hiện hướng dẫn safe area (chỉ là lớp hướng dẫn hiển thị, không phải cài đặt render)."); });
   const cmpBtn = $("btnPreviewCompare");
   // Round 4: REAL Compare masked wipe, following the original
   // (EditorView+Viewer: a second player masked to one half +
@@ -1794,7 +1794,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
       : "Đã tắt Sections.");
   });
   const askBtn = $("tlAskAgent");
-  if (askBtn) askBtn.addEventListener("click", () => focusAgent(selectedId ? "Help with the selected clip" : "Help with this project"));
+  if (askBtn) askBtn.addEventListener("click", () => focusAgent(selectedId ? "Giúp với clip đang chọn" : "Giúp với project này"));
   const reportBtn = $("btnExportReport");
   if (reportBtn) reportBtn.addEventListener("click", () => {
     const tab = document.querySelector('[data-tab="ai"]'); if (tab) tab.click();
@@ -1973,7 +1973,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const wr = $("btnWelcomeReveal");
   if (wr) wr.addEventListener("click", async () => { try { const d = await api("/api/reveal", { folder: $("projectSelect") ? $("projectSelect").value : "" }); $("welcomeStatus").textContent = `Đã mở thư mục: ${d.path}`; } catch (err) { $("welcomeStatus").textContent = `Reveal thất bại: ${err.message}`; } });
   const wcp = $("btnWelcomeCopyPath");
-  if (wcp) wcp.addEventListener("click", async () => { try { const res = await fetch("/api/projects"); const d = await res.json(); await navigator.clipboard.writeText(d.current || ""); $("welcomeStatus").textContent = "Đã sao chép đường dẫn project hiện tại."; } catch (err) { $("welcomeStatus").textContent = `Copy thất bại: ${err.message}`; } });
+  if (wcp) wcp.addEventListener("click", async () => { try { const res = await fetch("/api/projects"); const d = await res.json(); await navigator.clipboard.writeText(d.current || ""); $("welcomeStatus").textContent = "Đã sao chép đường dẫn project hiện tại."; } catch (err) { $("welcomeStatus").textContent = `Sao chép thất bại: ${err.message}`; } });
 })();
 
 /* Round 3 wiring: knowledge/skills, vision, plugin install/download and
@@ -2076,7 +2076,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   }));
   const kg = $("btnKnowledgeGet");
   if (kg) kg.addEventListener("click", () => show(async () => {
-    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill / lesson id first."); return; }
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Nhập id skill / bài học trước."); return; }
     try {
       // Round 23: skill detail renders markdown, never raw JSON.
       const d = await post({ op: "skills_get", skill: id });
@@ -2089,19 +2089,19 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   }));
   const kd = $("btnKnowledgeSkillDisable");
   if (kd) kd.addEventListener("click", () => show(async () => {
-    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Nhập id skill trước."); return; }
     await post({ op: "skills_disable", skill: id }); out("knowledgeResult", `Skill ${id} disabled.`);
   }));
   const ke = $("btnKnowledgeSkillEnable");
   if (ke) ke.addEventListener("click", () => show(async () => {
-    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Nhập id skill trước."); return; }
     await post({ op: "skills_enable", skill: id }); out("knowledgeResult", `Skill ${id} enabled.`);
   }));
   const kr = $("btnKnowledgeSkillRemove");
   if (kr) kr.addEventListener("click", () => show(async () => {
-    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Enter a skill id first."); return; }
+    const id = $("knowledgeId").value.trim(); if (!id) { out("knowledgeResult", "Nhập id skill trước."); return; }
     const confirmBox = $("knowledgeRemoveConfirm");
-    if (!confirmBox || !confirmBox.checked) { out("knowledgeResult", "Tick the confirm checkbox first — skill remove is irreversible except via git."); return; }
+    if (!confirmBox || !confirmBox.checked) { out("knowledgeResult", "Tick ô xác nhận xóa trước — xóa skill không khôi phục được trừ khi dùng git."); return; }
     await post({ op: "skills_remove", skill: id, confirm: true }); out("knowledgeResult", `Skill ${id} removed.`);
   }));
   // Round 23: skill import preview (ticked rows only) + install.
@@ -2150,7 +2150,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
     // Round 22: every panel action also overwrites the status
     // toast, so it never keeps a stale message from an earlier
     // panel (the toast itself still auto-hides after 4s).
-    if (!media) { out("visionResult", "Choose a media item first."); setStatus("Chọn một media trước.", true); return; }
+    if (!media) { out("visionResult", "Chọn một media trước."); setStatus("Chọn một media trước.", true); return; }
     try { const d = await post(Object.assign({ op, media }, extra || {})); out("visionResult", JSON.stringify(d.result, null, 2)); setStatus(`Vision xong (${op}) — kết quả ở panel Vision.`); }
     catch (err) { out("visionResult", err.message); setStatus(err.message, true); }
   };
@@ -2159,7 +2159,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const vc = $("btnVisionCutout"); if (vc) vc.addEventListener("click", () => vision("vision_cutout"));
   const vm = $("btnVisionCutoutModel"); if (vm) vm.addEventListener("click", () => {
     const model = $("visionModelPath") ? $("visionModelPath").value.trim() : "";
-    if (!model) { out("visionResult", "Enter a user-supplied ONNX model path first — no model is bundled."); return; }
+    if (!model) { out("visionResult", "Nhập đường dẫn model ONNX do người dùng cung cấp trước — app không kèm sẵn model nào."); return; }
     vision("vision_cutout_model", { model });
   });
   const pif = $("pluginInstallForm");
@@ -2171,7 +2171,7 @@ $("btnTransitionPreview").addEventListener("click", async () => {
   const pdf = $("pluginDownloadForm");
   if (pdf) pdf.addEventListener("submit", (e) => { e.preventDefault(); (async () => {
     try {
-      if (!$("pluginDownloadConfirm").checked) { out("pluginInstallResult", "Tick the confirm checkbox first — download only, never installs."); return; }
+      if (!$("pluginDownloadConfirm").checked) { out("pluginInstallResult", "Tick ô xác nhận trước — chỉ tải về, không cài đặt."); return; }
       const d = await post({ op: "plugin_download", url: $("pluginDownloadUrl").value.trim(), confirm: true });
       out("pluginInstallResult", `Downloaded only (not installed): ${JSON.stringify(d.result)}`);
     } catch (err) { out("pluginInstallResult", err.message); }

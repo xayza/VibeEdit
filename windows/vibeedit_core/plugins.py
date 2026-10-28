@@ -71,13 +71,13 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
         try:
             spec = importlib.util.spec_from_file_location(mod_name, path)
             if spec is None or spec.loader is None:
-                raise ImportError(f"Cannot load plugin module: {path}")
+                raise ImportError(f"Không tải được module plugin: {path}")
             module = importlib.util.module_from_spec(spec)
             sys.modules[mod_name] = module
             spec.loader.exec_module(module)
             info = module.register()
             if not isinstance(info, dict) or "name" not in info:
-                raise ValueError("register() must return a dict with 'name'")
+                raise ValueError("register() phải trả về dict có 'name'")
             plugins[str(info["name"])] = info
         except Exception as exc:  # noqa: BLE001 - one bad plugin
             errors[name] = str(exc)
@@ -115,7 +115,7 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
                 if not isinstance(sidecar, dict) \
                         or sidecar.get("registry_id") != name:
                     raise ValueError(
-                        "registry sidecar id does not match folder")
+                        "id sidecar registry không khớp thư mục")
                 plugins[name] = {
                     "name": name,
                     "display_name": name,
@@ -136,16 +136,16 @@ def load_plugins(plugins_dir: str | None = None) -> dict[str, dict]:
             with open(manifest_path, encoding="utf-8") as fh:
                 manifest = _json.load(fh)
             if not isinstance(manifest, dict):
-                raise ValueError("plugin.json must be an object")
+                raise ValueError("plugin.json phải là object")
             pid = manifest.get("id") or name
             if not isinstance(pid, str) or not SAFE_ID_RE.match(pid):
-                raise ValueError(f"unsafe manifest id: {pid!r}")
+                raise ValueError(f"id manifest không an toàn: {pid!r}")
             hooks = manifest.get("hooks")
             if hooks is None:
                 hooks = []
             if not isinstance(hooks, list) or \
                     not all(isinstance(h, str) for h in hooks):
-                raise ValueError("manifest hooks must be a list of strings")
+                raise ValueError("hooks của manifest phải là danh sách chuỗi")
             entry_info: dict = {
                 "name": pid,
                 "display_name": manifest.get("name", pid),
@@ -213,7 +213,7 @@ def set_plugin_enabled(name: str, enabled: bool,
     plugin (unknown names error, never silently create an entry)."""
     plugins = load_plugins(plugins_dir)
     if name not in plugins:
-        raise KeyError(f"Unknown plugin: {name!r}")
+        raise KeyError(f"Plugin không rõ: {name!r}")
     # Round 15: registry records are review-only and can never be
     # enabled -- they have no Windows-runnable entry, and enabling
     # one would be the first step toward executing macOS provider
@@ -221,9 +221,7 @@ def set_plugin_enabled(name: str, enabled: bool,
     # stays allowed (it is the overwrite precondition for updates).
     if plugins[name].get("registry") and enabled:
         raise ValueError(
-            f"Registry plugin {name!r} cannot be enabled: it has no "
-            "Windows-runnable entry (review-only record; see "
-            "vibeedit-registry.json in its folder)")
+            f"Plugin registry {name!r} không bật được: nó không có entry chạy được trên Windows (bản ghi chỉ để xem lại; xem vibeedit-registry.json trong thư mục của nó)")
     import json as _json
     state = load_plugin_state(plugins_dir)
     disabled = set(state.get("disabled", []))
@@ -274,7 +272,7 @@ def get_plugin_options(plugin_name: str,
     """
     plugins = load_plugins(plugins_dir)
     if plugin_name not in plugins:
-        raise KeyError(f"Unknown plugin: {plugin_name!r}")
+        raise KeyError(f"Plugin không rõ: {plugin_name!r}")
     info = plugins[plugin_name]
     raw = info.get("options")
     if raw is None:
@@ -283,29 +281,26 @@ def get_plugin_options(plugin_name: str,
         return []
     if not isinstance(raw, list):
         raise ValueError(
-            f"Plugin {plugin_name!r} options must be a list")
+            f"Plugin {plugin_name!r} options phải là danh sách")
     schema: list[dict] = []
     seen: set[str] = set()
     for entry in raw:
         if not isinstance(entry, dict):
             raise ValueError(
-                f"Plugin {plugin_name!r} has a non-object option entry")
+                f"Plugin {plugin_name!r} có entry tùy chọn không phải object")
         oid = entry.get("id")
         if not isinstance(oid, str) or not oid or oid in seen:
             raise ValueError(
-                f"Plugin {plugin_name!r} has a bad/duplicate option id: "
-                f"{oid!r}")
+                f"Plugin {plugin_name!r} có id tùy chọn xấu/trùng lặp: {oid!r}")
         seen.add(oid)
         otype = entry.get("type", "string")
         if otype not in OPTION_TYPES:
             raise ValueError(
-                f"Plugin {plugin_name!r} option {oid!r} has unknown "
-                f"type {otype!r}")
+                f"Plugin {plugin_name!r} tùy chọn {oid!r} có kiểu không rõ {otype!r}")
         scope = entry.get("scope", "user")
         if scope not in ("user", "project"):
             raise ValueError(
-                f"Plugin {plugin_name!r} option {oid!r} has unknown "
-                f"scope {scope!r}")
+                f"Plugin {plugin_name!r} tùy chọn {oid!r} có phạm vi không rõ {scope!r}")
         norm: dict = {"id": oid, "type": otype, "scope": scope,
                       "default": entry.get("default"),
                       "description": entry.get("description", "")}
@@ -313,8 +308,7 @@ def get_plugin_options(plugin_name: str,
             choices = entry.get("choices")
             if not isinstance(choices, list) or not choices:
                 raise ValueError(
-                    f"Plugin {plugin_name!r} choice option {oid!r} "
-                    "needs a non-empty choices list")
+                    f"Plugin {plugin_name!r} tùy chọn choice {oid!r} cần danh sách choices không rỗng")
             norm["choices"] = list(choices)
         schema.append(norm)
     return schema
@@ -337,29 +331,28 @@ def coerce_plugin_option_value(option: dict, value):
         if text in ("off", "false", "no", "0"):
             return False
         raise ValueError(
-            f"Option {oid!r} needs on/off (got {value!r})")
+            f"Tùy chọn {oid!r} cần on/off (nhận được {value!r})")
     if otype == "number":
         try:
             return float(value)
         except (TypeError, ValueError):
             raise ValueError(
-                f"Option {oid!r} needs a number (got {value!r})") from None
+                f"Tùy chọn {oid!r} cần một số (nhận được {value!r})") from None
     if otype == "integer":
         try:
             number = float(value)
         except (TypeError, ValueError):
             raise ValueError(
-                f"Option {oid!r} needs an integer (got {value!r})") from None
+                f"Tùy chọn {oid!r} cần một số nguyên (nhận được {value!r})") from None
         if number != int(number):
             raise ValueError(
-                f"Option {oid!r} needs an integer (got {value!r})")
+                f"Tùy chọn {oid!r} cần một số nguyên (nhận được {value!r})")
         return int(number)
     if otype == "choice":
         text = str(value)
         if text not in option["choices"]:
             raise ValueError(
-                f"Option {oid!r} must be one of "
-                f"{option['choices']} (got {value!r})")
+                f"Tùy chọn {oid!r} phải là một trong {option['choices']} (nhận được {value!r})")
         return text
     return str(value)
 
@@ -410,7 +403,7 @@ def set_plugin_option(plugin_name: str, option_id: str, value,
     option = next((o for o in schema if o["id"] == option_id), None)
     if option is None:
         raise ValueError(
-            f"Unknown option {option_id!r} for plugin {plugin_name!r}")
+            f"Tùy chọn không rõ {option_id!r} cho plugin {plugin_name!r}")
     if value is None:
         effective = option["default"]
         reset = True
@@ -420,8 +413,7 @@ def set_plugin_option(plugin_name: str, option_id: str, value,
     if option["scope"] == "project":
         if not isinstance(project_data, dict):
             raise ValueError(
-                f"Option {option_id!r} is project-scope; open a "
-                "project first")
+                f"Tùy chọn {option_id!r} thuộc phạm vi project; hãy mở project trước")
         all_project = project_data.get("plugin_options")
         if not isinstance(all_project, dict):
             all_project = {}
@@ -488,8 +480,7 @@ def apply_plugin(project, plugin_name: str, hook: str,
     plugins = load_plugins(plugins_dir)
     if plugin_name not in plugins:
         raise KeyError(
-            f"Unknown plugin: {plugin_name!r} "
-            f"(available: {', '.join(sorted(k for k in plugins if not k.startswith('_')))})")
+            f"Plugin không rõ: {plugin_name!r} (có sẵn: {', '.join(sorted(k for k in plugins if not k.startswith('_')))})")
     if plugin_name in set(load_plugin_state(plugins_dir).get("disabled", [])):
         raise ValueError(f"Plugin {plugin_name!r} is disabled; enable it first")
     info = plugins[plugin_name]
@@ -504,21 +495,17 @@ def apply_plugin(project, plugin_name: str, hook: str,
         # instead of pretending a hook ran.
         if info.get("entry_error"):
             raise ValueError(
-                f"Plugin {plugin_name!r} entry failed to load: "
-                f"{info['entry_error']}")
+                f"Plugin {plugin_name!r} entry tải thất bại: {info['entry_error']}")
         if hook not in (info.get("manifest_hooks") or []):
             raise ValueError(
-                f"Plugin {plugin_name!r} does not declare hook "
-                f"{hook!r} in its manifest")
+                f"Plugin {plugin_name!r} không khai báo hook {hook!r} trong manifest của nó")
         if not callable(info.get(hook)):
             raise ValueError(
-                f"Plugin {plugin_name!r} declares hook {hook!r} but "
-                "its entry module does not provide it (manifest "
-                "plugins without an 'entry' are not executable)")
+                f"Plugin {plugin_name!r} khai báo hook {hook!r} nhưng module entry của nó không cung cấp hook đó (plugin manifest thiếu 'entry' thì không chạy được)")
     fn = info.get(hook)
     if not callable(fn):
         raise ValueError(
-            f"Plugin {plugin_name!r} has no hook {hook!r}")
+            f"Plugin {plugin_name!r} không có hook {hook!r}")
     _, item = project.item(item_id)
     result = fn(project, item_id)
     # Round 8 proposal convention: a hook that wants its edit
@@ -599,8 +586,7 @@ def _validate_id(plugin_id) -> str:
     if not isinstance(plugin_id, str) or not plugin_id \
             or not SAFE_ID_RE.match(plugin_id):
         raise ValueError(
-            "plugin.json 'id' must be a non-empty string using only "
-            "letters, digits, '-' and '_'")
+            "plugin.json 'id' phải là chuỗi không rỗng chỉ dùng chữ cái, chữ số, '-' và '_'")
     return plugin_id
 
 
@@ -612,22 +598,20 @@ def _validate_manifest(data, *, source_label: str) -> dict:
     """
     if not isinstance(data, dict):
         raise ValueError(
-            f"plugin.json in {source_label!r} must be a JSON object")
+            f"plugin.json trong {source_label!r} phải là object JSON")
     plugin_id = _validate_id(data.get("id"))
     name = data.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ValueError(
-            f"plugin.json in {source_label!r} must have a non-empty "
-            "string 'name'")
+            f"plugin.json trong {source_label!r} phải có 'name' dạng chuỗi không rỗng")
     hooks = data.get("hooks")
     if not isinstance(hooks, list):
         raise ValueError(
-            f"plugin.json in {source_label!r} must have a 'hooks' list")
+            f"plugin.json trong {source_label!r} phải có danh sách 'hooks'")
     for hook in hooks:
         if not isinstance(hook, str) or not hook.strip():
             raise ValueError(
-                f"plugin.json in {source_label!r} has a non-string or "
-                "empty entry in 'hooks'")
+                f"plugin.json trong {source_label!r} có entry không phải chuỗi hoặc rỗng trong 'hooks'")
     # Round 4: an optional "entry" declares the code module that
     # implements the hooks. It must be a plain file name inside the
     # plugin folder (no directories, no traversal, *.py only) so a
@@ -638,9 +622,7 @@ def _validate_manifest(data, *, source_label: str) -> dict:
                 or entry != os.path.basename(entry) \
                 or entry in (".", ".."):
             raise ValueError(
-                f"plugin.json in {source_label!r} has an unsafe 'entry' "
-                f"{entry!r}: it must be a plain *.py file name inside "
-                "the plugin folder")
+                f"plugin.json trong {source_label!r} có 'entry' không an toàn {entry!r}: nó phải là tên file *.py thường bên trong thư mục plugin")
     # Round 8: optional "actions" (editor actions the plugin adds)
     # and "views" (JSON component models for the plugin's panels).
     # Both are validated here so a bad declaration fails the
@@ -649,7 +631,7 @@ def _validate_manifest(data, *, source_label: str) -> dict:
     if actions is not None:
         if not isinstance(actions, list):
             raise ValueError(
-                f"plugin.json in {source_label!r} has non-list 'actions'")
+                f"plugin.json trong {source_label!r} có 'actions' không phải danh sách")
         for action in actions:
             if not isinstance(action, dict) \
                     or not isinstance(action.get("id"), str) \
@@ -657,31 +639,27 @@ def _validate_manifest(data, *, source_label: str) -> dict:
                     or not isinstance(action.get("hook"), str) \
                     or not action["hook"]:
                 raise ValueError(
-                    f"plugin.json in {source_label!r} has an action "
-                    "without a string 'id' and 'hook'")
+                    f"plugin.json trong {source_label!r} có action thiếu 'id' và 'hook' dạng chuỗi")
             params = action.get("parameters")
             if params is not None and not isinstance(params, dict):
                 raise ValueError(
-                    f"plugin.json in {source_label!r} has an action "
-                    "whose 'parameters' is not a JSON Schema object")
+                    f"plugin.json trong {source_label!r} có action mà 'parameters' không phải object JSON Schema")
     views = data.get("views")
     if views is not None:
         if not isinstance(views, list):
             raise ValueError(
-                f"plugin.json in {source_label!r} has non-list 'views'")
+                f"plugin.json trong {source_label!r} có 'views' không phải danh sách")
         for view in views:
             if not isinstance(view, dict) \
                     or not isinstance(view.get("id"), str) \
                     or not view["id"]:
                 raise ValueError(
-                    f"plugin.json in {source_label!r} has a view "
-                    "without a string 'id'")
+                    f"plugin.json trong {source_label!r} có view thiếu 'id' dạng chuỗi")
             components = view.get("components")
             if components is not None:
                 if not isinstance(components, list):
                     raise ValueError(
-                        f"plugin.json in {source_label!r} has a view "
-                        "whose 'components' is not a list")
+                        f"plugin.json trong {source_label!r} có view mà 'components' không phải danh sách")
                 for comp in components:
                     if not isinstance(comp, dict) \
                             or not isinstance(comp.get("id"), str) \
@@ -689,9 +667,7 @@ def _validate_manifest(data, *, source_label: str) -> dict:
                             or comp.get("kind") not in (
                                 "text", "input", "button", "list"):
                         raise ValueError(
-                            f"plugin.json in {source_label!r} has a "
-                            "view component without a string 'id' and "
-                            "a kind of text/input/button/list")
+                            f"plugin.json trong {source_label!r} có thành phần view thiếu 'id' dạng chuỗi và kind thuộc text/input/button/list")
     return data
 
 
@@ -709,20 +685,18 @@ def _load_manifest_entry(pid: str, folder: str, entry: str) -> dict:
     path = os.path.join(folder, entry)
     if not os.path.isfile(path):
         raise ValueError(
-            f"Manifest plugin {pid!r} declares entry {entry!r} but "
-            f"the file is missing from its folder")
+            f"Manifest plugin {pid!r} khai báo entry {entry!r} nhưng file thiếu trong thư mục của nó")
     mod_name = f"vibeedit_manifest_{pid}"
     spec = importlib.util.spec_from_file_location(mod_name, path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load plugin entry module: {path}")
+        raise ImportError(f"Không tải được module entry plugin: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[mod_name] = module
     spec.loader.exec_module(module)
     info = module.register()
     if not isinstance(info, dict) or "name" not in info:
         raise ValueError(
-            f"Manifest plugin {pid!r} entry register() must return a "
-            "dict with 'name'")
+            f"Manifest plugin {pid!r} entry register() phải trả về dict có 'name'")
     return info
 
 
@@ -731,7 +705,7 @@ def _parse_manifest_bytes(raw: bytes, *, source_label: str) -> dict:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(
-            f"plugin.json in {source_label!r} is not valid JSON: {exc}"
+            f"plugin.json trong {source_label!r} không phải JSON hợp lệ: {exc}"
         ) from exc
     return _validate_manifest(data, source_label=source_label)
 
@@ -742,19 +716,15 @@ def _warnings_for_manifest(manifest: dict, *, has_code_files: bool) -> list[str]
     always untrusted until a human has reviewed it)."""
     plugin_id = manifest["id"]
     warnings = [
-        f"Plugin '{plugin_id}' is new/untrusted: installed from an "
-        "untrusted source; review its files before enabling it.",
+        f"Plugin '{plugin_id}' is new/untrusted: installed from an untrusted source; review its files before enabling it.",
     ]
     hooks = manifest.get("hooks") or []
     if hooks:
         warnings.append(
-            f"Plugin declares code hooks ({', '.join(hooks)}); plugin "
-            "code was NOT executed during install or validation.")
+            f"Plugin declares code hooks ({', '.join(hooks)}); plugin code was NOT executed during install or validation.")
     if has_code_files:
         warnings.append(
-            "Plugin bundle contains Python (.py) code files; they "
-            "were copied as inert files and were NOT executed during "
-            "install or validation.")
+            "Gói plugin chứa file code Python (.py); chúng chỉ được sao chép dưới dạng file trơ và đã KHÔNG được chạy trong lúc cài đặt hay kiểm tra.")
     if not isinstance(manifest.get("description"), str) \
             or not manifest["description"].strip():
         warnings.append("Manifest has no description.")
@@ -807,7 +777,7 @@ def _check_dest_within_plugins(dest: str, plugins_dir: str | None) -> None:
     folder = _plugins_folder(plugins_dir)
     if os.path.commonpath([folder, dest]) != folder \
             or os.path.dirname(dest) != folder:
-        raise ValueError("Plugin destination escapes the plugins folder")
+        raise ValueError("Thư mục đích plugin thoát khỏi thư mục plugins")
 
 
 def _existing_folder_id(plugin_id: str, plugins_dir: str | None) -> str | None:
@@ -831,7 +801,7 @@ def _check_no_symlink_escape(root: str, path: str, *, label: str) -> None:
     resolved = os.path.realpath(path)
     if os.path.commonpath([resolved_root, resolved]) != resolved_root:
         raise ValueError(
-            f"{label}: symlink escapes the bundle: {path!r}")
+            f"{label}: symlink thoát khỏi gói: {path!r}")
 
 
 def _scan_folder_source(source_dir: str) -> list[str]:
@@ -850,8 +820,7 @@ def _scan_folder_source(source_dir: str) -> list[str]:
                 _check_no_symlink_escape(source_dir, full,
                                          label="folder source")
                 raise ValueError(
-                    f"folder source: symlinked directory not supported: "
-                    f"{os.path.relpath(full, source_dir)!r}")
+                    f"nguồn thư mục: không hỗ trợ thư mục symlink: {os.path.relpath(full, source_dir)!r}")
         for name in names:
             full = os.path.join(root, name)
             if os.path.islink(full):
@@ -859,12 +828,10 @@ def _scan_folder_source(source_dir: str) -> list[str]:
                                          label="folder source")
                 if not os.path.isfile(full):
                     raise ValueError(
-                        "folder source: symlink does not point to a "
-                        f"regular file: {os.path.relpath(full, source_dir)!r}")
+                        f"nguồn thư mục: symlink không trỏ tới file thường: {os.path.relpath(full, source_dir)!r}")
             elif not os.path.isfile(full):
                 raise ValueError(
-                    "folder source: not a regular file: "
-                    f"{os.path.relpath(full, source_dir)!r}")
+                    f"nguồn thư mục: không phải file thường: {os.path.relpath(full, source_dir)!r}")
             files.append(os.path.relpath(full, source_dir))
     return sorted(files)
 
@@ -874,15 +841,15 @@ def _check_zip_entry_name(name: str) -> None:
     and empty path components in a zip entry name."""
     if not name or name.startswith("/") or name.startswith("\\") \
             or _DRIVE_RE.match(name) or "\\" in name:
-        raise ValueError(f"zip bundle: unsafe entry name: {name!r}")
+        raise ValueError(f"gói zip: tên entry không an toàn: {name!r}")
     parts = name.split("/")
     for part in parts[:-1]:
         if part in ("", ".", ".."):
-            raise ValueError(f"zip bundle: unsafe entry name: {name!r}")
+            raise ValueError(f"gói zip: tên entry không an toàn: {name!r}")
     if parts[-1] in ("", ".", "..") and not name.endswith("/"):
-        raise ValueError(f"zip bundle: unsafe entry name: {name!r}")
+        raise ValueError(f"gói zip: tên entry không an toàn: {name!r}")
     if parts[-1] == "..":
-        raise ValueError(f"zip bundle: unsafe entry name: {name!r}")
+        raise ValueError(f"gói zip: tên entry không an toàn: {name!r}")
 
 
 def _scan_zip_source(zip_path: str):
@@ -897,15 +864,14 @@ def _scan_zip_source(zip_path: str):
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as exc:
-        raise ValueError(f"Not a valid .zip bundle: {zip_path!r}") from exc
+        raise ValueError(f"Không phải gói .zip hợp lệ: {zip_path!r}") from exc
     with zf:
         infos = zf.infolist()
         for info in infos:
             _check_zip_entry_name(info.filename)
             if (info.external_attr >> 16) & _FILE_TYPE_MASK == _SYMLINK_MODE:
                 raise ValueError(
-                    f"zip bundle: symlink entry rejected: "
-                    f"{info.filename!r}")
+                    f"gói zip: đã từ chối entry symlink: {info.filename!r}")
         files = [i for i in infos if not i.filename.endswith("/")]
         manifest_names = []
         for info in files:
@@ -916,19 +882,17 @@ def _scan_zip_source(zip_path: str):
                 manifest_names.append((info, parts[0] + "/"))
         if not manifest_names:
             raise ValueError(
-                "zip bundle: no plugin.json at the root or in exactly "
-                "one top-level folder")
+                "gói zip: không có plugin.json ở gốc hay trong đúng một thư mục cấp cao nhất")
         roots = {root for _, root in manifest_names}
         if len(roots) != 1:
             raise ValueError(
-                "zip bundle: plugin.json found in multiple top-level "
-                "folders; bundle must contain exactly one plugin")
+                "gói zip: tìm thấy plugin.json trong nhiều thư mục cấp cao nhất; gói phải chứa đúng một plugin")
         manifest_info, root = manifest_names[0]
         try:
             raw = zf.read(manifest_info)
         except (KeyError, RuntimeError) as exc:
             raise ValueError(
-                f"zip bundle: cannot read plugin.json: {exc}") from exc
+                f"gói zip: không đọc được plugin.json: {exc}") from exc
         manifest = _parse_manifest_bytes(raw, source_label=zip_path)
         entries: list[tuple[str, zipfile.ZipInfo]] = []
         seen: set[str] = set()
@@ -936,14 +900,13 @@ def _scan_zip_source(zip_path: str):
         for info in files:
             if not info.filename.startswith(root):
                 raise ValueError(
-                    "zip bundle: file outside the plugin folder: "
-                    f"{info.filename!r}")
+                    f"gói zip: file nằm ngoài thư mục plugin: {info.filename!r}")
             rel = info.filename[len(root):]
             if not rel:
                 continue
             if rel.lower() in seen:
                 raise ValueError(
-                    f"zip bundle: duplicate entry for {rel!r}")
+                    f"gói zip: entry trùng lặp cho {rel!r}")
             seen.add(rel.lower())
             total += info.file_size
             if total > MAX_BUNDLE_BYTES:
@@ -964,7 +927,7 @@ def _copy_validated_folder(source_dir: str, dest: str,
         target = os.path.join(dest, rel)
         if os.path.commonpath([os.path.abspath(dest), os.path.abspath(target)]) \
                 != os.path.abspath(dest):
-            raise ValueError(f"folder source: unsafe path: {rel!r}")
+            raise ValueError(f"nguồn thư mục: đường dẫn không an toàn: {rel!r}")
         os.makedirs(os.path.dirname(target), exist_ok=True)
         # copyfile follows internal symlinks and writes plain bytes;
         # no symlink is ever recreated in the destination.
@@ -980,7 +943,7 @@ def _copy_validated_zip(zip_path: str, dest: str,
             target = os.path.join(dest, *rel.split("/"))
             target_abs = os.path.abspath(target)
             if os.path.commonpath([dest_abs, target_abs]) != dest_abs:
-                raise ValueError(f"zip bundle: unsafe path: {rel!r}")
+                raise ValueError(f"gói zip: đường dẫn không an toàn: {rel!r}")
             os.makedirs(os.path.dirname(target_abs), exist_ok=True)
             with zf.open(info, "r") as src, open(target_abs, "wb") as out:
                 shutil.copyfileobj(src, out)
@@ -1026,26 +989,22 @@ def install_plugin(source, plugins_dir: str | None = None,
     """
     if isinstance(source, str) and _URL_RE.match(source.strip()):
         raise ValueError(
-            "install_plugin never downloads: a URL source must be "
-            "downloaded first with download_plugin_bundle() (gated "
-            "behind user confirmation) and then installed from the "
-            "downloaded bundle; pass the URL as source_label to "
-            "record it as metadata only")
+            "install_plugin không bao giờ tải về: nguồn URL phải được tải trước bằng download_plugin_bundle() (cần người dùng xác nhận) rồi mới cài từ gói đã tải; truyền URL qua source_label để chỉ ghi lại dạng metadata")
     src = os.fspath(source)
     if not os.path.exists(src):
-        raise FileNotFoundError(f"Plugin source not found: {src!r}")
+        raise FileNotFoundError(f"Không tìm thấy nguồn plugin: {src!r}")
     recorded = source_label if source_label is not None else str(source)
 
     if os.path.isdir(src):
         manifest_path = os.path.join(src, "plugin.json")
         if not os.path.isfile(manifest_path):
             raise ValueError(
-                f"folder source has no plugin.json at its root: {src!r}")
+                f"nguồn thư mục không có plugin.json ở gốc: {src!r}")
         rel_files = _scan_folder_source(src)
         if "plugin.json" not in {r.replace(os.sep, "/") for r in rel_files} \
                 and not os.path.isfile(manifest_path):
             raise ValueError(
-                f"folder source has no plugin.json at its root: {src!r}")
+                f"nguồn thư mục không có plugin.json ở gốc: {src!r}")
         with open(manifest_path, "rb") as fh:
             manifest = _parse_manifest_bytes(fh.read(), source_label=src)
         has_code = any(r.lower().endswith(".py") for r in rel_files)
@@ -1056,8 +1015,7 @@ def install_plugin(source, plugins_dir: str | None = None,
         bundle_kind = "zip"
     else:
         raise ValueError(
-            "Plugin source must be a folder containing plugin.json "
-            f"or a .zip bundle, not: {src!r}")
+            f"Nguồn plugin phải là thư mục chứa plugin.json hoặc gói .zip, không phải: {src!r}")
 
     # Round 4: a declared entry must actually be in the bundle, or
     # the install is rejected before anything is copied (a plugin
@@ -1070,9 +1028,7 @@ def install_plugin(source, plugins_dir: str | None = None,
             bundle_names = {rel for rel, _ in entries}
         if manifest["entry"] not in bundle_names:
             raise ValueError(
-                f"Plugin manifest declares entry "
-                f"{manifest['entry']!r} but the bundle does not "
-                "contain that file")
+                f"Manifest plugin khai báo entry {manifest['entry']!r} nhưng gói không chứa file đó")
 
     plugin_id = manifest["id"]
     dest = _dest_for(plugin_id, plugins_dir)
@@ -1080,20 +1036,18 @@ def install_plugin(source, plugins_dir: str | None = None,
     folder = _plugins_folder(plugins_dir)
     if os.path.realpath(src) == os.path.realpath(dest) \
             and os.path.exists(dest):
-        raise ValueError("Plugin source is already the install destination")
+        raise ValueError("Nguồn plugin đã là thư mục đích cài đặt")
     existing = _existing_folder_id(plugin_id, plugins_dir)
     if existing is not None:
         if not overwrite:
             raise ValueError(
-                f"Plugin id {plugin_id!r} already exists; pass "
-                "overwrite=True to replace it")
+                f"Id plugin {plugin_id!r} đã tồn tại; truyền overwrite=True để thay thế")
         disabled = _disabled_ids(plugins_dir)
         # The stored folder name may differ in case from the id;
         # disabled under either spelling counts as disabled.
         if plugin_id not in disabled and existing not in disabled:
             raise ValueError(
-                f"Plugin {plugin_id!r} is enabled; disable it first "
-                "before overwriting")
+                f"Plugin {plugin_id!r} đang bật; hãy tắt nó trước khi ghi đè")
         # Remove the old folder only now, after all validation.
         old_dest = os.path.join(folder, existing)
         _check_dest_within_plugins(old_dest, plugins_dir)
@@ -1141,11 +1095,10 @@ def remove_plugin(plugin_id: str, plugins_dir: str | None = None) -> dict:
     dest = os.path.join(folder, plugin_id)
     _check_dest_within_plugins(dest, plugins_dir)
     if not os.path.isdir(dest):
-        raise KeyError(f"No installed plugin folder for id {plugin_id!r}")
+        raise KeyError(f"Không có thư mục plugin đã cài cho id {plugin_id!r}")
     if plugin_id not in _disabled_ids(plugins_dir):
         raise ValueError(
-            f"Plugin {plugin_id!r} is enabled; disable it first "
-            "before removing it")
+            f"Plugin {plugin_id!r} đang bật; hãy tắt nó trước khi xóa")
     shutil.rmtree(dest)
     _set_disabled(plugin_id, False, plugins_dir)
     return {"id": plugin_id, "removed": True, "path": dest}
@@ -1156,7 +1109,7 @@ def _load_installed_manifest(plugin_id: str,
     dest = os.path.join(_plugins_folder(plugins_dir), plugin_id)
     manifest_path = os.path.join(dest, "plugin.json")
     if not os.path.isdir(dest) or not os.path.isfile(manifest_path):
-        raise KeyError(f"No installed plugin folder for id {plugin_id!r}")
+        raise KeyError(f"Không có thư mục plugin đã cài cho id {plugin_id!r}")
     with open(manifest_path, "rb") as fh:
         return _parse_manifest_bytes(fh.read(),
                                      source_label=manifest_path)
@@ -1220,18 +1173,16 @@ def download_plugin_bundle(url: str, dest,
     import urllib.error
 
     if not isinstance(url, str):
-        raise ValueError("URL must be a string")
+        raise ValueError("URL phải là chuỗi")
     parsed = urllib.parse.urlparse(url.strip())
     if parsed.scheme.lower() not in ("http", "https") \
             or not parsed.netloc or parsed.username is not None \
             or parsed.password is not None:
         raise ValueError(
-            "Plugin bundle URL must be an http(s) URL without "
-            "embedded credentials")
+            "URL gói plugin phải là URL http(s) không nhúng thông tin đăng nhập")
     dest_path = os.fspath(dest)
     if os.path.exists(dest_path):
-        raise FileExistsError(f"Download destination already exists: "
-                              f"{dest_path!r}")
+        raise FileExistsError(f"Thư mục đích tải về đã tồn tại: {dest_path!r}")
     parent = os.path.dirname(os.path.abspath(dest_path))
     os.makedirs(parent, exist_ok=True)
     tmp_path = dest_path + ".part"
@@ -1241,20 +1192,18 @@ def download_plugin_bundle(url: str, dest,
         try:
             response = urllib.request.urlopen(request, timeout=timeout)
         except urllib.error.URLError as exc:
-            raise ValueError(f"Plugin bundle download failed: {exc}") \
+            raise ValueError(f"Tải gói plugin thất bại: {exc}") \
                 from exc
         with response:
             if getattr(response, "status", 200) != 200:
                 raise ValueError(
-                    "Plugin bundle download failed: HTTP "
-                    f"{getattr(response, 'status', '?')}")
+                    f"Tải gói plugin thất bại: HTTP {getattr(response, 'status', '?')}")
             content_type = response.headers.get("Content-Type")
             if content_type:
                 base = content_type.split(";", 1)[0].strip().lower()
                 if base not in ALLOWED_BUNDLE_CONTENT_TYPES:
                     raise ValueError(
-                        "Plugin bundle download rejected: unexpected "
-                        f"Content-Type {base!r}")
+                        f"Từ chối tải gói plugin: Content-Type không mong đợi {base!r}")
             length = response.headers.get("Content-Length")
             if length is not None:
                 try:
@@ -1287,10 +1236,10 @@ def download_plugin_bundle(url: str, dest,
             magic = fh.read(4)
         if magic not in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
             raise ValueError(
-                "Downloaded file does not look like a .zip bundle")
+                "File đã tải không giống gói .zip")
         if not zipfile.is_zipfile(tmp_path):
             raise ValueError(
-                "Downloaded file is not a valid .zip bundle")
+                "File đã tải không phải gói .zip hợp lệ")
     except Exception:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -1329,28 +1278,28 @@ def _overlay_scope(plugins_dir) -> str:
 
 def _validate_overlay(entry: dict) -> dict:
     if not isinstance(entry, dict):
-        raise ValueError("Plugin overlays must be objects")
+        raise ValueError("Overlay plugin phải là object")
     oid = entry.get("id")
     kind = entry.get("kind")
     if not isinstance(oid, str) or not oid:
-        raise ValueError("Plugin overlay needs a string 'id'")
+        raise ValueError("Overlay plugin cần 'id' dạng chuỗi")
     if kind not in ("range", "marker", "region"):
         raise ValueError(
-            "Plugin overlay kind must be range, marker or region")
+            "Kind overlay plugin phải là range, marker hoặc region")
     for key in ("start", "end"):
         if key in entry and not isinstance(entry[key], (int, float)):
             raise ValueError(
-                f"Plugin overlay {key!r} must be a number")
+                f"Overlay plugin {key!r} phải là số")
     rect = entry.get("rect")
     if rect is not None:
         if not isinstance(rect, dict):
-            raise ValueError("Plugin overlay rect must be an object")
+            raise ValueError("Rect overlay plugin phải là object")
         for key in ("x", "y", "width", "height"):
             value = rect.get(key)
             if not isinstance(value, (int, float)) \
                     or not 0 <= value <= 1:
                 raise ValueError(
-                    "Plugin overlay rect values must be 0..1 shares")
+                    "Giá trị rect overlay plugin phải là tỉ lệ 0..1")
     return dict(entry)
 
 
@@ -1359,7 +1308,7 @@ def set_plugin_overlays(plugin: str, overlays,
     """Replace a plugin's overlays (an empty list clears them).
     Session-only: never saved with the project, per the spec."""
     if not isinstance(overlays, list):
-        raise ValueError("plugins.set-overlays needs a JSON array")
+        raise ValueError("plugins.set-overlays cần mảng JSON")
     cleaned = [_validate_overlay(e) for e in overlays]
     scope = _overlay_scope(plugins_dir)
     _OVERLAYS.setdefault(scope, {})[plugin] = cleaned
@@ -1429,8 +1378,7 @@ def _manifest_view(info: dict, view_id: str) -> dict:
         if isinstance(view, dict) and view.get("id") == view_id:
             return view
     raise KeyError(
-        f"Plugin has no view {view_id!r} "
-        f"(declared: {[v.get('id') for v in views if isinstance(v, dict)]})")
+        f"Plugin không có view {view_id!r} (đã khai báo: {[v.get('id') for v in views if isinstance(v, dict)]})")
 
 
 def get_plugin_view(plugin: str, view_id: str,
@@ -1441,12 +1389,11 @@ def get_plugin_view(plugin: str, view_id: str,
     SwiftUI host headless, so 'open' is not honoured here."""
     plugins = load_plugins(plugins_dir)
     if plugin not in plugins or plugins[plugin].get("_errors"):
-        raise KeyError(f"Unknown plugin: {plugin!r}")
+        raise KeyError(f"Plugin không rõ: {plugin!r}")
     info = plugins[plugin]
     if not info.get("manifest"):
         raise ValueError(
-            f"Plugin {plugin!r} is not a manifest plugin and "
-            "declares no views")
+            f"Plugin {plugin!r} không phải plugin manifest và không khai báo view nào")
     view = _manifest_view(info, view_id)
     scope = _overlay_scope(plugins_dir)
     state = _VIEW_STATE.get((scope, plugin, view_id), {})
@@ -1477,7 +1424,7 @@ def plugin_view_event(plugin: str, view_id: str, node: str,
     comp = next((c for c in components if c["id"] == node), None)
     if comp is None:
         raise KeyError(
-            f"View {view_id!r} has no component {node!r}")
+            f"View {view_id!r} không có thành phần {node!r}")
     scope = _overlay_scope(plugins_dir)
     if event_type in ("change", "submit", "select"):
         state = _VIEW_STATE.setdefault((scope, plugin, view_id), {})
@@ -1487,16 +1434,15 @@ def plugin_view_event(plugin: str, view_id: str, node: str,
         if action:
             if project is None:
                 raise ValueError(
-                    "Button action needs an open project")
+                    "Action nút cần một project đang mở")
             item_id = comp.get("item")
             if item_id is None:
                 raise ValueError(
-                    "Button action needs the view component to "
-                    "carry an 'item' id")
+                    "Action nút cần thành phần view mang id 'item'")
             apply_plugin(project, plugin, action, item_id,
                          plugins_dir=plugins_dir)
     elif event_type not in ("click",):
-        raise ValueError(f"Unknown view event type: {event_type!r}")
+        raise ValueError(f"Kiểu sự kiện view không rõ: {event_type!r}")
     return get_plugin_view(plugin, view_id, plugins_dir)
 
 
@@ -1506,7 +1452,7 @@ def store_plugin_proposal(project, plugin: str, hook: str,
     proposal convention). Ops are validated on apply, not here,
     so a proposal can be inspected before anything runs."""
     if not isinstance(ops, list) or not ops:
-        raise ValueError("Plugin proposal needs a non-empty ops list")
+        raise ValueError("Proposal plugin cần danh sách ops không rỗng")
     proposals = project.data.setdefault("plugin_proposals", [])
     pid = f"prop-{len(proposals) + 1:04d}"
     record = {"id": pid, "plugin": plugin, "hook": hook,
@@ -1525,16 +1471,15 @@ def apply_plugin_proposal(project, proposal_id: str,
     refuse the whole proposal."""
     if decision not in ("apply", "discard"):
         raise ValueError(
-            "plugins.proposal decision must be 'apply' or 'discard'")
+            "quyết định plugins.proposal phải là 'apply' hoặc 'discard'")
     proposals = project.data.get("plugin_proposals") or []
     record = next((p for p in proposals if p["id"] == proposal_id),
                   None)
     if record is None:
-        raise KeyError(f"Unknown proposal: {proposal_id!r}")
+        raise KeyError(f"Proposal không rõ: {proposal_id!r}")
     if record.get("status") != "pending":
         raise ValueError(
-            f"Proposal {proposal_id!r} is already "
-            f"{record.get('status')}")
+            f"Proposal {proposal_id!r} đã là {record.get('status')}")
     if decision == "discard":
         record["status"] = "discarded"
         project._bump()
@@ -1543,27 +1488,26 @@ def apply_plugin_proposal(project, proposal_id: str,
     # Validate everything first.
     for op in record["ops"]:
         if not isinstance(op, dict) or "op" not in op:
-            raise ValueError("Proposal op must be an object with 'op'")
+            raise ValueError("Op proposal phải là object có 'op'")
         if op["op"] == "set_clip_field":
             _, item = project.item(op["item"])
             if op.get("field") not in ("volume", "muted", "fadeIn",
                                        "fadeOut"):
                 raise ValueError(
-                    "Proposal set_clip_field field must be volume, "
-                    "muted, fadeIn or fadeOut")
+                    "Trường set_clip_field của proposal phải là volume, muted, fadeIn hoặc fadeOut")
         elif op["op"] == "set_text":
             _, item = project.item(op["item"])
             if "text" not in item:
                 raise ValueError(
-                    "Proposal set_text target has no text field")
+                    "Đích set_text của proposal không có trường text")
         elif op["op"] == "add_text":
             track = project.track(op["track"])
             if track["kind"] != "text":
                 raise ValueError(
-                    "Proposal add_text target must be a text track")
+                    "Đích add_text của proposal phải là track chữ")
         else:
             raise ValueError(
-                f"Unknown proposal op: {op['op']!r}")
+                f"Op proposal không rõ: {op['op']!r}")
     applied = []
     for op in record["ops"]:
         if op["op"] == "set_clip_field":
@@ -1599,21 +1543,18 @@ def replace_plugin(plugin_id: str, source,
     if plugin_id not in _disabled_ids(plugins_dir) and \
             _existing_folder_id(plugin_id, plugins_dir) is not None:
         raise ValueError(
-            f"Plugin {plugin_id!r} is enabled; disable it first "
-            "before replacing it")
+            f"Plugin {plugin_id!r} đang bật; hãy tắt nó trước khi thay thế")
     if isinstance(source, str) and _URL_RE.match(source.strip()):
         raise ValueError(
-            "replace_plugin never downloads: download the bundle "
-            "first with download_plugin_bundle(), then replace "
-            "from the downloaded file")
+            "replace_plugin không bao giờ tải về: hãy tải gói trước bằng download_plugin_bundle(), rồi thay thế từ file đã tải")
     src = os.fspath(source)
     if not os.path.exists(src):
-        raise FileNotFoundError(f"Plugin source not found: {src!r}")
+        raise FileNotFoundError(f"Không tìm thấy nguồn plugin: {src!r}")
     if os.path.isdir(src):
         manifest_path = os.path.join(src, "plugin.json")
         if not os.path.isfile(manifest_path):
             raise ValueError(
-                f"folder source has no plugin.json at its root: {src!r}")
+                f"nguồn thư mục không có plugin.json ở gốc: {src!r}")
         with open(manifest_path, "rb") as fh:
             candidate = _parse_manifest_bytes(fh.read(),
                                               source_label=src)
@@ -1621,12 +1562,10 @@ def replace_plugin(plugin_id: str, source,
         candidate, _entries = _scan_zip_source(src)
     else:
         raise ValueError(
-            "Plugin source must be a folder containing plugin.json "
-            f"or a .zip bundle, not: {src!r}")
+            f"Nguồn plugin phải là thư mục chứa plugin.json hoặc gói .zip, không phải: {src!r}")
     if candidate.get("id") != plugin_id:
         raise ValueError(
-            f"Replacement plugin id {candidate.get('id')!r} does not "
-            f"match installed plugin {plugin_id!r}")
+            f"Id plugin thay thế {candidate.get('id')!r} không khớp plugin đã cài {plugin_id!r}")
     result = install_plugin(src, plugins_dir=plugins_dir,
                             overwrite=True)
     result["replaced"] = True

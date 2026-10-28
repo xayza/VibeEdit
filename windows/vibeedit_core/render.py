@@ -149,10 +149,7 @@ def find_tool(name: str) -> str:
         if candidate and os.path.isfile(candidate):
             return candidate
     raise FileNotFoundError(
-        f"FFmpeg tool {name!r} not found. Install FFmpeg and add it "
-        f"to PATH, set the VIBEEDIT_FFMPEG_DIR environment variable "
-        f"to the folder containing {name}, or place {name} next to "
-        f"the VibeEdit script/executable.")
+        f"FFmpeg tool {name!r} not found. Install FFmpeg and add it to PATH, set the VIBEEDIT_FFMPEG_DIR environment variable to the folder containing {name}, or place {name} next to the VibeEdit script/executable.")
 
 
 def app_fonts_dir() -> str:
@@ -172,11 +169,11 @@ def import_font(source_path: str, fonts_dir: str | None = None) -> dict:
     moved. Returns the stored entry (``fonts_list`` will include it
     because font_candidates() searches the app fonts folder)."""
     if not os.path.isfile(source_path):
-        raise FileNotFoundError(f"Font file not found: {source_path}")
+        raise FileNotFoundError(f"Không tìm thấy file font: {source_path}")
     ext = os.path.splitext(source_path)[1].lower()
     if ext not in (".ttf", ".otf"):
         raise ValueError(
-            f"Only .ttf and .otf fonts can be imported, got {ext!r}")
+            f"Chỉ import được font .ttf và .otf, nhận được {ext!r}")
     folder = fonts_dir or app_fonts_dir()
     os.makedirs(folder, exist_ok=True)
     from .project import unique_media_name
@@ -229,9 +226,7 @@ def find_font() -> str | None:
         if os.path.isfile(override):
             return override
         raise FileNotFoundError(
-            f"VIBEEDIT_FONT points at a missing font file: {override!r}. "
-            f"Point it at an existing .ttf file or unset it to use "
-            f"the automatic font search.")
+            f"VIBEEDIT_FONT trỏ tới file font bị thiếu: {override!r}. Hãy trỏ nó tới file .ttf có sẵn hoặc bỏ đặt để dùng tìm kiếm font tự động.")
     for path in font_candidates():
         if os.path.isfile(path):
             return path
@@ -315,7 +310,7 @@ def _piecewise_expr(points: list[tuple[float, float]], var: str = "t") -> str:
     the expression survives FFmpeg's filter parser.
     """
     if not points:
-        raise ValueError("No keyframe points")
+        raise ValueError("Không có điểm keyframe")
     if len(points) == 1:
         return _num(points[0][1])
     expr = _num(points[-1][1])
@@ -330,7 +325,7 @@ def _piecewise_expr(points: list[tuple[float, float]], var: str = "t") -> str:
 def _atempo_chain(speed: float) -> str:
     """atempo only accepts 0.5-100; chain for anything outside."""
     if speed <= 0:
-        raise ValueError("Speed must be positive")
+        raise ValueError("Tốc độ phải dương")
     parts = []
     remaining = float(speed)
     while remaining > 100.0:
@@ -382,12 +377,11 @@ def blended_cube_path(lut: str, strength: float, out_dir: str) -> str:
             else:
                 parts = line.split()
                 if len(parts) != 3:
-                    raise ValueError(f"Invalid .cube data line: {line!r}")
+                    raise ValueError(f"Dòng dữ liệu .cube không hợp lệ: {line!r}")
                 values.append(tuple(float(v) for v in parts))
     if size is None or len(values) != size ** 3:
         raise ValueError(
-            f"LUT grid mismatch in {lut}: size {size}, "
-            f"{len(values)} data lines")
+            f"Lưới LUT không khớp trong {lut}: kích thước {size}, {len(values)} dòng dữ liệu")
     key = hashlib.sha256(
         f"{lut}|{strength:.4f}".encode()).hexdigest()[:12]
     out_path = os.path.join(out_dir, f"blended-{key}.cube")
@@ -431,7 +425,7 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
             if strength < 1.0:
                 if lut_dir is None:
                     raise ValueError(
-                        "LUT strength blending needs a render temp dir")
+                        "Pha trộn độ mạnh LUT cần thư mục tạm render")
                 lut = blended_cube_path(lut, strength, lut_dir)
             else:
                 validate_cube(lut)
@@ -439,7 +433,7 @@ def _color_filters(item: dict, lut_dir: str | None = None) -> list[str]:
     preset = color.get("preset")
     if preset and preset != "none":
         if preset not in COLOR_PRESETS:
-            raise ValueError(f"Unknown colour preset: {preset!r}")
+            raise ValueError(f"Preset màu không rõ: {preset!r}")
         # Phase 5: eq presets honour preset_strength (0..1, default
         # 1.0); strength 0 skips the eq filter entirely.
         eq_filter = eq_preset_filter(
@@ -480,19 +474,17 @@ def reframe_crop_filter(item: dict) -> str | None:
         return None
     if not isinstance(ref, dict):
         raise ValueError(
-            f"reframe must be a dict of x/y/w/h fractions, got {ref!r}")
+            f"reframe phải là dict các phân số x/y/w/h, nhận được {ref!r}")
     try:
         x, y, w, h = (float(ref["x"]), float(ref["y"]),
                       float(ref["w"]), float(ref["h"]))
     except (KeyError, TypeError, ValueError):
         raise ValueError(
-            "reframe needs numeric x/y/w/h fractions, "
-            f"got {ref!r}")
+            f"reframe cần phân số x/y/w/h dạng số, nhận được {ref!r}")
     if not (0 <= x and 0 <= y and 0 < w <= 1 and 0 < h <= 1
             and x + w <= 1 + 1e-9 and y + h <= 1 + 1e-9):
         raise ValueError(
-            f"Invalid reframe window {ref!r}: need 0<=x, 0<=y, "
-            "0<w<=1, 0<h<=1, x+w<=1, y+h<=1")
+            f"Cửa sổ reframe không hợp lệ {ref!r}: cần 0<=x, 0<=y, 0<w<=1, 0<h<=1, x+w<=1, y+h<=1")
     if x == 0 and y == 0 and w == 1 and h == 1:
         return None
     return (f"crop=w='iw*{w:g}':h='ih*{h:g}':"
@@ -708,8 +700,7 @@ def render_halftone_segment(a_path: str, b_path: str, out_path: str,
     import tempfile
     if duration_s <= 0 or fps <= 0 or width <= 0 or height <= 0:
         raise ValueError(
-            "render_halftone_segment needs positive duration, fps, "
-            "width and height")
+            "render_halftone_segment cần duration, fps, width và height dương")
     n_frames = max(1, int(round(float(fps) * float(duration_s))))
     tmpdir = tempfile.mkdtemp(prefix="vibeedit-halftone-")
     try:
@@ -747,14 +738,13 @@ def generate_proxy(src: str, out_path: str, width: int = 540) -> dict:
     info = probe_media(src)
     if not info.get("width"):
         raise ValueError(
-            "generate_proxy needs a video source; %s has no video "
-            "stream" % (src,))
+            "generate_proxy cần nguồn video; %s không có video stream" % (src,))
     try:
         width = int(width)
     except (TypeError, ValueError) as exc:
-        raise ValueError("proxy width must be an integer") from exc
+        raise ValueError("chiều rộng proxy phải là số nguyên") from exc
     if width < 2:
-        raise ValueError("proxy width must be >= 2")
+        raise ValueError("chiều rộng proxy phải >= 2")
     if width % 2:
         width -= 1
     os.makedirs(os.path.dirname(os.path.abspath(out_path)),
@@ -790,8 +780,7 @@ def export_preset_info(name: str, project_width: int,
     key = aliases.get(key, key)
     if key not in EXPORT_PRESETS:
         raise ValueError(
-            f"Unknown export preset: {name!r} "
-            f"(choose one of {', '.join(sorted(EXPORT_PRESETS))})")
+            f"Preset xuất không rõ: {name!r} (hãy chọn một trong {', '.join(sorted(EXPORT_PRESETS))})")
     info = dict(EXPORT_PRESETS[key])
     if info["width"] is None:
         if key == "quickdraft":
@@ -1000,7 +989,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
             if medium["id"] == item_media:
                 path = medium["path"]
                 return path if os.path.isabs(path) else os.path.join(folder, path)
-        raise KeyError(f"Media not found in project: {item_media}")
+        raise KeyError(f"Không tìm thấy media trong project: {item_media}")
 
     def media_fps(medium: dict) -> float:
         return fps_value(medium.get("fps", fmt["fps"]))
@@ -1040,7 +1029,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
     main = next((t for t in project["tracks"]
                  if t.get("role") == "main" and t["kind"] == "video"), None)
     if main is None:
-        raise ValueError("Project has no main video track")
+        raise ValueError("Project chưa có track video chính")
     main_items = sorted(main["items"], key=lambda i: i["at"])
 
     # ---- transitions: validate once, build the time adjustment -------
@@ -1049,8 +1038,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         kind = trans.get("kind")
         if kind in UNRENDERABLE_TRANSITIONS:
             raise ValueError(
-                f"Transition kind {kind!r} cannot be rendered: "
-                f"{UNRENDERABLE_TRANSITIONS[kind]}")
+                f"Kiểu transition {kind!r} không render được: {UNRENDERABLE_TRANSITIONS[kind]}")
         if kind not in TRANSITION_XFADE \
                 and kind not in MOTION_TRANSITIONS \
                 and kind not in HALFTONE_TRANSITIONS:
@@ -1130,8 +1118,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 return
             if trans["kind"] in UNRENDERABLE_TRANSITIONS:
                 raise ValueError(
-                    f"Transition kind {trans['kind']!r} cannot be "
-                    f"rendered: {UNRENDERABLE_TRANSITIONS[trans['kind']]}")
+                    f"Kiểu transition {trans['kind']!r} không render được: {UNRENDERABLE_TRANSITIONS[trans['kind']]}")
             trans_s = frames_to_seconds(trans["duration"], fmt["fps"])
             out_label = next_label("vxf")
             filter_parts.append(
@@ -1405,8 +1392,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 f"[{vtail}][{over_a}]overlay=0:0:format=yuv420[{out}]")
             return _finish(out, "mfin")
         raise ValueError(
-            f"Motion transition {kind!r} has no filter builder in "
-            "render.py (registry/render mismatch)")
+            f"Transition motion {kind!r} không có filter builder trong render.py (lệch registry/render)")
 
     def chain_motion_video(label: str, dur_s: float, trans: dict):
         """Chain a motion transition (Phase B6).
@@ -1634,7 +1620,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         medium = next((m for m in project["media"]
                        if m["id"] == item["media"]), None)
         if medium is None:
-            raise KeyError(f"Media not found: {item['media']}")
+            raise KeyError(f"Không tìm thấy media: {item['media']}")
         src = media_path(item["media"])
         idx = add_input(src)
         src_s = item.get("in", 0) / media_fps(medium) + local_start * speed
@@ -2344,10 +2330,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         for item in track["items"])
     if _has_text and font is None:
         raise RuntimeError(
-            "No font found for text overlays. Install a font (on "
-            "Windows: any .ttf in the system Fonts folder) or set "
-            "the VIBEEDIT_FONT environment variable to a .ttf file, "
-            "then export again.")
+            "Không tìm thấy font cho lớp chữ. Hãy cài font (trên Windows: file .ttf bất kỳ trong thư mục Fonts hệ thống) hoặc đặt biến môi trường VIBEEDIT_FONT thành file .ttf, rồi xuất lại.")
     text_count = 0
     karaoke_rendered = 0
     for track in project["tracks"]:
@@ -2365,8 +2348,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
                 # a defensive guard so a missing font can never
                 # silently produce a broken drawtext filter.
                 raise RuntimeError(
-                    "No font found for text overlays. Install a font "
-                    "or set VIBEEDIT_FONT to a .ttf file.")
+                    "Không tìm thấy font cho lớp chữ. Hãy cài font hoặc đặt VIBEEDIT_FONT thành file .ttf.")
             style = item.get("textStyle") or {}
             size_frac = float(style.get("size", 0.062))
             fontsize = max(int(size_frac * out_h), 12)
@@ -2610,7 +2592,7 @@ def _render_inner(project: dict, folder: str, output: str, preset: str,
         raise RenderCancelled("export cancelled")
     if returncode != 0:
         raise RuntimeError(
-            f"FFmpeg failed ({returncode}): {err_text[-2000:]}")
+            f"FFmpeg thất bại ({returncode}): {err_text[-2000:]}")
     # Round 25 export diagnostics: what the user (and the next
     # 330s-style investigation) needs without re-running anything.
     # clip_fps pairs every video item's recorded source fps with the

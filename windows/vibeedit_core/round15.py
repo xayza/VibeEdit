@@ -128,7 +128,7 @@ def _decode_point(data):
     sign = (data[31] >> 7) & 1
     x = _recover_x(y)
     if x is None:
-        raise ValueError("invalid Ed25519 point")
+        raise ValueError("điểm Ed25519 không hợp lệ")
     if (x & 1) != sign:
         x = _B - x
     return (x, y)
@@ -179,20 +179,20 @@ def _decode_key(key_text):
     """Decode an ``ed25519:<base64>`` publisher key to 32 raw bytes."""
     import base64
     if not isinstance(key_text, str) or not key_text.startswith("ed25519:"):
-        raise ValueError(f"not an ed25519: publisher key: {key_text!r}")
+        raise ValueError(f"không phải ed25519: khóa nhà phát hành: {key_text!r}")
     raw = base64.b64decode(key_text[len("ed25519:"):])
     if len(raw) != 32:
-        raise ValueError("ed25519 publisher key is not 32 bytes")
+        raise ValueError("khóa nhà phát hành ed25519 không phải 32 byte")
     return raw
 
 
 def _decode_signature(sig_text):
     import base64
     if not isinstance(sig_text, str) or not sig_text.startswith("ed25519:"):
-        raise ValueError(f"not an ed25519: signature: {sig_text!r}")
+        raise ValueError(f"không phải ed25519: chữ ký: {sig_text!r}")
     raw = base64.b64decode(sig_text[len("ed25519:"):])
     if len(raw) != 64:
-        raise ValueError("ed25519 signature is not 64 bytes")
+        raise ValueError("chữ ký ed25519 không phải 64 byte")
     return raw
 
 
@@ -202,7 +202,7 @@ def verify_release_signature(sha256_hex, signature_text, keys=PUBLISHER_KEYS):
     convention the kit and plugin releases use, proven against the
     real kit 0.1.56 signature in tests/test_round15.py)."""
     if not _SHA256_RE.match(sha256_hex or ""):
-        raise ValueError(f"release digest is not a SHA-256 hex: {sha256_hex!r}")
+        raise ValueError(f"digest release không phải hex SHA-256: {sha256_hex!r}")
     digest = bytes.fromhex(sha256_hex)
     sig = _decode_signature(signature_text)
     for key in keys:
@@ -218,16 +218,16 @@ def _http_get(url, timeout=30, max_bytes=_MAX_FEED_BYTES):
     tests monkeypatch ``round15._http_get`` instead of the network."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise ValueError(f"feed URL must be https: {url!r}")
+        raise ValueError(f"URL feed phải là https: {url!r}")
     request = urllib.request.Request(
         url, headers={"User-Agent": "VibeEdit kit/registry fetcher"})
     try:
         response = urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.URLError as exc:
-        raise ValueError(f"fetch failed ({url}): {exc}") from exc
+        raise ValueError(f"tải thất bại ({url}): {exc}") from exc
     with response:
         if response.status != 200:
-            raise ValueError(f"fetch failed ({url}): HTTP {response.status}")
+            raise ValueError(f"tải thất bại ({url}): HTTP {response.status}")
         chunks = []
         total = 0
         while True:
@@ -236,7 +236,7 @@ def _http_get(url, timeout=30, max_bytes=_MAX_FEED_BYTES):
                 break
             total += len(chunk)
             if total > max_bytes:
-                raise ValueError(f"fetch too large (>{max_bytes} bytes): {url}")
+                raise ValueError(f"tải quá lớn (>{max_bytes} byte): {url}")
             chunks.append(chunk)
     return b"".join(chunks)
 
@@ -342,47 +342,38 @@ def parse_kit_releases(raw):
         try:
             data = json.loads(bytes(raw).decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
-            raise ValueError(f"kit releases.json is not valid JSON: {exc}") from exc
+            raise ValueError(f"kit releases.json không phải JSON hợp lệ: {exc}") from exc
     else:
         data = raw
     if not isinstance(data, dict):
-        raise ValueError("kit releases.json: top level must be an object")
+        raise ValueError("kit releases.json: cấp cao nhất phải là object")
     if data.get("schemaVersion") != 1:
-        raise ValueError("kit releases.json: unsupported schemaVersion "
-                         f"(expected 1, got {data.get('schemaVersion')!r})")
+        raise ValueError(f"kit releases.json: schemaVersion không hỗ trợ (mong đợi 1, nhận được {data.get('schemaVersion')!r})")
     if data.get("kit") != "bashcut":
-        raise ValueError("kit releases.json: unexpected kit "
-                         f"{data.get('kit')!r} (expected 'bashcut')")
+        raise ValueError(f"kit releases.json: kit không mong đợi {data.get('kit')!r} (mong đợi 'bashcut')")
     versions = data.get("versions")
     if not isinstance(versions, list) or not versions:
-        raise ValueError("kit releases.json: 'versions' must be a "
-                         "non-empty list")
+        raise ValueError("kit releases.json: 'versions' phải là danh sách không rỗng")
     out = []
     for entry in versions:
         if not isinstance(entry, dict):
-            raise ValueError("kit releases.json: version entry must be "
-                             "an object")
+            raise ValueError("kit releases.json: entry version phải là object")
         version = entry.get("version")
         url = entry.get("url")
         sha256 = entry.get("sha256")
         signature = entry.get("signature")
         size = entry.get("size")
         if not isinstance(version, str) or not version:
-            raise ValueError("kit releases.json: version entry without a "
-                             "version string")
+            raise ValueError("kit releases.json: entry version thiếu chuỗi version")
         if not _is_https_url(url):
-            raise ValueError(f"kit releases.json: version {version!r} has "
-                             "no https url")
+            raise ValueError(f"kit releases.json: version {version!r} không có url https")
         if not isinstance(sha256, str) or not _SHA256_RE.match(sha256):
-            raise ValueError(f"kit releases.json: version {version!r} has "
-                             "no valid sha256 digest")
+            raise ValueError(f"kit releases.json: version {version!r} không có digest sha256 hợp lệ")
         if not isinstance(signature, str) \
                 or not signature.startswith("ed25519:"):
-            raise ValueError(f"kit releases.json: version {version!r} has "
-                             "no ed25519 signature")
+            raise ValueError(f"kit releases.json: version {version!r} không có chữ ký ed25519")
         if not isinstance(size, int) or size <= 0:
-            raise ValueError(f"kit releases.json: version {version!r} has "
-                             "no positive size")
+            raise ValueError(f"kit releases.json: version {version!r} không có kích thước dương")
         out.append({
             "version": version,
             "url": url,
@@ -406,7 +397,7 @@ def _latest_release(releases, version=None):
         for entry in versions:
             if entry["version"] == version:
                 return entry
-        raise ValueError(f"kit version not in releases catalog: {version!r}")
+        raise ValueError(f"version kit không có trong catalog releases: {version!r}")
     return max(versions, key=lambda e: _version_key(e["version"]))
 
 
@@ -417,17 +408,16 @@ def _parse_skill_frontmatter(text, skill_id):
     its directory, like the real kit files do. Anything else is a
     malformed skill, not a kit skill."""
     if not text.startswith("---"):
-        raise ValueError(f"kit skill {skill_id!r}: missing frontmatter")
+        raise ValueError(f"skill kit {skill_id!r}: thiếu frontmatter")
     end = text.find("\n---", 3)
     if end < 0:
-        raise ValueError(f"kit skill {skill_id!r}: unterminated frontmatter")
+        raise ValueError(f"skill kit {skill_id!r}: frontmatter chưa đóng")
     name = None
     for line in text[3:end].splitlines():
         if line.startswith("name:"):
             name = line.split(":", 1)[1].strip().strip("\"'")
     if name != skill_id:
-        raise ValueError(f"kit skill {skill_id!r}: frontmatter name "
-                         f"{name!r} does not match its directory")
+        raise ValueError(f"skill kit {skill_id!r}: tên frontmatter {name!r} không khớp thư mục của nó")
 
 
 def kit_zip_skills(zip_path):
@@ -440,7 +430,7 @@ def kit_zip_skills(zip_path):
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as exc:
-        raise ValueError(f"kit zip is not a valid .zip: {zip_path!r}") from exc
+        raise ValueError(f"kit zip không phải .zip hợp lệ: {zip_path!r}") from exc
     from vibeedit_core.plugins import _check_zip_entry_name
     skills = {}
     with zf:
@@ -459,21 +449,21 @@ def kit_zip_skills(zip_path):
             else:
                 continue
             if not _SAFE_ID_RE.match(skill_id):
-                raise ValueError(f"kit zip: unsafe skill id {skill_id!r}")
+                raise ValueError(f"kit zip: id skill không an toàn {skill_id!r}")
             if skill_id in skills:
-                raise ValueError(f"kit zip: duplicate skill {skill_id!r}")
+                raise ValueError(f"kit zip: skill trùng lặp {skill_id!r}")
             if info.file_size > _MAX_KIT_SKILL_BYTES:
-                raise ValueError(f"kit zip: skill {skill_id!r} too large")
+                raise ValueError(f"kit zip: skill {skill_id!r} quá lớn")
             raw = zf.read(info)
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError(
-                    f"kit skill {skill_id!r} is not UTF-8") from exc
+                    f"skill kit {skill_id!r} không phải UTF-8") from exc
             _parse_skill_frontmatter(text, skill_id)
             skills[skill_id] = raw
     if not skills:
-        raise ValueError("kit zip: no skills/*/SKILL.md entries found")
+        raise ValueError("kit zip: không tìm thấy entry skills/*/SKILL.md nào")
     return sorted(skills.items())
 
 
@@ -500,9 +490,7 @@ def kit_install_from_zip(zip_path, kit_dir=None, managed_ids=None):
         target = os.path.join(folder, skill_id + ".md")
         if os.path.exists(target) and skill_id not in managed:
             refused.append({"id": skill_id,
-                            "reason": "a non-kit file with this name "
-                                      "already exists; refused rather "
-                                      "than overwriting user content"})
+                            "reason": "đã có file không phải kit trùng tên này; từ chối thay vì ghi đè nội dung của người dùng"})
             continue
         to_write.append((skill_id, raw, target))
     installed = []
@@ -585,26 +573,22 @@ def kit_update(kit_dir=None, version=None, fetcher=None, downloader=None):
         return {"updated": False,
                 "version": installed_version,
                 "latest": target["version"],
-                "reason": "already up to date"}
+                "reason": "đã cập nhật mới nhất"}
     fetch = fetcher or _http_get
     archive = fetch(target["url"], max_bytes=_MAX_KIT_ZIP_BYTES) \
         if fetcher is None and downloader is None \
         else (downloader(target["url"]) if downloader is not None
               else fetch(target["url"]))
     if not isinstance(archive, (bytes, bytearray)):
-        raise ValueError("kit download did not return bytes")
+        raise ValueError("tải kit không trả về byte")
     archive = bytes(archive)
     if len(archive) != target["size"]:
-        raise ValueError(f"kit {target['version']}: size mismatch "
-                         f"(registry says {target['size']}, got "
-                         f"{len(archive)})")
+        raise ValueError(f"kit {target['version']}: lệch kích thước (registry ghi {target['size']}, nhận được {len(archive)})")
     digest = hashlib.sha256(archive).hexdigest()
     if digest != target["sha256"]:
-        raise ValueError(f"kit {target['version']}: SHA-256 mismatch "
-                         "(archive does not match the releases catalog)")
+        raise ValueError(f"kit {target['version']}: lệch SHA-256 (archive không khớp catalog releases)")
     if not verify_release_signature(digest, target["signature"]):
-        raise ValueError(f"kit {target['version']}: publisher signature "
-                         "verification failed; refusing to install")
+        raise ValueError(f"kit {target['version']}: xác minh chữ ký nhà phát hành thất bại; từ chối cài đặt")
     # Back up old kit-managed files before touching anything.
     backup = tempfile.mkdtemp(prefix="vibeedit-kit-backup-")
     backed_up = []
@@ -704,52 +688,43 @@ def parse_registry(raw):
         try:
             data = json.loads(bytes(raw).decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
-            raise ValueError(f"registry.json is not valid JSON: {exc}") from exc
+            raise ValueError(f"registry.json không phải JSON hợp lệ: {exc}") from exc
     else:
         data = raw
     if not isinstance(data, dict):
-        raise ValueError("registry.json: top level must be an object")
+        raise ValueError("registry.json: cấp cao nhất phải là object")
     if data.get("schemaVersion") != 1:
-        raise ValueError("registry.json: unsupported schemaVersion "
-                         f"(expected 1, got {data.get('schemaVersion')!r})")
+        raise ValueError(f"registry.json: schemaVersion không hỗ trợ (mong đợi 1, nhận được {data.get('schemaVersion')!r})")
     publishers = data.get("publishers")
     if not isinstance(publishers, dict) or not publishers:
-        raise ValueError("registry.json: 'publishers' must be a "
-                         "non-empty object")
+        raise ValueError("registry.json: 'publishers' phải là object không rỗng")
     for pub_id, pub in publishers.items():
         if not isinstance(pub, dict) \
                 or not isinstance(pub.get("keys"), list) \
                 or not pub["keys"]:
-            raise ValueError(f"registry.json: publisher {pub_id!r} has "
-                             "no keys")
+            raise ValueError(f"registry.json: nhà phát hành {pub_id!r} không có khóa")
         for key in pub["keys"]:
             if not isinstance(key, str) or not key.startswith("ed25519:"):
-                raise ValueError(f"registry.json: publisher {pub_id!r} "
-                                 "has a non-ed25519 key")
+                raise ValueError(f"registry.json: nhà phát hành {pub_id!r} có khóa không phải ed25519")
     plugins = data.get("plugins")
     if not isinstance(plugins, list):
-        raise ValueError("registry.json: 'plugins' must be a list")
+        raise ValueError("registry.json: 'plugins' phải là danh sách")
     out = []
     for entry in plugins:
         if not isinstance(entry, dict) or not entry.get("id"):
-            raise ValueError("registry.json: plugin entry without an id")
+            raise ValueError("registry.json: entry plugin thiếu id")
         versions = entry.get("versions")
         if not isinstance(versions, list) or not versions:
-            raise ValueError(f"registry.json: plugin {entry['id']!r} has "
-                             "no versions")
+            raise ValueError(f"registry.json: plugin {entry['id']!r} không có version nào")
         clean_versions = []
         for ver in versions:
             if not isinstance(ver, dict) or not ver.get("version"):
-                raise ValueError(f"registry.json: plugin {entry['id']!r} "
-                                 "has a version entry without a version")
+                raise ValueError(f"registry.json: plugin {entry['id']!r} có entry version thiếu version")
             if not _is_https_url(ver.get("url")):
-                raise ValueError(f"registry.json: plugin {entry['id']!r} "
-                                 f"version {ver['version']!r} has no https url")
+                raise ValueError(f"registry.json: plugin {entry['id']!r} version {ver['version']!r} không có url https")
             if not isinstance(ver.get("sha256"), str) \
                     or not _SHA256_RE.match(ver["sha256"]):
-                raise ValueError(f"registry.json: plugin {entry['id']!r} "
-                                 f"version {ver['version']!r} has no valid "
-                                 "sha256 digest")
+                raise ValueError(f"registry.json: plugin {entry['id']!r} version {ver['version']!r} không có digest sha256 hợp lệ")
             clean_versions.append({
                 "version": ver["version"],
                 "url": ver["url"],
@@ -857,7 +832,7 @@ def registry_plugin(registry, plugin_id):
     for entry in registry["plugins"]:
         if entry["id"] == plugin_id:
             return entry
-    raise ValueError(f"plugin not in registry: {plugin_id!r}")
+    raise ValueError(f"plugin không có trong registry: {plugin_id!r}")
 
 
 def registry_latest(entry, version=None):
@@ -865,8 +840,7 @@ def registry_latest(entry, version=None):
         for ver in entry["versions"]:
             if ver["version"] == version:
                 return ver
-        raise ValueError(f"plugin {entry['id']!r}: version {version!r} "
-                         "not in registry")
+        raise ValueError(f"plugin {entry['id']!r}: version {version!r} không có trong registry")
     return max(entry["versions"], key=lambda v: _version_key(v["version"]))
 
 
@@ -934,15 +908,13 @@ def _scan_registry_zip(zip_path):
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as exc:
-        raise ValueError(f"registry zip is not a valid .zip: "
-                         f"{zip_path!r}") from exc
+        raise ValueError(f"registry zip không phải .zip hợp lệ: {zip_path!r}") from exc
     with zf:
         infos = zf.infolist()
         for info in infos:
             _check_zip_entry_name(info.filename)
             if (info.external_attr >> 16) & 0o170000 == 0o120000:
-                raise ValueError("registry zip: symlink entry rejected: "
-                                 f"{info.filename!r}")
+                raise ValueError(f"registry zip: đã từ chối entry symlink: {info.filename!r}")
         files = [i for i in infos if not i.filename.endswith("/")]
         manifest_names = []
         for info in files:
@@ -952,42 +924,36 @@ def _scan_registry_zip(zip_path):
             elif len(parts) == 2 and parts[1] == "plugin.json":
                 manifest_names.append((info, parts[0] + "/"))
         if not manifest_names:
-            raise ValueError("registry zip: no plugin.json at the root "
-                             "or in exactly one top-level folder")
+            raise ValueError("registry zip: không có plugin.json ở gốc hay trong đúng một thư mục cấp cao nhất")
         roots = {root for _, root in manifest_names}
         if len(roots) != 1:
-            raise ValueError("registry zip: plugin.json found in "
-                             "multiple top-level folders")
+            raise ValueError("registry zip: tìm thấy plugin.json trong nhiều thư mục cấp cao nhất")
         manifest_info, root = manifest_names[0]
         try:
             raw = zf.read(manifest_info)
         except (KeyError, RuntimeError) as exc:
-            raise ValueError(f"registry zip: cannot read plugin.json: "
-                             f"{exc}") from exc
+            raise ValueError(f"registry zip: không đọc được plugin.json: {exc}") from exc
         try:
             manifest = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
-            raise ValueError(f"registry zip: plugin.json is not valid "
-                             f"JSON: {exc}") from exc
+            raise ValueError(f"registry zip: plugin.json không phải JSON hợp lệ: {exc}") from exc
         if not isinstance(manifest, dict):
-            raise ValueError("registry zip: plugin.json must be an object")
+            raise ValueError("registry zip: plugin.json phải là object")
         entries = []
         seen = set()
         total = 0
         for info in files:
             if not info.filename.startswith(root):
-                raise ValueError("registry zip: file outside the plugin "
-                                 f"folder: {info.filename!r}")
+                raise ValueError(f"registry zip: file nằm ngoài thư mục plugin: {info.filename!r}")
             rel = info.filename[len(root):]
             if not rel:
                 continue
             if rel.lower() in seen:
-                raise ValueError(f"registry zip: duplicate entry for "
-                                 f"{rel!r}")
+                raise ValueError(f"registry zip: entry trùng lặp cho {rel!r}")
             seen.add(rel.lower())
             total += info.file_size
             if total > 50 * 1024 * 1024:
-                raise ValueError("registry zip: bundle over 50 MiB")
+                raise ValueError("registry zip: gói vượt quá 50 MiB")
             entries.append((rel, info))
     return manifest, entries
 
@@ -1017,31 +983,22 @@ def install_registry_plugin(registry, plugin_id, version=None,
     platforms = ver["platforms"] or []
     if platforms and not any("windows" in str(p).lower() for p in platforms):
         warnings.append(
-            "registry lists only non-Windows platforms for this release "
-            f"({', '.join(platforms)}); the record is installed for "
-            "review only and cannot run on Windows")
+            f"registry lists only non-Windows platforms for this release ({', '.join(platforms)}); the record is installed for review only and cannot run on Windows")
     elif not platforms:
-        warnings.append("registry lists no platforms for this release; "
-                        "the record is installed for review only")
+        warnings.append("registry không liệt kê platform nào cho release này; bản ghi chỉ được cài để xem lại")
     publisher = entry.get("publisher")
     publishers = registry.get("publishers", {})
     pub_keys = publishers.get(publisher, {}).get("keys") if publisher else None
     if not pub_keys:
-        raise ValueError(f"registry plugin {plugin_id!r}: publisher "
-                         f"{publisher!r} has no keys in the registry; "
-                         "refusing to install unsigned")
+        raise ValueError(f"plugin registry {plugin_id!r}: nhà phát hành {publisher!r} không có khóa trong registry; từ chối cài khi chưa ký")
     if not ver.get("signature"):
-        raise ValueError(f"registry plugin {plugin_id!r} version "
-                         f"{ver['version']!r}: no publisher signature in "
-                         "the registry; refusing to install")
+        raise ValueError(f"plugin registry {plugin_id!r} version {ver['version']!r}: không có chữ ký nhà phát hành trong registry; từ chối cài đặt")
     folder = _plugins_folder(plugins_dir)
     os.makedirs(folder, exist_ok=True)
     dest = _dest_for(plugin_id, plugins_dir)
     if os.path.exists(dest) and not (
             overwrite and plugin_id in _disabled_ids(plugins_dir)):
-        raise ValueError(f"plugin {plugin_id!r} already installed; "
-                         "disable it first and pass overwrite=true to "
-                         "replace it")
+        raise ValueError(f"plugin {plugin_id!r} đã cài rồi; hãy tắt nó trước rồi truyền overwrite=true để thay thế")
     tmp_dir = tempfile.mkdtemp(prefix="vibeedit-regdl-")
     try:
         zip_path = os.path.join(tmp_dir, "bundle.zip")
@@ -1057,31 +1014,21 @@ def install_registry_plugin(registry, plugin_id, version=None,
         with open(zip_path, "rb") as fh:
             archive = fh.read()
         if ver.get("size") is not None and len(archive) != ver["size"]:
-            raise ValueError(f"registry plugin {plugin_id!r}: size "
-                             f"mismatch (registry says {ver['size']}, got "
-                             f"{len(archive)})")
+            raise ValueError(f"plugin registry {plugin_id!r}: lệch kích thước (registry ghi {ver['size']}, nhận được {len(archive)})")
         digest = hashlib.sha256(archive).hexdigest()
         if digest != ver["sha256"]:
-            raise ValueError(f"registry plugin {plugin_id!r}: SHA-256 "
-                             "mismatch (archive does not match the "
-                             "registry)")
+            raise ValueError(f"plugin registry {plugin_id!r}: lệch SHA-256 (archive không khớp registry)")
         if not verify_release_signature(digest, ver["signature"],
                                         keys=tuple(pub_keys)):
-            raise ValueError(f"registry plugin {plugin_id!r}: publisher "
-                             "signature verification failed; refusing "
-                             "to install")
+            raise ValueError(f"plugin registry {plugin_id!r}: xác minh chữ ký nhà phát hành thất bại; từ chối cài đặt")
         manifest, entries = _scan_registry_zip(zip_path)
         if manifest.get("id") != plugin_id:
-            raise ValueError(f"registry zip manifest id "
-                             f"{manifest.get('id')!r} does not match the "
-                             f"registry plugin {plugin_id!r}")
+            raise ValueError(f"id manifest registry zip {manifest.get('id')!r} không khớp plugin registry {plugin_id!r}")
         if manifest.get("version") != ver["version"]:
-            raise ValueError(f"registry zip manifest version "
-                             f"{manifest.get('version')!r} does not match "
-                             f"the registry version {ver['version']!r}")
+            raise ValueError(f"version manifest registry zip {manifest.get('version')!r} không khớp version registry {ver['version']!r}")
         name = resolve_localized(manifest.get("name"))
         if not name:
-            raise ValueError("registry zip manifest has no usable name")
+            raise ValueError("manifest registry zip không có tên dùng được")
         backup = None
         if os.path.exists(dest):
             backup = dest + ".bak"
@@ -1101,9 +1048,7 @@ def install_registry_plugin(registry, plugin_id, version=None,
                 "installed_from": ver["url"],
                 "warnings": warnings,
                 "runnable": False,
-                "reason": "registry provider plugin: no Windows-runnable "
-                          ".py entry; macOS provider scripts cannot run "
-                          "on Windows; record is review-only",
+                "reason": "plugin provider registry: không có entry .py chạy được trên Windows; script provider macOS không chạy được trên Windows; bản ghi chỉ để xem lại",
             }
             with open(os.path.join(dest, "vibeedit-registry.json"), "w",
                       encoding="utf-8") as fh:
@@ -1122,6 +1067,4 @@ def install_registry_plugin(registry, plugin_id, version=None,
     return {"id": plugin_id, "version": ver["version"], "path": dest,
             "enabled": False, "runnable": False,
             "warnings": warnings,
-            "reason": "installed disabled as a review-only registry "
-                      "record; it is listed but never executed, and "
-                      "cannot be enabled without a Windows-runnable entry"}
+            "reason": "đã cài ở trạng thái tắt dạng bản ghi registry chỉ để xem lại; nó được liệt kê nhưng không bao giờ chạy, và không bật được nếu thiếu entry chạy được trên Windows"}

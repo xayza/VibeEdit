@@ -26,7 +26,7 @@ def decode_mono(path: str, sample_rate: int = SAMPLE_RATE) -> list[float]:
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError(
-            f"FFmpeg could not decode {path}: "
+            f"FFmpeg không giải mã được {path}: "
             f"{proc.stderr[-500:].decode('utf-8', errors='replace')}")
     samples = array.array("f")
     samples.frombytes(proc.stdout)

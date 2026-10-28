@@ -31,7 +31,7 @@ def generate_thumbnail(src_path: str, dest_path: str, kind: str) -> str:
     if kind == "image" or ext in IMAGE_EXTS:
         return src_path
     if kind == "audio" or ext in {".mp3", ".wav", ".m4a", ".ogg", ".flac"}:
-        raise ValueError("Audio has no thumbnail")
+        raise ValueError("Audio không có thumbnail")
     if os.path.isfile(dest_path):
         return dest_path
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -45,4 +45,4 @@ def generate_thumbnail(src_path: str, dest_path: str, kind: str) -> str:
                               encoding="utf-8", errors="replace", timeout=60)
         if proc.returncode == 0 and os.path.isfile(dest_path):
             return dest_path
-    raise RuntimeError("FFmpeg could not extract a thumbnail frame")
+    raise RuntimeError("FFmpeg không trích được khung hình thumbnail")

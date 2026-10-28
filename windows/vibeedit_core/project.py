@@ -129,16 +129,16 @@ def validate_reframe(window) -> dict:
     origin). Returns a normalised dict; raises on malformed windows
     instead of silently rendering the full frame."""
     if not isinstance(window, dict):
-        raise ValueError("reframe must be an object with x, y, w, h")
+        raise ValueError("reframe phải là object có x, y, w, h")
     try:
         x, y, w, h = (float(window["x"]), float(window["y"]),
                       float(window["w"]), float(window["h"]))
     except (KeyError, TypeError, ValueError):
-        raise ValueError("reframe needs numeric x, y, w, h")
+        raise ValueError("reframe cần x, y, w, h dạng số")
     if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1):
-        raise ValueError("reframe x/y/w/h must be fractions in range")
+        raise ValueError("x/y/w/h của reframe phải là phân số trong khoảng")
     if x + w > 1 or y + h > 1:
-        raise ValueError("reframe window must fit inside the source frame")
+        raise ValueError("cửa sổ reframe phải nằm trong khung hình nguồn")
     return {"x": x, "y": y, "w": w, "h": h}
 
 
@@ -158,28 +158,28 @@ def validate_backdrop(backdrop) -> dict:
     the bars black.
     """
     if not isinstance(backdrop, dict):
-        raise ValueError("backdrop must be an object with kind")
+        raise ValueError("backdrop phải là object có kind")
     kind = backdrop.get("kind")
     if kind not in ("blur", "color"):
         raise ValueError(
-            f"backdrop kind must be 'blur' or 'color', not {kind!r}")
+            f"kind của backdrop phải là 'blur' hoặc 'color', không phải {kind!r}")
     try:
         blur = float(backdrop.get("blur", 0.05))
     except (TypeError, ValueError):
-        raise ValueError("backdrop blur must be a number")
+        raise ValueError("blur của backdrop phải là số")
     if not 0 <= blur <= 0.5:
-        raise ValueError("backdrop blur must be within 0..0.5")
+        raise ValueError("blur của backdrop phải trong 0..0.5")
     try:
         dim = float(backdrop.get("dim", 0))
     except (TypeError, ValueError):
-        raise ValueError("backdrop dim must be a number")
+        raise ValueError("dim của backdrop phải là số")
     if not 0 <= dim <= 1:
-        raise ValueError("backdrop dim must be within 0..1")
+        raise ValueError("dim của backdrop phải trong 0..1")
     color = backdrop.get("color", "#000000")
     if not isinstance(color, str) or not re.fullmatch(
             r"#[0-9A-Fa-f]{6}", color):
         raise ValueError(
-            f"backdrop color must be #RRGGBB, not {color!r}")
+            f"màu backdrop phải dạng #RRGGBB, không phải {color!r}")
     return {"kind": kind, "color": color.upper(),
             "blur": blur, "dim": dim}
 
@@ -256,10 +256,10 @@ def eq_preset_filter(preset: str, strength: float = 1.0) -> str:
     if preset in (None, "none"):
         return ""
     if preset not in COLOR_PRESETS:
-        raise ValueError(f"Unknown colour preset: {preset!r}")
+        raise ValueError(f"Preset màu không rõ: {preset!r}")
     strength = float(strength)
     if not 0.0 <= strength <= 1.0:
-        raise ValueError("Colour preset strength must be 0..1")
+        raise ValueError("Độ mạnh preset màu phải trong 0..1")
     if strength == 0.0:
         return ""
     if strength == 1.0:
@@ -284,9 +284,9 @@ def eq_preset_filter(preset: str, strength: float = 1.0) -> str:
 def validate_cube(path: str) -> int:
     """Validate a .cube LUT file. Returns LUT_3D_SIZE. Raises ValueError."""
     if not os.path.isfile(path):
-        raise ValueError(f"LUT file not found: {path}")
+        raise ValueError(f"Không tìm thấy file LUT: {path}")
     if not str(path).lower().endswith(".cube"):
-        raise ValueError(f"LUT file must end with .cube: {path}")
+        raise ValueError(f"File LUT phải kết thúc bằng .cube: {path}")
     size = None
     with open(path, encoding="utf-8", errors="strict") as fh:
         for line in fh:
@@ -294,13 +294,13 @@ def validate_cube(path: str) -> int:
             if line.startswith("LUT_3D_SIZE"):
                 parts = line.split()
                 if len(parts) != 2 or not parts[1].isdigit():
-                    raise ValueError(f"Invalid LUT_3D_SIZE line in {path}")
+                    raise ValueError(f"Dòng LUT_3D_SIZE không hợp lệ trong {path}")
                 size = int(parts[1])
                 break
             if line and not line.startswith(("#", "TITLE", "DOMAIN_")):
-                raise ValueError(f"Invalid .cube content in {path}: {line!r}")
+                raise ValueError(f"Nội dung .cube không hợp lệ trong {path}: {line!r}")
     if size is None:
-        raise ValueError(f"No LUT_3D_SIZE found in {path}")
+        raise ValueError(f"Không tìm thấy LUT_3D_SIZE trong {path}")
     return size
 
 
@@ -357,18 +357,18 @@ def parse_srt(text: str) -> list[tuple[float, float, str]]:
             continue
         match = pattern.search(lines[0])
         if not match:
-            raise ValueError(f"Invalid SRT timecode line: {lines[0]!r}")
+            raise ValueError(f"Dòng timecode SRT không hợp lệ: {lines[0]!r}")
         nums = [int(g) for g in match.groups()]
         start = nums[0] * 3600 + nums[1] * 60 + nums[2] + nums[3] / 1000.0
         end = nums[4] * 3600 + nums[5] * 60 + nums[6] + nums[7] / 1000.0
         if end <= start:
-            raise ValueError(f"SRT cue ends before it starts: {lines[0]!r}")
+            raise ValueError(f"Cue SRT kết thúc trước khi bắt đầu: {lines[0]!r}")
         body = " ".join(lines[1:])
         body = re.sub(r"<[^>]+>", "", body).strip()
         if body:
             cues.append((start, end, body))
     if not cues:
-        raise ValueError("No SRT cues found")
+        raise ValueError("Không tìm thấy cue SRT nào")
     return cues
 
 _counter = itertools.count(1)
@@ -532,12 +532,12 @@ def load_project(path: str) -> dict:
     if os.path.isdir(path):
         found = find_project_file(path)
         if not found:
-            raise FileNotFoundError(f"No project file in folder: {path}")
+            raise FileNotFoundError(f"Không có file project trong thư mục: {path}")
         path = found
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     if data.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
-        raise ValueError(f"Unsupported project schema: {data.get('schema')!r}")
+        raise ValueError(f"Schema project không hỗ trợ: {data.get('schema')!r}")
     data.setdefault("tracks", copy.deepcopy(DEFAULT_TRACKS))
     data.setdefault("media", [])
     data.setdefault("transitions", [])
@@ -713,10 +713,10 @@ class Project:
             width = int(width)
             height = int(height)
         except (TypeError, ValueError):
-            raise ValueError("Format width and height must be integers")
+            raise ValueError("Chiều rộng và chiều cao format phải là số nguyên")
         if not 240 <= width <= 3840 or not 240 <= height <= 3840:
             raise ValueError(
-                "Format width and height must each be between 240 and 3840")
+                "Chiều rộng và chiều cao format mỗi cái phải từ 240 đến 3840")
         self.data["format"]["width"] = width
         self.data["format"]["height"] = height
         self._bump()
@@ -726,20 +726,20 @@ class Project:
         for track in self.data["tracks"]:
             if track["id"] == track_id:
                 return track
-        raise KeyError(f"Unknown track: {track_id}")
+        raise KeyError(f"Track không rõ: {track_id}")
 
     def item(self, item_id: str) -> tuple[dict, dict]:
         for track in self.data["tracks"]:
             for item in track["items"]:
                 if item["id"] == item_id:
                     return track, item
-        raise KeyError(f"Unknown item: {item_id}")
+        raise KeyError(f"Mục không rõ: {item_id}")
 
     def add_track(self, kind: str, role: str, name: str) -> dict:
         """Add a new empty track (used by Add Layer and the Voiceover
         panel). Track ids follow the MCP tool convention: t1, t2, ..."""
         if kind not in ("video", "text", "audio"):
-            raise ValueError(f"Unknown track kind: {kind!r}")
+            raise ValueError(f"Kiểu track không rõ: {kind!r}")
         used = {t["id"] for t in self.data["tracks"]}
         n = 1
         while f"t{n}" in used:
@@ -754,7 +754,7 @@ class Project:
         for medium in self.data["media"]:
             if medium["id"] == media_id:
                 return medium
-        raise KeyError(f"Unknown media: {media_id}")
+        raise KeyError(f"Media không rõ: {media_id}")
 
     def duration_frames(self) -> int:
         end = 0
@@ -794,7 +794,7 @@ class Project:
         medium = self.media(media_id)
         track = self.track(track_id)
         if track["kind"] == "text":
-            raise ValueError("Cannot place a media clip on a text track")
+            raise ValueError("Không đặt được clip media lên track chữ")
         if dur is None:
             # Round 19: ``dur`` is PROJECT frames everywhere
             # downstream (timeline, server duration, render), so a
@@ -813,9 +813,9 @@ class Project:
             else:
                 dur = 0
         if dur <= 0:
-            raise ValueError("Clip duration must be positive")
+            raise ValueError("Thời lượng clip phải dương")
         if speed <= 0:
-            raise ValueError("Speed must be positive")
+            raise ValueError("Tốc độ phải dương")
         item = {"id": _new_id("c"), "media": media_id, "in": int(in_frame),
                 "dur": int(dur), "at": int(at), "speed": float(speed)}
         if reframe is not None:
@@ -831,8 +831,7 @@ class Project:
                 o_start = int(other["at"])
                 if o_start < int(at) < o_start + int(other["dur"]):
                     raise ValueError(
-                        "Magnetic insert cannot land inside a clip: "
-                        "insert at a clip boundary or in a gap")
+                        "Chèn magnetic không được rơi vào trong clip: hãy chèn tại biên clip hoặc trong khoảng trống")
             changes: dict = {}
             for other in track["items"]:
                 if int(other["at"]) >= int(at):
@@ -857,7 +856,7 @@ class Project:
                  position_x: float = 0.5) -> dict:
         track = self.track(track_id)
         if track["kind"] != "text":
-            raise ValueError("Text items belong on a text track")
+            raise ValueError("Mục chữ thuộc về track chữ")
         item = {"id": _new_id("s"), "at": int(at), "dur": int(dur),
                 "text": text,
                 "textStyle": {"size": float(size), "positionY": float(position_y),
@@ -874,18 +873,18 @@ class Project:
         start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
         if edge == "start":
             if not (start < to_frame < end):
-                raise ValueError("Trim start must fall strictly inside the item")
+                raise ValueError("Điểm bắt đầu trim phải nằm hẳn bên trong mục")
             new_at, new_dur = to_frame, end - to_frame
             new_in = int(item.get("in", 0)) + (to_frame - start)
             start_delta = to_frame - start
         elif edge == "end":
             if not (start < to_frame < end):
-                raise ValueError("Trim end must fall strictly inside the item")
+                raise ValueError("Điểm kết thúc trim phải nằm hẳn bên trong mục")
             new_at, new_dur = start, to_frame - start
             new_in = int(item.get("in", 0))
             start_delta = 0
         else:
-            raise ValueError("edge must be 'start' or 'end'")
+            raise ValueError("edge phải là 'start' hoặc 'end'")
         # Linked partners take the same edge trim, by the same
         # timeline delta (start trims advance both partners' source
         # offset, end trims shorten both). A partner that would be
@@ -904,8 +903,7 @@ class Project:
                 p_in = int(partner.get("in", 0))
             if p_dur <= 0:
                 raise ValueError(
-                    f"Trim would leave linked clip {partner['id']} "
-                    f"with no duration")
+                    f"Trim sẽ khiến clip đã liên kết {partner['id']} không còn thời lượng")
             changes[partner["id"]] = (partner_track["id"], p_at, p_dur)
             if edge == "start":
                 in_updates.append((partner, p_in))
@@ -937,7 +935,7 @@ class Project:
         Raises before mutating when the point is outside the item."""
         start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
         if not (start < at_frame < end):
-            raise ValueError("Split point must fall strictly inside the item")
+            raise ValueError("Điểm tách phải nằm hẳn bên trong mục")
         right = copy.deepcopy(item)
         right["id"] = _new_id("c" if "media" in item else "s")
         right["at"] = at_frame
@@ -972,15 +970,14 @@ class Project:
         at_frame = int(at_frame)
         start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
         if not (start < at_frame < end):
-            raise ValueError("Split point must fall strictly inside the item")
+            raise ValueError("Điểm tách phải nằm hẳn bên trong mục")
         partners = self._link_partners(item)
         for _partner_track, partner in partners:
             p_start = int(partner["at"])
             p_end = p_start + int(partner["dur"])
             if not (p_start < at_frame < p_end):
                 raise ValueError(
-                    f"Linked clip {partner['id']} does not cover "
-                    f"the split point {at_frame}; split is refused")
+                    f"Clip đã liên kết {partner['id']} không phủ điểm tách {at_frame}; từ chối tách")
         # Every split below is pre-validated, so nothing here can
         # fail part-way: the split is atomic without a snapshot.
         split_partners = []
@@ -1013,9 +1010,9 @@ class Project:
         track, item = self.item(item_id)
         dest = self.track(track_id)
         if dest["kind"] == "text" and "media" in item:
-            raise ValueError("Cannot move a media clip onto a text track")
+            raise ValueError("Không chuyển được clip media sang track chữ")
         if dest["kind"] != "text" and "media" not in item:
-            raise ValueError("Cannot move a text item onto a media track")
+            raise ValueError("Không chuyển được mục chữ sang track media")
         old_track, old_at = track, int(item["at"])
         new_at = int(at)
         delta = new_at - old_at
@@ -1040,9 +1037,7 @@ class Project:
                     prev = ordered[idx - 1]
                     if new_at < int(prev["at"]) + int(prev["dur"]):
                         raise ValueError(
-                            "Magnetic move cannot jump over the "
-                            "previous Main clip (clip order is "
-                            "preserved)")
+                            "Di chuyển magnetic không được nhảy qua clip Main trước đó (thứ tự clip được giữ nguyên)")
                 for follower in ordered[idx + 1:]:
                     self._shift_with_partners(changes, track, follower,
                                               delta)
@@ -1060,8 +1055,7 @@ class Project:
                     o_start = int(other["at"])
                     if o_start < new_at < o_start + int(other["dur"]):
                         raise ValueError(
-                            "Magnetic move cannot land inside a "
-                            "Main clip")
+                            "Di chuyển magnetic không được rơi vào trong clip Main")
                 for other in dest["items"]:
                     if int(other["at"]) >= new_at:
                         self._shift_with_partners(changes, dest, other,
@@ -1132,7 +1126,7 @@ class Project:
     def set_speed(self, item_id: str, speed: float) -> dict:
         _, item = self.item(item_id)
         if speed <= 0:
-            raise ValueError("Speed must be positive")
+            raise ValueError("Tốc độ phải dương")
         item["speed"] = float(speed)
         self._bump()
         return item
@@ -1150,7 +1144,7 @@ class Project:
     def set_text(self, item_id: str, text: str) -> dict:
         _, item = self.item(item_id)
         if "text" not in item:
-            raise ValueError("Item has no text field")
+            raise ValueError("Mục không có trường text")
         item["text"] = text
         self._bump()
         return item
@@ -1170,13 +1164,12 @@ class Project:
         override the preset's values for that field."""
         _, item = self.item(item_id)
         if "text" not in item:
-            raise ValueError("Item has no text field")
+            raise ValueError("Mục không có trường text")
         style = dict(item.get("textStyle", {}))
         if preset is not None:
             if preset not in TEXT_PRESETS:
                 raise ValueError(
-                    f"Unknown text preset: {preset!r} "
-                    f"(choose one of {', '.join(sorted(TEXT_PRESETS))})")
+                    f"Preset chữ không rõ: {preset!r} (hãy chọn một trong {', '.join(sorted(TEXT_PRESETS))})")
             style.update(TEXT_PRESETS[preset])
         if size is not None:
             style["size"] = float(size)
@@ -1198,9 +1191,9 @@ class Project:
         target track raises ValueError, like add_clip/add_text."""
         track = self.track(track_id)
         if track["kind"] == "text" and "text" not in item:
-            raise ValueError("Cannot place a media clip on a text track")
+            raise ValueError("Không đặt được clip media lên track chữ")
         if track["kind"] != "text" and "text" in item:
-            raise ValueError("Text items belong on a text track")
+            raise ValueError("Mục chữ thuộc về track chữ")
         if "text" in item:
             new = self.add_text(track_id, item["text"], int(at),
                                 int(item["dur"]))
@@ -1237,29 +1230,26 @@ class Project:
         """
         if kind in UNRENDERABLE_TRANSITION_KINDS:
             raise ValueError(
-                f"Transition kind {kind!r} cannot be rendered: no FFmpeg "
-                f"filter chain reproduces it; path: pre-rendered segment")
+                f"Kiểu transition {kind!r} không render được: không có chuỗi filter FFmpeg nào tái tạo được nó; hướng xử lý: đoạn render trước")
         if kind not in TRANSITION_XFADE and \
                 kind not in MOTION_TRANSITION_KINDS and \
                 kind not in HALFTONE_TRANSITION_KINDS:
             raise ValueError(
-                f"Unknown transition kind: {kind!r} "
-                f"(choose one of {', '.join(TRANSITION_KINDS)})")
+                f"Unknown transition kind: {kind!r} (hãy chọn một trong {', '.join(TRANSITION_KINDS)})")
         duration_s = float(duration_s)
         if not 0.1 <= duration_s <= 2.0:
-            raise ValueError("Transition duration must be 0.1–2.0 seconds")
+            raise ValueError("Thời lượng transition phải từ 0,1–2,0 giây")
         _, from_item = self.item(from_id)
         _, to_item = self.item(to_id)
         main = next((t for t in self.data["tracks"]
                      if t.get("role") == "main" and t["kind"] == "video"), None)
         if main is None:
-            raise ValueError("Project has no main video track")
+            raise ValueError("Project chưa có track video chính")
         main_ids = [i["id"] for i in main["items"]]
         if from_id not in main_ids or to_id not in main_ids:
-            raise ValueError("Transitions only join main-track clips")
+            raise ValueError("Transition chỉ nối các clip trên track chính")
         if int(from_item["at"]) + int(from_item["dur"]) != int(to_item["at"]):
-            raise ValueError("Transition clips must be directly consecutive "
-                             "(no gap between them)")
+            raise ValueError("Các clip có transition phải kề nhau trực tiếp (không có khoảng trống giữa chúng)")
         dur_frames = seconds_to_frames(duration_s, self.fps)
         if dur_frames <= 0 or dur_frames > min(int(from_item["dur"]),
                                                int(to_item["dur"])):
@@ -1267,7 +1257,7 @@ class Project:
                              "adjacent clip")
         for existing in self.data["transitions"]:
             if existing["from"] == from_id and existing["to"] == to_id:
-                raise ValueError("A transition already exists for this cut")
+                raise ValueError("Cut này đã có transition")
         transition = {"id": _new_id("tr"), "kind": kind,
                       "from": from_id, "to": to_id,
                       "duration": dur_frames}
@@ -1280,7 +1270,7 @@ class Project:
         self.data["transitions"] = [t for t in self.data["transitions"]
                                     if t["id"] != transition_id]
         if len(self.data["transitions"]) == before:
-            raise KeyError(f"Unknown transition: {transition_id}")
+            raise KeyError(f"Transition không rõ: {transition_id}")
         self._bump()
 
     def set_keyframes(self, item_id: str, keyframes: list[dict]) -> dict:
@@ -1292,24 +1282,24 @@ class Project:
         for kf in keyframes:
             at = int(kf["at"])
             if not 0 <= at <= dur:
-                raise ValueError("Keyframe time must fall inside the item")
+                raise ValueError("Thời gian keyframe phải nằm trong mục")
             entry = {"at": at}
             for prop in KEYFRAME_PROPS:
                 if prop in kf:
                     value = float(kf[prop])
                     if prop in ("x", "y") and not 0.0 <= value <= 1.0:
-                        raise ValueError("x/y keyframes must be 0..1")
+                        raise ValueError("Keyframe x/y phải trong 0..1")
                     if prop == "scale" and value <= 0:
-                        raise ValueError("scale keyframes must be positive")
+                        raise ValueError("Keyframe scale phải dương")
                     if prop == "opacity" and not 0.0 <= value <= 1.0:
-                        raise ValueError("opacity keyframes must be 0..1")
+                        raise ValueError("Keyframe opacity phải trong 0..1")
                     if prop == "volume" and not -60.0 <= value <= 24.0:
-                        raise ValueError("volume keyframes must be -60..24 dB")
+                        raise ValueError("Keyframe volume phải trong -60..24 dB")
                     if prop == "tilt" and not -180.0 <= value <= 180.0:
-                        raise ValueError("tilt keyframes must be -180..180 degrees")
+                        raise ValueError("Keyframe tilt phải trong -180..180 độ")
                     entry[prop] = value
             if len(entry) == 1:
-                raise ValueError("Keyframe must set at least one property")
+                raise ValueError("Keyframe phải đặt ít nhất một thuộc tính")
             cleaned.append(entry)
         cleaned.sort(key=lambda k: k["at"])
         item["keyframes"] = cleaned
@@ -1320,7 +1310,7 @@ class Project:
                      value: float) -> dict:
         _, item = self.item(item_id)
         if prop not in KEYFRAME_PROPS:
-            raise ValueError(f"Unknown keyframe property: {prop!r}")
+            raise ValueError(f"Thuộc tính keyframe không rõ: {prop!r}")
         existing = [dict(kf) for kf in item.get("keyframes") or []]
         at = seconds_to_frames(float(at_seconds), self.fps)
         merged = False
@@ -1375,35 +1365,33 @@ class Project:
         if preset is not None:
             if preset not in COLOR_PRESETS:
                 raise ValueError(
-                    f"Unknown colour preset: {preset!r} "
-                    f"(choose one of {', '.join(sorted(COLOR_PRESETS))})")
+                    f"Preset màu không rõ: {preset!r} (hãy chọn một trong {', '.join(sorted(COLOR_PRESETS))})")
             color["preset"] = preset
         if strength is not None:
             strength = float(strength)
             if not 0.0 <= strength <= 1.0:
-                raise ValueError("LUT strength must be 0..1")
+                raise ValueError("Độ mạnh LUT phải trong 0..1")
             color["strength"] = strength
         if preset_strength is not None:
             preset_strength = float(preset_strength)
             if not 0.0 <= preset_strength <= 1.0:
-                raise ValueError("Colour preset strength must be 0..1")
+                raise ValueError("Độ mạnh preset màu phải trong 0..1")
             color["preset_strength"] = preset_strength
         if clear_eq:
             color.pop("eq", None)
         if eq is not None:
             if not isinstance(eq, dict) or not eq:
-                raise ValueError("eq must be a non-empty object")
+                raise ValueError("eq phải là object không rỗng")
             merged = dict(color.get("eq") or {})
             for key, value in eq.items():
                 if key not in self.EQ_RANGES:
                     raise ValueError(
-                        f"Unknown eq parameter: {key!r} "
-                        f"(choose one of {', '.join(sorted(self.EQ_RANGES))})")
+                        f"Thông số eq không rõ: {key!r} (hãy chọn một trong {', '.join(sorted(self.EQ_RANGES))})")
                 value = float(value)
                 lo, hi = self.EQ_RANGES[key]
                 if not lo <= value <= hi:
                     raise ValueError(
-                        f"eq {key} must be {lo}..{hi}, got {value}")
+                        f"eq {key} phải là {lo}..{hi}, nhận được {value}")
                 merged[key] = value
             color["eq"] = merged
         if not color:
@@ -1411,8 +1399,7 @@ class Project:
                 item["color"] = {}
                 self._bump()
                 return item
-            raise ValueError("Provide a LUT path, a colour preset, "
-                             "and/or eq parameters")
+            raise ValueError("Hãy cung cấp đường dẫn LUT, preset màu và/hoặc thông số eq")
         if "lut" in color:
             color.setdefault("strength", 1.0)
         if "preset" in color:
@@ -1431,7 +1418,7 @@ class Project:
         """
         import copy as _copy
         if out_frame <= in_frame:
-            raise ValueError("Source Out must be after Source In")
+            raise ValueError("Source Out phải đứng sau Source In")
         medium = self.media(media_id)
         if track_id is None:
             want_kind = medium.get("kind") or "video"
@@ -1482,15 +1469,12 @@ class Project:
                 continue
             if self._linked_video_id(item) is not None:
                 raise ValueError(
-                    "Cannot overwrite a linked audio clip: unlink "
-                    "it from its video first")
+                    "Không ghi đè được clip audio đã liên kết: hãy hủy liên kết nó khỏi video trước")
             for _pt, partner in self._link_partners(item):
                 if int(partner["at"]) != istart \
                         or int(partner["dur"]) != int(item["dur"]):
                     raise ValueError(
-                        f"Linked audio {partner['id']} is not "
-                        f"aligned with clip {item['id']}: unlink "
-                        f"or realign it before overwriting")
+                        f"Audio đã liên kết {partner['id']} không thẳng hàng với clip {item['id']}: hãy hủy liên kết hoặc căn lại trước khi ghi đè")
         # Partner edits are collected first and applied only after
         # the new clip is verified to fit the kept list, so a failed
         # overwrite never half-edits an audio track.
@@ -1702,11 +1686,10 @@ class Project:
                 partner_track, partner = self.item(audio_id)
             except KeyError:
                 raise ValueError(
-                    f"Linked audio clip {audio_id!r} is missing")
+                    f"Clip audio đã liên kết {audio_id!r} bị thiếu")
             if self._linked_video_id(partner) != item["id"]:
                 raise ValueError(
-                    f"Link to {audio_id!r} is one-way: its audio "
-                    f"does not link back to {item['id']!r}")
+                    f"Liên kết tới {audio_id!r} là một chiều: audio của nó không liên kết ngược tới {item['id']!r}")
             partners.append((partner_track, partner))
         video_id = self._linked_video_id(item)
         if video_id is not None:
@@ -1714,11 +1697,10 @@ class Project:
                 partner_track, partner = self.item(video_id)
             except KeyError:
                 raise ValueError(
-                    f"Linked video clip {video_id!r} is missing")
+                    f"Clip video đã liên kết {video_id!r} bị thiếu")
             if item["id"] not in self._linked_audio_ids(partner):
                 raise ValueError(
-                    f"Link to {video_id!r} is one-way: its video "
-                    f"does not link back to {item['id']!r}")
+                    f"Liên kết tới {video_id!r} là một chiều: video của nó không liên kết ngược tới {item['id']!r}")
             partners.append((partner_track, partner))
         return partners
 
@@ -1735,20 +1717,20 @@ class Project:
         _, video = self.item(video_clip_id)
         audio_track, audio = self.item(audio_clip_id)
         if "media" not in video or "media" not in audio:
-            raise ValueError("Only media clips can be linked")
+            raise ValueError("Chỉ clip media mới liên kết được")
         if audio_track["kind"] != "audio":
-            raise ValueError("Linked audio must live on an audio track")
+            raise ValueError("Audio đã liên kết phải nằm trên track audio")
         if video_clip_id == audio_clip_id:
-            raise ValueError("A clip cannot link to itself")
+            raise ValueError("Một clip không thể liên kết với chính nó")
         existing = self._linked_video_id(audio)
         if existing is not None:
             if existing == video_clip_id:
-                raise ValueError("These clips are already linked")
+                raise ValueError("Các clip này đã liên kết rồi")
             raise ValueError(
-                f"Audio clip is already linked to {existing!r}")
+                f"Clip audio đã liên kết tới {existing!r}")
         ids = self._linked_audio_ids(video)
         if audio_clip_id in ids:
-            raise ValueError("These clips are already linked")
+            raise ValueError("Các clip này đã liên kết rồi")
         ids.append(audio_clip_id)
         video["linked_audio"] = ids
         audio["linked_video"] = video_clip_id
@@ -1766,11 +1748,11 @@ class Project:
         if audio_clip_id is None:
             targets = list(ids)
             if not targets:
-                raise ValueError("Video clip has no linked audio")
+                raise ValueError("Clip video không có audio liên kết")
         else:
             if audio_clip_id not in ids:
                 raise ValueError(
-                    "Audio clip is not linked to this video clip")
+                    "Clip audio không liên kết với clip video này")
             targets = [audio_clip_id]
         for target_id in targets:
             try:
@@ -1837,18 +1819,15 @@ class Project:
             for item_id, at, dur in ordered:
                 if at < 0:
                     raise ValueError(
-                        f"Item {item_id} would start before frame 0 "
-                        f"on track {track_id}")
+                        f"Mục {item_id} sẽ bắt đầu trước khung hình 0 trên track {track_id}")
                 if dur <= 0:
                     raise ValueError(
-                        f"Item {item_id} would have no duration "
-                        f"on track {track_id}")
+                        f"Mục {item_id} sẽ không còn thời lượng trên track {track_id}")
             for (id1, at1, dur1), (id2, at2, _dur2) in zip(
                     ordered, ordered[1:]):
                 if at1 + dur1 > at2:
                     raise ValueError(
-                        f"Item {id1} would overlap {id2} "
-                        f"on track {track_id}")
+                        f"Mục {id1} sẽ chồng lấn {id2} trên track {track_id}")
 
     def _apply_planned(self, changes: dict, removed=frozenset()) -> None:
         """Apply position/duration changes and removals validated by
@@ -1886,7 +1865,7 @@ class Project:
         planned = (track_id, at, dur)
         if item_id in changes and changes[item_id] != planned:
             raise ValueError(
-                f"Conflicting planned positions for item {item_id}")
+                f"Vị trí dự kiến xung đột cho mục {item_id}")
         changes[item_id] = planned
 
     def _shift_with_partners(self, changes: dict, track: dict,
@@ -1996,14 +1975,14 @@ class Project:
         moving it to its current position is a no-op."""
         track, item = self.item(item_id)
         if not self._is_main_track(track):
-            raise ValueError("Reorder applies to Main-track clips only")
+            raise ValueError("Sắp xếp lại chỉ áp dụng cho clip trên track Main")
         ordered = sorted(track["items"], key=lambda i: i["at"])
         ids = [i["id"] for i in ordered]
         if before_id is not None:
             if before_id == item_id:
-                raise ValueError("Cannot reorder a clip before itself")
+                raise ValueError("Không sắp xếp lại clip trước chính nó")
             if before_id not in ids:
-                raise ValueError(f"Unknown clip: {before_id!r}")
+                raise ValueError(f"Clip không rõ: {before_id!r}")
             before = next(i for i in ordered if i["id"] == before_id)
             target = int(before["at"])
             if ids.index(before_id) == ids.index(item_id) + 1:
@@ -2093,15 +2072,14 @@ class Project:
         """
         if preset not in self.SPEED_CURVE_PRESETS:
             raise ValueError(
-                f"Unknown speed-curve preset: {preset!r} "
-                f"(choose one of {', '.join(sorted(self.SPEED_CURVE_PRESETS))})")
+                f"Preset speed-curve không rõ: {preset!r} (hãy chọn một trong {', '.join(sorted(self.SPEED_CURVE_PRESETS))})")
         track, item = self.item(item_id)
         if "media" not in item:
-            raise ValueError("Speed curves apply to media clips only")
+            raise ValueError("Speed curve chỉ áp dụng cho clip media")
         points = self.SPEED_CURVE_PRESETS[preset]
         start, dur = int(item["at"]), int(item["dur"])
         if dur <= 0:
-            raise ValueError("Clip duration must be positive")
+            raise ValueError("Thời lượng clip phải dương")
         bounds = []
         for t, _ in points[1:-1]:
             at = start + int(round(dur * t))
@@ -2134,7 +2112,7 @@ class Project:
         clearing it restores forward playback."""
         _, item = self.item(item_id)
         if "media" not in item:
-            raise ValueError("Reverse applies to media clips only")
+            raise ValueError("Reverse chỉ áp dụng cho clip media")
         item["reverse"] = bool(reverse)
         self._bump()
         return item
@@ -2145,7 +2123,7 @@ class Project:
         source frame before scaling, never stretching it."""
         _, item = self.item(item_id)
         if "media" not in item:
-            raise ValueError("Reframe applies to media clips only")
+            raise ValueError("Reframe chỉ áp dụng cho clip media")
         if window is None:
             item.pop("reframe", None)
         else:
@@ -2169,12 +2147,10 @@ class Project:
         track, item = self.item(item_id)
         if "media" not in item or track.get("kind") != "video":
             raise ValueError(
-                "Backdrop applies to video clips or images only")
+                "Backdrop chỉ áp dụng cho clip video hoặc ảnh")
         if track.get("role") != "main":
             raise ValueError(
-                "Backdrop renders on the main track only in this "
-                "build; overlay video items have no backdrop layer "
-                "yet")
+                "Bản build này backdrop chỉ render trên track chính; mục video overlay chưa có lớp backdrop")
         if backdrop is None:
             item.pop("backdrop", None)
         else:
@@ -2191,10 +2167,10 @@ class Project:
         """
         track, item = self.item(item_id)
         if "media" not in item:
-            raise ValueError("Freeze applies to media clips only")
+            raise ValueError("Freeze chỉ áp dụng cho clip media")
         extra_frames = int(extra_frames)
         if extra_frames <= 0:
-            raise ValueError("Freeze length must be positive frames")
+            raise ValueError("Độ dài freeze phải là số khung hình dương")
         try:
             media_fps = fps_value(self.media(item["media"]).get(
                 "fps", self.fps))
@@ -2242,7 +2218,7 @@ class Project:
         marks status accepted. Requires a prior run_review call."""
         review = self.data.get("review")
         if not review or review.get("status") not in ("run", "verified"):
-            raise ValueError("Run a review before accepting it")
+            raise ValueError("Hãy chạy review trước khi chấp nhận")
         review["status"] = "accepted"
         review["accepted_rev"] = self.rev
         self._bump()
@@ -2255,7 +2231,7 @@ class Project:
         pass/fail verdict beyond the counts."""
         old = self.data.get("review")
         if not old:
-            raise ValueError("Run a review before verifying it")
+            raise ValueError("Hãy chạy review trước khi xác minh")
         fresh = self.run_review()
         fresh["status"] = "verified"
         fresh["previous_issue_count"] = old.get("issue_count")
@@ -2287,7 +2263,7 @@ class Project:
         self.data["library"] = [e for e in self.data.get("library", [])
                                 if e["id"] != entry_id]
         if len(self.data["library"]) == before:
-            raise KeyError(f"Unknown library item: {entry_id}")
+            raise KeyError(f"Mục thư viện không rõ: {entry_id}")
         self._bump()
         return {"deleted": entry_id}
 
@@ -2300,7 +2276,7 @@ class Project:
         entry = next((e for e in self.data.get("library", [])
                       if e["id"] == entry_id), None)
         if entry is None:
-            raise KeyError(f"Unknown library item: {entry_id}")
+            raise KeyError(f"Mục thư viện không rõ: {entry_id}")
         src = entry["item"]
         if "media" in src:
             if track_id is None:
@@ -2339,11 +2315,11 @@ class Project:
         brand = dict(self.data.get("brand") or {})
         if colours is not None:
             if not isinstance(colours, list):
-                raise ValueError("Brand colours must be a list")
+                raise ValueError("Màu thương hiệu phải là danh sách")
             for c in colours:
                 if not isinstance(c, str) or not c.startswith("#"):
                     raise ValueError(
-                        f"Brand colour must be a hex string: {c!r}")
+                        f"Màu thương hiệu phải là chuỗi hex: {c!r}")
             brand["colours"] = list(colours)
         if logo_media is not None:
             if logo_media == "":
@@ -2363,7 +2339,7 @@ class Project:
         track = self.track(track_id)
         name = (name or "").strip()
         if not name:
-            raise ValueError("Track name must not be empty")
+            raise ValueError("Tên track không được để trống")
         track["name"] = name
         self._bump()
         return track
@@ -2375,9 +2351,9 @@ class Project:
         """
         track = self.track(track_id)
         if track.get("role") == "main":
-            raise ValueError("Cannot remove the Main track")
+            raise ValueError("Không xóa được track Main")
         if track["items"]:
-            raise ValueError("Track still has clips; delete them first")
+            raise ValueError("Track vẫn còn clip; hãy xóa chúng trước")
         self.data["tracks"] = [t for t in self.data["tracks"]
                                if t["id"] != track_id]
         self._bump()
@@ -2387,7 +2363,7 @@ class Project:
     def add_marker(self, text: str, at_frame: int) -> dict:
         """Add a timeline marker (stored in the project's markers[])."""
         if not str(text).strip():
-            raise ValueError("Marker text must not be empty")
+            raise ValueError("Nội dung marker không được để trống")
         marker = {"id": _new_id("mk"), "text": str(text),
                   "at": int(at_frame)}
         self.data.setdefault("markers", []).append(marker)
@@ -2400,7 +2376,7 @@ class Project:
         self.data["markers"] = [m for m in self.data.get("markers", [])
                                 if m["id"] != marker_id]
         if len(self.data["markers"]) == before:
-            raise KeyError(f"Unknown marker: {marker_id}")
+            raise KeyError(f"Marker không rõ: {marker_id}")
         self._bump()
 
     def move_marker(self, marker_id: str, at_frame: int) -> dict:
@@ -2410,7 +2386,7 @@ class Project:
                 marker["at"] = int(at_frame)
                 self._bump()
                 return marker
-        raise KeyError(f"Unknown marker: {marker_id}")
+        raise KeyError(f"Marker không rõ: {marker_id}")
 
     def clip_at_time(self, frame: int) -> dict | None:
         """The main-track clip covering ``frame``, or None (Phase 8).
@@ -2432,14 +2408,14 @@ class Project:
         (including overlap) before any of them is added."""
         track = self.track(track_id)
         if track["kind"] != "text":
-            raise ValueError("SRT cues belong on a text track")
+            raise ValueError("Cue SRT thuộc về track chữ")
         cues = parse_srt(text)
         items = []
         for start_s, end_s, body in cues:
             at = seconds_to_frames(start_s, self.fps)
             dur = seconds_to_frames(end_s, self.fps) - at
             if dur <= 0:
-                raise ValueError(f"SRT cue too short to place: {body!r}")
+                raise ValueError(f"Cue SRT quá ngắn để đặt: {body!r}")
             item = {"id": _new_id("s"), "at": at, "dur": dur, "text": body,
                     "textStyle": {"size": 0.062, "positionY": 0.8,
                                   "positionX": 0.5}}
@@ -2448,7 +2424,7 @@ class Project:
                 o_start, o_end = other["at"], other["at"] + other["dur"]
                 if at < o_end and o_start < at + dur:
                     raise ValueError(
-                        f"SRT cue overlaps another imported cue: {body!r}")
+                        f"Cue SRT chồng lấn một cue đã import khác: {body!r}")
             items.append(item)
         for item in items:
             track["items"].append(item)
@@ -2493,27 +2469,27 @@ class Project:
         invalid LUT is a hard error, never a silent skip.
         """
         if int(dur) <= 0:
-            raise ValueError("Adjustment duration must be positive")
+            raise ValueError("Thời lượng adjustment phải dương")
         color: dict = {}
         if lut is not None:
             validate_cube(lut)
             color["lut"] = lut
         if preset is not None:
             if preset not in COLOR_PRESETS:
-                raise ValueError(f"Unknown colour preset: {preset!r}")
+                raise ValueError(f"Preset màu không rõ: {preset!r}")
             color["preset"] = preset
         if strength is not None:
             strength = float(strength)
             if not 0.0 <= strength <= 1.0:
-                raise ValueError("LUT strength must be 0..1")
+                raise ValueError("Độ mạnh LUT phải trong 0..1")
             color["strength"] = strength
         if preset_strength is not None:
             preset_strength = float(preset_strength)
             if not 0.0 <= preset_strength <= 1.0:
-                raise ValueError("Colour preset strength must be 0..1")
+                raise ValueError("Độ mạnh preset màu phải trong 0..1")
             color["preset_strength"] = preset_strength
         if not color:
-            raise ValueError("Provide a LUT path and/or a colour preset")
+            raise ValueError("Hãy cung cấp đường dẫn LUT và/hoặc preset màu")
         color.setdefault("strength", 1.0)
         if "preset" in color:
             color.setdefault("preset_strength", 1.0)
@@ -2531,7 +2507,7 @@ class Project:
         before = len(track["items"])
         track["items"] = [i for i in track["items"] if i["id"] != item_id]
         if len(track["items"]) == before:
-            raise KeyError(f"Unknown adjustment layer: {item_id}")
+            raise KeyError(f"Lớp adjustment không rõ: {item_id}")
         self._bump()
 
     def list_adjustments(self) -> list[dict]:
@@ -2554,7 +2530,7 @@ class Project:
         """
         _, item = self.item(item_id)
         if "text" not in item:
-            raise ValueError("Karaoke belongs on a text item")
+            raise ValueError("Karaoke thuộc về mục chữ")
         dur_s = frames_to_seconds(int(item["dur"]), self.fps)
         cleaned: list[dict] = []
         prev_end = 0.0
@@ -2562,13 +2538,12 @@ class Project:
             text = str(word.get("text", "")).strip()
             start, end = float(word["start"]), float(word["end"])
             if not text:
-                raise ValueError("Karaoke word text must not be empty")
+                raise ValueError("Nội dung từ karaoke không được để trống")
             if not (0.0 <= start < end <= dur_s + 1e-9):
                 raise ValueError(
-                    f"Karaoke word {text!r} falls outside the cue")
+                    f"Từ karaoke {text!r} nằm ngoài cue")
             if start < prev_end - 1e-9:
-                raise ValueError("Karaoke words must be in order "
-                                 "and non-overlapping")
+                raise ValueError("Từ karaoke phải theo thứ tự và không chồng lấn")
             entry: dict = {"text": text, "start": start, "end": end}
             # Phase 5: optional per-syllable timings. Syllables must
             # join (concatenated, no separator) to the word text,
@@ -2579,8 +2554,7 @@ class Project:
             if syllables is not None:
                 if not isinstance(syllables, list) or not syllables:
                     raise ValueError(
-                        f"Karaoke syllables for {text!r} must be a "
-                        f"non-empty list")
+                        f"Âm tiết karaoke cho {text!r} phải là danh sách không rỗng")
                 cleaned_syl: list[dict] = []
                 prev_syl_end = start
                 for syl in syllables:
@@ -2588,34 +2562,30 @@ class Project:
                     syl_start, syl_end = float(syl["start"]), float(syl["end"])
                     if not syl_text:
                         raise ValueError(
-                            "Karaoke syllable text must not be empty")
+                            "Nội dung âm tiết karaoke không được để trống")
                     if not (start - 1e-9 <= syl_start < syl_end
                             <= end + 1e-9):
                         raise ValueError(
-                            f"Karaoke syllable {syl_text!r} falls "
-                            f"outside word {text!r}")
+                            f"Âm tiết karaoke {syl_text!r} nằm ngoài từ {text!r}")
                     if syl_start < prev_syl_end - 1e-9:
                         raise ValueError(
-                            "Karaoke syllables must be in order and "
-                            "non-overlapping")
+                            "Âm tiết karaoke phải theo thứ tự và không chồng lấn")
                     cleaned_syl.append({"text": syl_text,
                                         "start": syl_start,
                                         "end": syl_end})
                     prev_syl_end = syl_end
                 if "".join(s["text"] for s in cleaned_syl) != text:
                     raise ValueError(
-                        f"Karaoke syllables {''.join(s['text'] for s in cleaned_syl)!r} "
-                        f"do not join to word {text!r}")
+                        f"Âm tiết karaoke {''.join(s['text'] for s in cleaned_syl)!r} không ghép thành từ {text!r}")
                 entry["syllables"] = cleaned_syl
             cleaned.append(entry)
             prev_end = end
         if not cleaned:
-            raise ValueError("Karaoke needs at least one word")
+            raise ValueError("Karaoke cần ít nhất một từ")
         joined = " ".join(w["text"] for w in cleaned)
         if " ".join(str(item["text"]).split()) != joined:
             raise ValueError(
-                f"Karaoke words {joined!r} do not match cue text "
-                f"{item['text']!r}")
+                f"Từ karaoke {joined!r} không khớp nội dung cue {item['text']!r}")
         item["karaoke"] = {"words": cleaned}
         self._bump()
         return item
@@ -2623,7 +2593,7 @@ class Project:
     def karaoke_get(self, item_id: str) -> dict:
         _, item = self.item(item_id)
         if "karaoke" not in item:
-            raise KeyError(f"Item has no karaoke timings: {item_id}")
+            raise KeyError(f"Mục không có timing karaoke: {item_id}")
         return copy.deepcopy(item["karaoke"])
 
     # -- Phase 4: ducking ---------------------------------------------
@@ -2636,13 +2606,13 @@ class Project:
         is given explicitly; threshold is linear (0..1).
         """
         if not 0.0 < float(amount_db) <= 24.0:
-            raise ValueError("Duck amount must be 0..24 dB")
+            raise ValueError("Lượng duck phải trong 0..24 dB")
         if not 0.0 < float(threshold) <= 1.0:
-            raise ValueError("Duck threshold must be 0..1 (linear)")
+            raise ValueError("Ngưỡng duck phải trong 0..1 (tuyến tính)")
         if ratio is None:
             ratio = 10.0 ** (float(amount_db) / 20.0)
         if not 1.0 <= float(ratio) <= 20.0:
-            raise ValueError("Duck ratio must be 1..20")
+            raise ValueError("Tỉ lệ duck phải trong 1..20")
         config = {"enabled": bool(enabled), "amountDb": float(amount_db),
                   "threshold": float(threshold), "ratio": float(ratio),
                   "attack": float(attack), "release": float(release)}
@@ -2727,7 +2697,7 @@ class Project:
         warnings: list[str] = []
         data = self.data
         if data.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
-            errors.append(f"Unsupported schema: {data.get('schema')!r}")
+            errors.append(f"Schema không hỗ trợ: {data.get('schema')!r}")
         # Round 19: a video clip whose media has no fps cannot have
         # its timeline duration verified against the source frame
         # rate, so it is reported (not silently trusted).
@@ -2738,14 +2708,11 @@ class Project:
                 if medium is not None and medium.get("kind") == "video" \
                         and not medium.get("fps"):
                     warnings.append(
-                        f"Item {item['id']} references video media "
-                        f"{medium['id']} with unknown fps: its "
-                        f"timeline duration cannot be verified "
-                        f"against the source frame rate")
+                        f"Mục {item['id']} tham chiếu media video {medium['id']} chưa rõ fps: không kiểm chứng được thời lượng timeline theo frame rate nguồn")
         mains = [t for t in data["tracks"]
                  if t.get("role") == "main" and t["kind"] == "video"]
         if not mains:
-            errors.append("Project has no main video track")
+            errors.append("Project chưa có track video chính")
         media_ids = {m["id"] for m in data["media"]}
         items_by_id: dict[str, dict] = {}
         for track in data["tracks"]:
@@ -2754,18 +2721,16 @@ class Project:
                 items_by_id[item["id"]] = item
                 if "media" in item and item["media"] not in media_ids:
                     errors.append(
-                        f"Item {item['id']} references unknown media "
-                        f"{item['media']!r}")
+                        f"Mục {item['id']} tham chiếu media không rõ {item['media']!r}")
                 if int(item.get("dur", 0)) <= 0:
-                    errors.append(f"Item {item['id']} has no duration")
+                    errors.append(f"Mục {item['id']} không có thời lượng")
                 for other in seen:
                     o_start = int(other["at"])
                     o_end = o_start + int(other["dur"])
                     start, end = int(item["at"]), int(item["at"]) + int(item["dur"])
                     if start < o_end and o_start < end:
                         errors.append(
-                            f"Item {item['id']} overlaps {other['id']} "
-                            f"on track {track['id']}")
+                            f"Mục {item['id']} chồng lấn {other['id']} trên track {track['id']}")
                 seen.append(item)
         # Phase B2: link integrity (reported, not raised, like the
         # other validation errors): every linked id must exist and
@@ -2780,19 +2745,16 @@ class Project:
                         partner = items_by_id.get(audio_id)
                         if partner is None:
                             errors.append(
-                                f"Item {item['id']} links to unknown "
-                                f"audio {audio_id!r}")
+                                f"Mục {item['id']} liên kết tới audio không rõ {audio_id!r}")
                         elif partner.get("linked_video") != item["id"]:
                             errors.append(
-                                f"Item {item['id']} has a one-way "
-                                f"link to {audio_id}")
+                                f"Mục {item['id']} has a one-way link to {audio_id}")
                 video_id = item.get("linked_video")
                 if video_id is not None:
                     partner = items_by_id.get(video_id)
                     if partner is None:
                         errors.append(
-                            f"Item {item['id']} links to unknown "
-                            f"video {video_id!r}")
+                            f"Mục {item['id']} liên kết tới video không rõ {video_id!r}")
                     else:
                         partner_links = partner.get("linked_audio")
                         partner_ids = [partner_links] \
@@ -2800,24 +2762,20 @@ class Project:
                             else list(partner_links or [])
                         if item["id"] not in partner_ids:
                             errors.append(
-                                f"Item {item['id']} has a one-way "
-                                f"link to {video_id}")
+                                f"Mục {item['id']} has a one-way link to {video_id}")
         for trans in data.get("transitions", []):
             if trans.get("kind") in UNRENDERABLE_TRANSITION_KINDS:
                 errors.append(
-                    f"Transition {trans.get('id')} kind "
-                    f"{trans.get('kind')!r} cannot be rendered")
+                    f"Transition {trans.get('id')} kiểu {trans.get('kind')!r} không render được")
             elif trans.get("kind") not in TRANSITION_XFADE and \
                     trans.get("kind") not in MOTION_TRANSITION_KINDS and \
                     trans.get("kind") not in HALFTONE_TRANSITION_KINDS:
                 errors.append(
-                    f"Transition {trans.get('id')} has unknown kind "
-                    f"{trans.get('kind')!r}")
+                    f"Transition {trans.get('id')} có kiểu không rõ {trans.get('kind')!r}")
             for key in ("from", "to"):
                 if trans.get(key) not in items_by_id:
                     errors.append(
-                        f"Transition {trans.get('id')} references "
-                        f"unknown clip {trans.get(key)!r}")
+                        f"Transition {trans.get('id')} tham chiếu clip không rõ {trans.get(key)!r}")
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     # -- readouts -----------------------------------------------------

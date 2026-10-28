@@ -15,9 +15,9 @@ import os
 def waveform_peaks(path: str, buckets: int = 64) -> list[float]:
     """Return ``buckets`` RMS peaks in [0, 1] for an audio/video file."""
     if buckets <= 0:
-        raise ValueError("buckets must be positive")
+        raise ValueError("buckets phải là số dương")
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"No such media file: {path}")
+        raise FileNotFoundError(f"Không có file media như vậy: {path}")
     from .beats import decode_mono
 
     samples = decode_mono(path)

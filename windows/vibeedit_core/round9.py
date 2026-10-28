@@ -114,8 +114,7 @@ def _require_run_result(proj) -> dict:
     if not review or review.get("status") not in (
             "run", "verified", "accepted"):
         raise ValueError(
-            "No run result yet; run a review first "
-            "(vibeedit_review_run)")
+            "Chưa có kết quả run nào; hãy chạy review trước (vibeedit_review_run)")
     return review
 
 
@@ -143,8 +142,7 @@ def run_fix_issues(proj, output: str | None = None) -> dict:
     warnings = len(validation.get("warnings", []))
     if errors + warnings == 0:
         raise ValueError(
-            "No review issues left to fix; the result card's "
-            "Fix remaining issues needs issuesLeft > 0")
+            "Không còn issue review nào để sửa; nút Fix remaining issues trên thẻ kết quả cần issuesLeft > 0")
     exported = f"The export is done ({output}). " if output else ""
     request = (
         exported
@@ -226,16 +224,15 @@ def show_plugin_view(proj, plugin: str, view_id: str,
     """
     plugins = load_plugins(plugins_dir)
     if plugin not in plugins or plugins[plugin].get("_errors"):
-        raise KeyError(f"Unknown plugin: {plugin!r}")
+        raise KeyError(f"Plugin không rõ: {plugin!r}")
     info = plugins[plugin]
     views = info.get("manifest_views") or []
     if not views:
         raise ValueError(
-            f"Plugin {plugin!r} has no views; see plugins list "
-            "--views")
+            f"Plugin {plugin!r} không có view; xem plugins list --views")
     if plugin in _disabled_ids(plugins_dir):
         raise ValueError(
-            f"Plugin {plugin!r} is disabled; enable it first")
+            f"Plugin {plugin!r} đang tắt; hãy bật nó trước")
     view = _manifest_view(info, view_id)
     location = view.get("placement", "panel")
     if location == "inspector":

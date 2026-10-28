@@ -84,9 +84,9 @@ def detect_cuts(path: str, threshold: float = DEFAULT_THRESHOLD,
     audio-only file has no picture to cut).
     """
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"Media file not found: {path}")
+        raise FileNotFoundError(f"Không tìm thấy file media: {path}")
     if not 0.0 < threshold < 1.0:
-        raise ValueError("threshold must be between 0 and 1 (exclusive)")
+        raise ValueError("threshold phải nằm trong khoảng 0–1 (không tính biên)")
     # FFmpeg exits 0 on an audio-only file (it simply ignores -vf
     # with no video stream to filter), so the video-stream check
     # must be explicit — never report "no cuts" for a file that
@@ -95,11 +95,10 @@ def detect_cuts(path: str, threshold: float = DEFAULT_THRESHOLD,
         info = probe_media(path)
     except Exception as exc:
         raise ValueError(
-            f"Cannot probe media for scene detection: {exc}") from None
+            f"Không probe được media để phát hiện cảnh: {exc}") from None
     if "width" not in info:
         raise ValueError(
-            "Scene detection needs a video stream; this file has "
-            "none (audio-only?)")
+            "Phát hiện cảnh cần video stream; file này không có (chỉ có audio?)")
     tool = ffmpeg or find_tool("ffmpeg")
     cmd = [tool, "-hide_banner", "-i", path, "-vf",
            f"select='gt(scene,{threshold})',showinfo",
@@ -108,8 +107,7 @@ def detect_cuts(path: str, threshold: float = DEFAULT_THRESHOLD,
                           encoding="utf-8", errors="replace", timeout=300)
     if proc.returncode != 0:
         raise ValueError(
-            "Scene detection failed (is this a video file with a "
-            f"video stream?): {proc.stderr.strip()[-400:]}")
+            f"Phát hiện cảnh thất bại (đây có phải file video có video stream?): {proc.stderr.strip()[-400:]}")
     raw = _parse_showinfo_times(proc.stderr or "")
     return {"cuts": _merge_close(raw),
             "detected_frames": [round(t, 3) for t in sorted(raw)],
@@ -128,16 +126,16 @@ def _parse_seconds(value, label: str) -> list[float]:
     elif isinstance(value, list):
         items = value
     else:
-        raise ValueError(f"{label} must be seconds, comma separated")
+        raise ValueError(f"{label} phải là số giây, cách nhau bằng dấu phẩy")
     out: list[float] = []
     for item in items:
         try:
             seconds = float(item)
         except (TypeError, ValueError):
             raise ValueError(
-                f"{label} has a non-numeric entry: {item!r}") from None
+                f"{label} có mục không phải số: {item!r}") from None
         if seconds < 0:
-            raise ValueError(f"{label} has a negative second: {seconds}")
+            raise ValueError(f"{label} có giây âm: {seconds}")
         out.append(round(seconds, 3))
     return out
 
@@ -165,8 +163,7 @@ def apply_cut_corrections(detected: list[float], current: list[float],
         for seconds in added:
             if seconds > duration:
                 raise ValueError(
-                    f"add cut {seconds} is beyond the media duration "
-                    f"({duration}s)")
+                    f"thêm cut {seconds} vượt quá thời lượng media ({duration} giây)")
     cuts = sorted(set(round(t, 3) for t in base))
     for seconds in added:
         if seconds not in cuts:

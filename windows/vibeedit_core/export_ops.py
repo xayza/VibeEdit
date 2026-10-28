@@ -161,7 +161,7 @@ def import_otio(otio_path: str, dest_folder: str,
     with open(otio_path, encoding="utf-8") as fh:
         timeline = json.load(fh)
     if timeline.get("OTIO_SCHEMA") != "Timeline.1":
-        raise ValueError("Not an OpenTimelineIO Timeline.1 JSON file")
+        raise ValueError("Không phải file JSON OpenTimelineIO Timeline.1")
     otio_dir = os.path.dirname(os.path.abspath(otio_path))
     meta = (timeline.get("metadata") or {}).get("VibeEdit") or {}
     fmt = meta.get("format") or {"width": 1080, "height": 1920,
@@ -171,7 +171,7 @@ def import_otio(otio_path: str, dest_folder: str,
         found = find_project_file(dest_folder)
         if not found:
             raise FileNotFoundError(
-                f"No project file in folder for merge: {dest_folder}")
+                f"Không có file project trong thư mục để merge: {dest_folder}")
         # Phase 0: a merge rewrites an existing project, so back up
         # its saved file before importing (best-effort, never blocks
         # the import itself).
@@ -184,7 +184,7 @@ def import_otio(otio_path: str, dest_folder: str,
     else:
         if os.path.exists(os.path.join(dest_folder, PROJECT_FILENAME)):
             raise ValueError(
-                f"Destination already has a project: {dest_folder}")
+                f"Thư mục đích đã có project: {dest_folder}")
         os.makedirs(dest_folder, exist_ok=True)
         data = new_project(timeline.get("name") or "Imported OTIO",
                            width=int(fmt["width"]), height=int(fmt["height"]),
@@ -218,7 +218,7 @@ def import_otio(otio_path: str, dest_folder: str,
     for otio_track in otio_tracks:
         if otio_track.get("OTIO_SCHEMA") != "Track.1":
             warnings.append(
-                f"Skipped non-Track object: {otio_track.get('OTIO_SCHEMA')}")
+                f"Đã bỏ qua object không phải Track: {otio_track.get('OTIO_SCHEMA')}")
             continue
         tmeta = (otio_track.get("metadata") or {}).get("VibeEdit") or {}
         kind = otio_track.get("kind", "Video")
@@ -244,7 +244,7 @@ def import_otio(otio_path: str, dest_folder: str,
             if schema == "Transition.1":
                 tmeta2 = (child.get("metadata") or {}).get("VibeEdit") or {}
                 if prev_clip_id is None:
-                    warnings.append("Transition with no preceding clip skipped")
+                    warnings.append("Đã bỏ qua transition không có clip đứng trước")
                     continue
                 # The following clip is not known yet; stash it and
                 # resolve it when the next clip arrives.
@@ -257,7 +257,7 @@ def import_otio(otio_path: str, dest_folder: str,
                     "id": tmeta2.get("id")})
                 continue
             if schema != "Clip.1":
-                warnings.append(f"Skipped OTIO object: {schema}")
+                warnings.append(f"Đã bỏ qua object OTIO: {schema}")
                 continue
             cmeta = (child.get("metadata") or {}).get("VibeEdit") or {}
             src_range = child.get("source_range") or {}
@@ -265,7 +265,7 @@ def import_otio(otio_path: str, dest_folder: str,
             dur = (src_range.get("duration") or {}).get("value", 0)
             at = int(cmeta.get("at", 0))
             if dur <= 0:
-                warnings.append(f"Clip {cmeta.get('id')} has no duration, skipped")
+                warnings.append(f"Clip {cmeta.get('id')} không có thời lượng, đã bỏ qua")
                 continue
             clip_id = fresh_id(cmeta.get("id") or "", "c")
             ref = child.get("media_reference") or {}
@@ -348,13 +348,12 @@ def import_otio(otio_path: str, dest_folder: str,
                     kind2 = "dissolve" if pending["transition_type"] == \
                         "SMPTE_Dissolve" else None
                 if kind2 is None or pending["duration"] <= 0:
-                    warnings.append("Transition skipped: unknown kind "
-                                    "or zero duration")
+                    warnings.append("Đã bỏ qua transition: kiểu không rõ hoặc thời lượng bằng 0")
                     continue
                 from .project import TRANSITION_XFADE
                 if kind2 not in TRANSITION_XFADE:
                     warnings.append(
-                        f"Transition kind {kind2!r} not supported, skipped")
+                        f"Kiểu transition {kind2!r} không hỗ trợ, đã bỏ qua")
                     continue
                 from_id = id_map.get(pending["pending_from"],
                                      pending["pending_from"])
@@ -411,7 +410,7 @@ def export_karaoke_ass(project: dict, out_path: str) -> dict:
                 "size_frac": float(style.get("size", 0.062)),
                 "position_y": float(style.get("positionY", 0.8))})
     if not items:
-        raise ValueError("Project has no karaoke items")
+        raise ValueError("Project không có mục karaoke nào")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(build_ass(items, int(fmt["width"]), int(fmt["height"])))
@@ -437,16 +436,16 @@ def transition_preview(project: dict, folder: str,
     trans = next((t for t in project.get("transitions", [])
                   if t["id"] == transition_id), None)
     if trans is None:
-        raise ValueError(f"Unknown transition: {transition_id!r}")
+        raise ValueError(f"Transition không rõ: {transition_id!r}")
     items = {}
     for track in project["tracks"]:
         for item in track["items"]:
             items[item["id"]] = item
     if trans["from"] not in items or trans["to"] not in items:
-        raise ValueError("Transition references an unknown clip")
+        raise ValueError("Transition tham chiếu clip không rõ")
     from_item, to_item = items[trans["from"]], items[trans["to"]]
     if int(from_item["at"]) + int(from_item["dur"]) != int(to_item["at"]):
-        raise ValueError("Transition clips are not consecutive")
+        raise ValueError("Các clip có transition không kề nhau")
     rate = fps_value(project["format"]["fps"])
     trans_frames = int(trans["duration"])
     window = trans_frames + 15  # 0.5 s of context on each side
@@ -479,8 +478,7 @@ def transition_preview(project: dict, folder: str,
          "-frames:v", "1", png],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0 or not os.path.isfile(png):
-        raise RuntimeError(f"Transition preview frame grab failed: "
-                           f"{proc.stderr[-500:]}")
+        raise RuntimeError(f"Lấy khung hình xem trước transition thất bại: {proc.stderr[-500:]}")
     return {"transition": trans["id"], "kind": trans["kind"],
             "midpoint_seconds": round(midpoint, 3),
             "image": png, "video": video,
@@ -500,7 +498,7 @@ def batch_export(folders: list[str], preset: str = "full",
         try:
             found = find_project_file(folder)
             if not found:
-                raise FileNotFoundError(f"No project file in folder: {folder}")
+                raise FileNotFoundError(f"Không có file project trong thư mục: {folder}")
             data = load_project(found)
             out = os.path.join(
                 out_dir or os.path.join(folder, "render"),
@@ -520,12 +518,12 @@ def duplicate_project(src_folder: str, dest_folder: str,
     """Copy a project folder (media + project file, not renders or
     backups) and give the copy a new id, name and rev 0."""
     if os.path.abspath(src_folder) == os.path.abspath(dest_folder):
-        raise ValueError("Destination must differ from the source folder")
+        raise ValueError("Thư mục đích phải khác thư mục nguồn")
     found = find_project_file(src_folder)
     if not found:
-        raise FileNotFoundError(f"No project file in folder: {src_folder}")
+        raise FileNotFoundError(f"Không có file project trong thư mục: {src_folder}")
     if os.path.exists(dest_folder):
-        raise ValueError(f"Destination already exists: {dest_folder}")
+        raise ValueError(f"Thư mục đích đã tồn tại: {dest_folder}")
     os.makedirs(dest_folder)
     for entry in os.listdir(src_folder):
         src_path = os.path.join(src_folder, entry)
@@ -554,7 +552,7 @@ def media_metadata(project: dict, folder: str, media_id: str) -> dict:
     from .render import probe_media
     medium = next((m for m in project["media"] if m["id"] == media_id), None)
     if medium is None:
-        raise KeyError(f"Unknown media: {media_id}")
+        raise KeyError(f"Media không rõ: {media_id}")
     result = dict(medium)
     path = medium["path"]
     abs_path = path if os.path.isabs(path) else os.path.join(folder, path)

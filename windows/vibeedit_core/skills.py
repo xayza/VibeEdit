@@ -82,13 +82,12 @@ def _skill_path(skills_dir, skill_id):
     """
     if not isinstance(skill_id, str) or not _SAFE_ID.match(skill_id):
         raise ValueError(
-            "Invalid skill id %r: use a plain lowercase hyphenated name "
-            "with no path separators, extensions or '..'" % (skill_id,)
+            "Id skill không hợp lệ %r: dùng tên thường viết thường nối gạch ngang, không có dấu phân cách đường dẫn, phần mở rộng hay '..'" % (skill_id,)
         )
     base = _resolve_dir(skills_dir)
     path = os.path.normpath(os.path.join(base, skill_id + ".md"))
     if os.path.dirname(path) != base:
-        raise ValueError("Invalid skill id %r: escapes the skills directory"
+        raise ValueError("Id skill không hợp lệ %r: thoát khỏi thư mục skills"
                          % (skill_id,))
     return path
 
@@ -104,8 +103,7 @@ def _resolve_skill(skills_dir, skill_id):
     """
     if not isinstance(skill_id, str) or not _SAFE_ID.match(skill_id):
         raise ValueError(
-            "Invalid skill id %r: use a plain lowercase hyphenated name "
-            "with no path separators, extensions or '..'" % (skill_id,)
+            "Id skill không hợp lệ %r: dùng tên thường viết thường nối gạch ngang, không có dấu phân cách đường dẫn, phần mở rộng hay '..'" % (skill_id,)
         )
     base = _resolve_dir(skills_dir)
     folder = os.path.join(base, skill_id)
@@ -228,7 +226,7 @@ def get_skill(skills_dir, skill_id):
     """
     resolved = _resolve_skill(skills_dir, skill_id)
     if resolved is None:
-        raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
+        raise FileNotFoundError(f"Skill không rõ: {skill_id!r}")
     with open(resolved[1], "r", encoding="utf-8") as fh:
         return fh.read()
 
@@ -271,12 +269,11 @@ def save_skill(skills_dir, skill_id: str, title: str, body: str,
     for original BashCut text. Refuses to overwrite an existing skill
     unless ``overwrite`` is passed; empty bodies are refused."""
     if not str(body).strip():
-        raise ValueError("Skill body must not be empty")
+        raise ValueError("Nội dung skill không được để trống")
     path = _skill_path(skills_dir, skill_id)
     if os.path.exists(path) and not overwrite:
         raise ValueError(
-            f"Skill {skill_id!r} already exists; pass overwrite to "
-            f"replace it")
+            f"Skill {skill_id!r} đã tồn tại; truyền overwrite để thay thế")
     base = _resolve_dir(skills_dir)
     os.makedirs(base, exist_ok=True)
     text = ("Provenance: User-written skill — this is NOT original "
@@ -292,7 +289,7 @@ def set_skill_enabled(skills_dir, skill_id: str,
     """Enable/disable a skill by id. The skill must exist; unknown
     ids error, never silently create a state entry."""
     if not any(e["id"] == skill_id for e in list_skills(skills_dir)):
-        raise KeyError(f"Unknown skill: {skill_id!r}")
+        raise KeyError(f"Skill không rõ: {skill_id!r}")
     state = _load_state(skills_dir)
     disabled = _disabled_ids(skills_dir)
     if enabled:
@@ -314,7 +311,7 @@ def export_skill(skills_dir, skill_id: str, dest: str | None = None) -> dict:
     import shutil
     resolved = _resolve_skill(skills_dir, skill_id)
     if resolved is None:
-        raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
+        raise FileNotFoundError(f"Skill không rõ: {skill_id!r}")
     kind, main_path, folder = resolved
     text = get_skill(skills_dir, skill_id)
     if dest is None:
@@ -325,7 +322,7 @@ def export_skill(skills_dir, skill_id: str, dest: str | None = None) -> dict:
     if kind == "folder":
         if os.path.isfile(dest):
             raise ValueError(
-                f"Cannot export folder skill {skill_id!r} onto a file")
+                f"Không export được skill thư mục {skill_id!r} ra file")
         shutil.copytree(folder, dest, dirs_exist_ok=True)
         return {"skill": skill_id, "dest": dest, "kind": kind,
                 "files": _skill_files(skills_dir, skill_id)}
@@ -341,10 +338,10 @@ def remove_skill(skills_dir, skill_id: str, confirm: bool = False) -> dict:
     which the return value states plainly."""
     if not confirm:
         raise ValueError(
-            f"Removing skill {skill_id!r} needs confirm: true")
+            f"Xóa skill {skill_id!r} cần confirm: true")
     resolved = _resolve_skill(skills_dir, skill_id)
     if resolved is None:
-        raise FileNotFoundError(f"Unknown skill: {skill_id!r}")
+        raise FileNotFoundError(f"Skill không rõ: {skill_id!r}")
     kind, _main, folder = resolved
     import shutil
     if kind == "folder":
@@ -367,15 +364,15 @@ def propose_skill(skills_dir, skill_id: str, title: str,
     as active skills and their content is the caller's draft,
     verbatim — nothing is generated or approved here."""
     if not str(body).strip():
-        raise ValueError("Proposal body must not be empty")
+        raise ValueError("Nội dung proposal không được để trống")
     base = _resolve_dir(skills_dir)
     proposals_dir = os.path.join(base, "proposals")
     os.makedirs(proposals_dir, exist_ok=True)
     path = os.path.join(proposals_dir, skill_id + ".md")
     if not _SAFE_ID.match(skill_id):
-        raise ValueError(f"Invalid skill id {skill_id!r}")
+        raise ValueError(f"Id skill không hợp lệ {skill_id!r}")
     if os.path.exists(path):
-        raise ValueError(f"Proposal {skill_id!r} already exists")
+        raise ValueError(f"Proposal {skill_id!r} đã tồn tại")
     text = ("Provenance: User-proposed skill draft — NOT an active "
             "skill and NOT original BashCut text.\n\n# "
             + str(title or skill_id) + "\n\n" + str(body).lstrip() + "\n")

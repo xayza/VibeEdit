@@ -73,16 +73,14 @@ def _synthesize_edge(text: str, out_path: str,
         import edge_tts
     except ImportError as exc:
         raise VoiceUnavailable(
-            "Edge TTS is not installed. Install it with "
-            "'pip install edge-tts' (it synthesizes over the "
-            "network), or use the Piper backend instead.") from exc
+            "Chưa cài Edge TTS. Hãy cài bằng 'pip install edge-tts' (nó tổng hợp qua mạng), hoặc dùng backend Piper.") from exc
     kwargs = {"voice": voice} if voice else {}
     communicate = edge_tts.Communicate(text, **kwargs)
     try:
         asyncio.run(communicate.save(out_path))
     except Exception as exc:
         raise VoiceUnavailable(
-            f"Edge TTS synthesis failed: {exc}") from exc
+            f"Edge TTS tổng hợp thất bại: {exc}") from exc
     return {"backend": "edge_tts", "voice": voice}
 
 
@@ -91,24 +89,19 @@ def _synthesize_piper(text: str, out_path: str, model: str | None,
     piper = shutil.which("piper")
     if piper is None:
         raise VoiceUnavailable(
-            "The 'piper' binary was not found on PATH. Install "
-            "Piper and put it on PATH, or use the Edge TTS backend "
-            "instead.")
+            "Không tìm thấy binary 'piper' trên PATH. Hãy cài Piper và đưa nó lên PATH, hoặc dùng backend Edge TTS.")
     model = model or os.environ.get("VIBEEDIT_PIPER_MODEL") or voice
     if not model or not model.endswith(".onnx"):
         raise VoiceUnavailable(
-            "Piper needs a voice model file (.onnx): pass it as "
-            "the 'model' argument (or set VIBEEDIT_PIPER_MODEL). "
-            "No model is bundled with this build.")
+            "Piper cần file model giọng đọc (.onnx): truyền qua tham số 'model' (hoặc đặt VIBEEDIT_PIPER_MODEL). Bản build này không kèm sẵn model nào.")
     if not os.path.isfile(model):
-        raise FileNotFoundError(f"Piper model file not found: {model}")
+        raise FileNotFoundError(f"Không tìm thấy file model Piper: {model}")
     proc = subprocess.run(
         [piper, "--model", model, "--output_file", out_path],
         input=text, text=True, capture_output=True, timeout=300)
     if proc.returncode != 0 or not os.path.isfile(out_path):
         raise VoiceUnavailable(
-            "Piper synthesis failed: "
-            f"{proc.stderr.strip() or proc.stdout.strip()}")
+            f"Piper tổng hợp thất bại: {proc.stderr.strip() or proc.stdout.strip()}")
     return {"backend": "piper", "voice": model}
 
 
@@ -123,7 +116,7 @@ def synthesize(text: str, out_path: str, provider: str | None = None,
     is the Edge voice name (e.g. "vi-VN-HoaiMyNeural") or, for
     Piper, a .onnx model path (same as ``model``)."""
     if not text or not text.strip():
-        raise ValueError("Voice text must not be empty")
+        raise ValueError("Câu thoại không được để trống")
     out_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(out_dir, exist_ok=True)
     backends = available_backends()
@@ -134,21 +127,18 @@ def synthesize(text: str, out_path: str, provider: str | None = None,
             provider = "edge"
         else:
             raise VoiceUnavailable(
-                "No voice backend is available: install Piper "
-                "(binary on PATH plus a .onnx model) or Edge TTS "
-                "('pip install edge-tts').")
+                "Không có backend giọng đọc nào: hãy cài Piper (binary trên PATH kèm model .onnx) hoặc Edge TTS ('pip install edge-tts').")
     if provider == "piper":
         info = _synthesize_piper(text, out_path, model, voice)
     elif provider == "edge":
         info = _synthesize_edge(text, out_path, voice)
     else:
         raise ValueError(
-            f"Unknown voice provider: {provider!r} (use 'edge' or "
-            "'piper')")
+            f"Nhà cung cấp giọng đọc không rõ: {provider!r} (dùng 'edge' hoặc 'piper')")
     size = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
     if size == 0:
         raise VoiceUnavailable(
-            f"Voice provider {info['backend']} produced no audio")
+            f"Nhà cung cấp giọng đọc {info['backend']} không tạo ra audio")
     return {"path": out_path, "backend": info["backend"],
             "voice": info["voice"],
             "duration": _ffprobe_duration_seconds(out_path)}
@@ -162,8 +152,7 @@ def place_on_voiceover(project, media_id: str,
     placed on the Voiceover track."""
     medium = project.media(media_id)
     if medium.get("kind") != "audio":
-        raise ValueError("Only audio media can go on the Voiceover "
-                         "track")
+        raise ValueError("Chỉ media audio mới đưa được lên track Voiceover")
     track = next((t for t in project.data["tracks"]
                   if t.get("role") == "voiceover"), None)
     if track is None:

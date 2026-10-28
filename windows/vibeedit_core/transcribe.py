@@ -26,20 +26,17 @@ def transcribe_media(project, media_path: str, track_id: str = "t1",
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise RuntimeError(
-            "faster-whisper is not installed on this machine, so "
-            "transcription cannot run. Install it with "
-            "'pip install faster-whisper' and retry; no captions "
-            "were added.") from exc
+            "Máy này chưa cài faster-whisper nên không phiên âm được. Hãy cài bằng 'pip install faster-whisper' rồi thử lại; chưa thêm phụ đề nào.") from exc
     abs_path = media_path if os.path.isabs(media_path) else os.path.join(
         project.folder, media_path)
     if not os.path.isfile(abs_path):
-        raise FileNotFoundError(f"Media file not found: {abs_path}")
+        raise FileNotFoundError(f"Không tìm thấy file media: {abs_path}")
     whisper = WhisperModel(model, device="cpu", compute_type="int8")
     segments, _info = whisper.transcribe(abs_path)
     from .project import seconds_to_frames
     track = project.track(track_id)
     if track["kind"] != "text":
-        raise ValueError("Transcription captions belong on a text track")
+        raise ValueError("Phụ đề phiên âm thuộc về track chữ")
     added = []
     for segment in segments:
         at = seconds_to_frames(float(segment.start), project.fps)
@@ -106,22 +103,19 @@ def align_captions(project, track_id: str, media_path: str,
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise RuntimeError(
-            "faster-whisper is not installed on this machine, so "
-            "caption alignment cannot run. Install it with "
-            "'pip install faster-whisper' and retry; no timings "
-            "were changed.") from exc
+            "Máy này chưa cài faster-whisper nên không căn thời gian phụ đề được. Hãy cài bằng 'pip install faster-whisper' rồi thử lại; chưa đổi timing nào.") from exc
     import os
     abs_path = media_path if os.path.isabs(media_path) else \
         os.path.join(project.folder, media_path)
     if not os.path.isfile(abs_path):
-        raise FileNotFoundError(f"Media file not found: {abs_path}")
+        raise FileNotFoundError(f"Không tìm thấy file media: {abs_path}")
     whisper = WhisperModel(model, device="cpu", compute_type="int8")
     segments, _info = whisper.transcribe(abs_path)
     seg_list = [{"start": float(s.start), "end": float(s.end)}
                 for s in segments]
     track = project.track(track_id)
     if track["kind"] != "text":
-        raise ValueError("Captions belong on a text track")
+        raise ValueError("Phụ đề thuộc về track chữ")
     snaps = snap_items_to_segments(track["items"], seg_list,
                                    project.fps)
     by_id = {item["id"]: item for item in track["items"]}

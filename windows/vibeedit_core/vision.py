@@ -47,7 +47,7 @@ class VisionUnavailable(Exception):
 
 def _require_file(path):
     if not os.path.isfile(path):
-        raise FileNotFoundError("No such image file: %s" % (path,))
+        raise FileNotFoundError("Không có file ảnh như vậy: %s" % (path,))
     return path
 
 
@@ -80,32 +80,24 @@ def cutout_segmented(path, model_path, output_path=None):
     _require_file(path)
     if not model_path or not os.path.isfile(model_path):
         raise VisionUnavailable(
-            "No segmentation model file: "
-            f"{model_path!r} is not a file. Download a "
-            "person-segmentation model (ONNX) and pass its real "
-            "path; no model is bundled with this build, and no "
-            "model path is invented.")
+            f"Không có file model phân đoạn: {model_path!r} không phải là file. Hãy tải model phân đoạn người (ONNX) và truyền đường dẫn thật của nó; bản build này không kèm sẵn model nào và không bịa đường dẫn model.")
     try:
         import onnxruntime as ort
     except ImportError as exc:
         raise VisionUnavailable(
-            "ONNX Runtime is not installed, so the supplied "
-            f"segmentation model {model_path} cannot run. "
-            "Install it with 'pip install onnxruntime' and retry; "
-            "the model file itself is present but unused.") from exc
+            f"Chưa cài ONNX Runtime nên model phân đoạn đã cung cấp {model_path} không chạy được. Hãy cài bằng 'pip install onnxruntime' rồi thử lại; bản thân file model đã có nhưng chưa được dùng.") from exc
     try:
         import numpy as np
         from PIL import Image
     except ImportError as exc:
         raise VisionUnavailable(
-            "numpy/Pillow are needed to run a segmentation model "
-            f"({exc}); install them and retry.") from exc
+            f"Cần numpy/Pillow để chạy model phân đoạn ({exc}); hãy cài rồi thử lại.") from exc
     session = ort.InferenceSession(model_path,
                                    providers=["CPUExecutionProvider"])
     inputs = session.get_inputs()
     if not inputs:
         raise VisionUnavailable(
-            f"Segmentation model {model_path} declares no inputs.")
+            f"Model phân đoạn {model_path} không khai báo đầu vào nào.")
     input_name = inputs[0].name
     shape = [int(d) if isinstance(d, int) else 0
              for d in inputs[0].shape]
@@ -124,8 +116,7 @@ def cutout_segmented(path, model_path, output_path=None):
         outputs = session.run(None, {input_name: arr})
     except Exception as exc:
         raise VisionUnavailable(
-            f"Segmentation model {model_path} failed to run on "
-            f"this image: {exc}") from exc
+            f"Model phân đoạn {model_path} chạy thất bại trên ảnh này: {exc}") from exc
     mask = np.asarray(outputs[0])
     while mask.ndim > 3:
         mask = mask[0]
@@ -135,9 +126,7 @@ def cutout_segmented(path, model_path, output_path=None):
         mask = mask[1] if mask.shape[0] >= 2 else mask[0]
     if mask.ndim != 2:
         raise VisionUnavailable(
-            f"Segmentation model {model_path} returned a mask of "
-            f"shape {mask.shape}, not a 2D mask; its layout is not "
-            "supported by this backend slot.")
+            f"Model phân đoạn {model_path} trả về mask có shape {mask.shape}, không phải mask 2D; bố cục này backend slot này chưa hỗ trợ.")
     if mask.min() < 0 or mask.max() > 1:
         mask = 1.0 / (1.0 + np.exp(-mask))
     mask_img = Image.fromarray(
@@ -157,9 +146,7 @@ def _require_cv2():
         import cv2  # noqa: F401  (optional runtime dependency)
     except ImportError:
         raise VisionUnavailable(
-            "OpenCV (cv2) is not installed. Install it with "
-            "'pip install opencv-python-headless' (or 'opencv-python' "
-            "for the full package), then retry."
+            "Chưa cài OpenCV (cv2). Hãy cài bằng 'pip install opencv-python-headless' (hoặc 'opencv-python' cho gói đầy đủ), rồi thử lại."
         )
     return cv2
 
@@ -179,10 +166,7 @@ def ocr_image(path, languages=None):
     tesseract = shutil.which("tesseract")
     if tesseract is None:
         raise VisionUnavailable(
-            "Tesseract binary 'tesseract' not found on PATH. Install it "
-            "to enable OCR: Windows: download the installer from the "
-            "UB-Mannheim tesseract builds and add it to PATH; "
-            "Ubuntu/Debian: 'sudo apt install tesseract-ocr'."
+            "Không tìm thấy binary Tesseract 'tesseract' trên PATH. Hãy cài để bật OCR: Windows: tải installer từ bản build tesseract của UB-Mannheim rồi thêm vào PATH; Ubuntu/Debian: 'sudo apt install tesseract-ocr'."
         )
     langs = "+".join(languages) if languages else "eng"
     proc = subprocess.run(
@@ -192,7 +176,7 @@ def ocr_image(path, languages=None):
     )
     if proc.returncode != 0:
         raise VisionUnavailable(
-            "Tesseract failed on %s: %s"
+            "Tesseract thất bại trên %s: %s"
             % (path, (proc.stderr or "").strip() or "unknown error")
         )
     text = proc.stdout or ""
@@ -219,13 +203,12 @@ def detect_faces(path):
         cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
     if not os.path.isfile(cascade_path):
         raise VisionUnavailable(
-            "OpenCV Haar cascade not found at %s. Reinstall "
-            "opencv-python-headless; the cascade ships with the package."
+            "Không tìm thấy Haar cascade OpenCV tại %s. Hãy cài lại opencv-python-headless; cascade đi kèm gói."
             % (cascade_path,)
         )
     image = cv2.imread(path)
     if image is None:
-        raise ValueError("Could not decode image file: %s" % (path,))
+        raise ValueError("Không giải mã được file ảnh: %s" % (path,))
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     cascade = cv2.CascadeClassifier(cascade_path)
     rects = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
@@ -256,7 +239,7 @@ def cutout(path, output_path=None):
     cv2 = _require_cv2()
     image = cv2.imread(path, cv2.IMREAD_COLOR)
     if image is None:
-        raise ValueError("Could not decode image file: %s" % (path,))
+        raise ValueError("Không giải mã được file ảnh: %s" % (path,))
     height, width = image.shape[:2]
     inset_x, inset_y = max(1, width // 10), max(1, height // 10)
     rect = (inset_x, inset_y, width - 2 * inset_x, height - 2 * inset_y)
@@ -271,15 +254,14 @@ def cutout(path, output_path=None):
     foreground_share = float(keep.mean()) if keep.size else 0.0
     if foreground_share <= 0.0:
         raise ValueError(
-            "grabCut found no foreground subject in %s (subject may "
-            "touch the frame edge or fill the whole frame)" % (path,))
+            "grabCut không tìm thấy chủ thể foreground trong %s (chủ thể có thể chạm mép khung hình hoặc lấp đầy khung hình)" % (path,))
     if output_path is None:
         stem, _ = os.path.splitext(path)
         output_path = stem + "_cutout.png"
     bgra = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
     bgra[:, :, 3] = keep * 255
     if not cv2.imwrite(output_path, bgra):
-        raise ValueError("Could not write cutout PNG: %s" % (output_path,))
+        raise ValueError("Không ghi được PNG tách nền: %s" % (output_path,))
     return {"output_path": output_path,
             "foreground_share": foreground_share,
             "backend": "opencv-grabcut"}

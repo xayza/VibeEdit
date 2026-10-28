@@ -903,3 +903,88 @@ test OK trên Linux VM).
   thiếu — đã thêm vào đúng thứ tự alphabet, và test spec nay pass.
   Sau hai sửa này, full suite phải chạy lại từ đầu mới được coi là
   xanh (xem báo cáo vòng).
+
+## Vòng 26 — Quét nhất quán ngôn ngữ: chuỗi tiếng Anh còn lại sang tiếng Việt
+
+- **Phạm vi:** mọi chuỗi tiếng Anh còn nhìn thấy được trong
+  `static/index.html`, `static/app.js` và thông điệp `.py` hướng tới
+  người dùng trong `vibeedit_core/*.py` (lỗi hiện ở status/result,
+  body lỗi HTTP, warning import/export, lý do trong kết quả MCP).
+  Mô tả tool trong `mcp.py` CỐ TÌNH ngoài phạm vi: đó là hợp đồng
+  API cho agent ngoài, nhiều test pin tiền tố `NOT_AVAILABLE` và
+  schema — dịch mô tả sẽ phá agent ngoài mà không giúp UI.
+- **Ba cổng cho mỗi chuỗi trước khi dịch:** (1) không test nào
+  assert nó (grep `tests/` theo chuỗi chính xác, kể cả chuỗi con
+  viết thường như `not found` hay `disabled` — bài học của vòng
+  này); (2) không code nào match lên nó (JS `err.message ===`,
+  regex, Python `in str(exc)`); (3) không thuộc diện cố tình giữ
+  tiếng Anh (CTA Export, thuật ngữ kỹ thuật người dùng tự dùng,
+  nhãn app gốc, chuỗi test-locked). Chỉ chuỗi qua cả ba cổng mới
+  dịch, sang tiếng Việt có dấu, giữ nguyên nghĩa và giữ nguyên
+  mọi identifier/placeholder (`%s`, `{id!r}`, tên tham số, lệnh
+  pip, tên biến môi trường, mã preset).
+- **Đã dịch:** nhãn HTML (tên project, nút hiện/sao chép thư mục,
+  alt xem trước transition, `Màu — từng thông số`, aria-label
+  nhóm toolbar Sửa/Thêm/Xem/Lịch sử/Thu phóng); chuỗi JS (Knowledge,
+  Vision, plugin download, review/voiceover/upload, sao chép); và
+  thông điệp `.py` trong analysis, beats, cuts, export_ops (cảnh
+  báo OTIO), knowledge (lesson/proposal/fact/pref/claim), plugins
+  (validation manifest, install, overlay, proposal, entry),
+  project (validate, transition, karaoke, link, eq, reframe,
+  backdrop, LUT, SRT), render (font, preset, reframe, proxy,
+  FFmpeg), round8 (motion/describe/outcomes/pack), round9 (review),
+  round15 (kit/registry/signature), server (undo/redo, tên project,
+  voiceover, knowledge, vision, plugin_download, thao tác không rõ
+  và 6 body lỗi HTTP trực tiếp: `No export yet`, `No preview yet`,
+  `Not found`, `Unknown media`, `No thumbnail`, `Media file
+  missing`), skills, thumbnail, transcribe, updater, vision,
+  voice, waveform. Tổng cộng khoảng 600 phần thông điệp, cộng
+  11 body lỗi HTTP và chuỗi JS/HTML; sau vòng này
+  `vibeedit_core` có 665 phần thông điệp tiếng Việt (đã trừ các
+  phần revert dưới đây, và đã tính 16 phần vốn đã Việt trong
+  `skill_import.py` từ vòng 23).
+- **Cố tình giữ tiếng Anh (có lý do, pin trong test_round26):**
+  dropzone subtext (test_capcut_ui:90, test_round18:115); tooltip
+  icon timeline (test_round18); CTA `Export video`; `No beat grid
+  detected yet` (JS so khớp chính xác + test_round19:755);
+  `Unknown transition kind` (test_motion_transitions:221); mọi
+  thông điệp chứa `exceeds` (plugins.py re-raise khi gặp từ này);
+  tín hiệu hủy xuất `export cancelled*` (render.py, code match);
+  guard nội bộ `ProjectFileLock needs a project path`; mô tả
+  `mcp.py` (hợp đồng API). Docstring/prose nội bộ không hiện UI
+  cũng để nguyên (ví dụ round15 `unsafe entry names`, round9
+  `must be one of the manifest's views`).
+- **Sửa sau lần chạy full suite đầu (quan trọng — trạng thái cuối
+  mới xanh):** lần chạy đầu báo 8 failure, tất cả đều là test cũ
+  assert chuỗi con tiếng Anh trong thông điệp vừa dịch — tức các
+  chuỗi đó bị khóa, và theo luật vòng này thì REVERT bản dịch,
+  KHÔNG sửa test. Đã revert đúng 7 thông điệp + 1 regex: (1)
+  thông điệp công cụ FFmpeg (`not found` — test_windows_compat);
+  (2) thông điệp plugin bị tắt (`disabled` — test_round5_tools và
+  test_integration_parity); (3) lỗi validate one-way link
+  (`one-way` — test_magnetic_linked); (4) cảnh báo install
+  `new/untrusted` + `code hooks` + `no description` +
+  `no version` (test_plugin_install — failure đầu chỉ hiện
+  `untrusted`, sửa xong mới lộ 3 assertion còn lại); (5) cảnh
+  báo registry `only non-Windows platforms` (test_round15);
+  (6) thông điệp timeout khóa file (`Could not acquire project
+  lock` — test_round25); (7) thông điệp overlap của
+  `_check_overlap` + regex flash trong app.js (test_round22 pin
+  đúng chuỗi regex tiếng Anh — revert cả thông điệp lẫn regex để
+  flash vẫn hoạt động; lỗi overlap của validate() là thông điệp
+  khác và vẫn giữ tiếng Việt). Sau các revert này, nhóm mục tiêu
+  24 test pass và full suite chạy lại xanh hoàn toàn.
+- **Không đổi số đếm:** không tool mới, không tool nào chuyển thật
+  — registry vẫn 481 = 432 thật + 49 honest, và vòng này KHÔNG
+  sửa file test cũ nào (chỉ tạo mới tests/test_round26.py với 16
+  test: pin chuỗi đã dịch, pin tập giữ tiếng Anh, pin regex
+  overlap và các revert). `mcp.py` không động — số đếm và schema
+  giữ nguyên.
+- **Kiểm chứng:** py_compile các file Python chạm tới, node
+  --check static/app.js, show_shortcuts vẫn 30 (bài học vòng 23:
+  sửa app.js phải kiểm tra lại parser — vòng này chỉ đổi 1 regex
+  và 1 comment nên parser không ảnh hưởng), giá trị khóa vòng 18
+  còn nguyên, cây Swift không động, không merge, 21 skill phẳng
+  không đổi, `skills.json` không đổi ngữ nghĩa, full suite 860
+  test OK (844 vòng 25 + 16 test vòng 26). Kiểm chứng trực quan
+  trên Windows thật vẫn để lại cho người dùng sau khi pull.

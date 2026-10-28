@@ -96,7 +96,7 @@ Until then: no move, rename, or delete inside `VibeEdit/` or
   design) and export-report diagnostics (exact FFmpeg command, filter
   graph, -shortest flag, audio map, per-clip source-vs-project fps,
   and ffprobe-measured output video/audio durations, plus a Review
-  panel diagnostics line); what remains genuinely unported is listed
+  panel diagnostics line); round 26 swept remaining user-visible English strings to Vietnamese under a three-gate rule (no test locks it, no code matches on it, not intentionally English), reverting 10 messages whose English forms old tests assert (see `windows/PARITY.md` round 26); what remains genuinely unported is listed
   honestly in `windows/PARITY.md`.
 - **UI rounds 16–17:** round 16 harmonized colors (neutral chrome,
   cyan only for active/selected/focus + CTA + clip-type colors +

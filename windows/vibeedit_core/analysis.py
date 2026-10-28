@@ -139,7 +139,7 @@ def _ffprobe_json(path: str, extra_args: list) -> dict:
                           encoding="utf-8", errors="replace",
                           timeout=300)
     if proc.returncode != 0:
-        raise RuntimeError(f"ffprobe could not read {path}: "
+        raise RuntimeError(f"ffprobe không đọc được {path}: "
                            f"{proc.stderr.strip()[:300]}")
     return json.loads(proc.stdout or "{}")
 
@@ -362,7 +362,7 @@ def decode_sound_levels(path: str) -> dict | None:
     if proc.returncode != 0:
         err = proc.stderr.read().decode("utf-8", "replace") \
             if proc.stderr else ""
-        raise RuntimeError(f"FFmpeg could not decode the sound of "
+        raise RuntimeError(f"FFmpeg không giải mã được âm thanh của "
                            f"{path}: {err.strip()[:300]}")
     return meter.result()
 
@@ -466,8 +466,7 @@ def _extract_frames(path: str, select: str, scale: str, fmt: str,
         if "No such file" in err or not err:
             pass
         elif count == 0:
-            raise RuntimeError(f"FFmpeg could not extract frames "
-                               f"from {path}: {err.strip()[:300]}")
+            raise RuntimeError(f"FFmpeg không trích được khung hình từ {path}: {err.strip()[:300]}")
 
 
 def measure_picture(path: str, fps: float, total_frames: int,
@@ -629,10 +628,9 @@ def measure_media(path: str, fps: float | None = None,
     from ffprobe. Raises FileNotFoundError / RuntimeError with a
     clear message instead of returning a partial record."""
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"Media file not found: {path}")
+        raise FileNotFoundError(f"Không tìm thấy file media: {path}")
     if not (0.5 <= rate <= 30):
-        raise ValueError("rate must be between 0.5 and 30 samples "
-                         "per second")
+        raise ValueError("rate phải từ 0,5 đến 30 mẫu/giây")
     tech = probe_tech(path)
     video = tech.get("video") or {}
     audio = tech.get("audio")
@@ -1158,8 +1156,7 @@ def _decode_mono_8k_envelope(path: str) -> list:
     if proc.returncode != 0:
         err = proc.stderr.read().decode("utf-8", "replace") \
             if proc.stderr else ""
-        raise RuntimeError(f"FFmpeg could not decode {path} for "
-                           f"sync: {err.strip()[:300]}")
+        raise RuntimeError(f"FFmpeg không giải mã được {path} để đồng bộ: {err.strip()[:300]}")
     return envelope
 
 
@@ -1239,8 +1236,7 @@ def align_sound(first_path: str, second_path: str) -> dict:
     a = _decode_mono_8k_envelope(first_path)
     b = _decode_mono_8k_envelope(second_path)
     if min(len(a), len(b)) < 3 * ENVELOPE_RATE:
-        raise ValueError("Both files need at least 3 seconds of "
-                         "sound to sync")
+        raise ValueError("Cả hai file cần ít nhất 3 giây âm thanh để đồng bộ")
     minimum_overlap = min(len(a), len(b)) // 2
     coarse_a = _Envelope(_decimate(a, 10))
     coarse_b = _Envelope(_decimate(b, 10))
@@ -1249,8 +1245,7 @@ def align_sound(first_path: str, second_path: str) -> dict:
                          len(coarse_b.values)),
                    minimum_overlap // 10)
     if coarse is None:
-        raise ValueError("The files do not overlap enough to "
-                         "compare")
+        raise ValueError("Các file không chồng lấn đủ để so sánh")
     fine_a = _Envelope(a)
     fine_b = _Envelope(b)
     centre = coarse[1] * 10
@@ -1258,8 +1253,7 @@ def align_sound(first_path: str, second_path: str) -> dict:
                  range(centre - FINE_RADIUS, centre + FINE_RADIUS + 1),
                  minimum_overlap)
     if fine is None:
-        raise ValueError("The files do not overlap enough to "
-                         "compare")
+        raise ValueError("Các file không chồng lấn đủ để so sánh")
     lag = fine[1]
     start = max(0, -lag)
     end = min(len(a), len(b) - lag)
@@ -1303,7 +1297,7 @@ def extract_frame_png(path: str, seconds: float, dest: str,
                           timeout=120)
     if proc.returncode != 0 or not os.path.isfile(dest):
         raise RuntimeError(
-            f"FFmpeg could not extract a frame at {seconds}s from "
+            f"FFmpeg không trích được khung hình tại {seconds} giây từ "
             f"{path}: {proc.stderr.strip()[:300]}")
     return dest
 
@@ -1333,9 +1327,7 @@ def render_strip_png(frame_pngs: list, frame_times: list,
         from PIL import Image, ImageDraw
     except ImportError as exc:
         raise RuntimeError(
-            "Pillow is not installed, so the strip PNG cannot be "
-            "drawn (the strip data itself is still returned); "
-            "install it with 'pip install pillow'.") from exc
+            "Chưa cài Pillow nên không vẽ được PNG strip (bản thân dữ liệu strip vẫn được trả về); hãy cài bằng 'pip install pillow'.") from exc
     count = max(1, len(frame_pngs))
     cell_width = width / count
     images = []

@@ -492,7 +492,7 @@ class State:
             candidate = os.path.dirname(candidate)
         found = find_project_file(candidate)
         if not found:
-            raise FileNotFoundError(f"No project file in folder: {folder}")
+            raise FileNotFoundError(f"Không có file project trong thư mục: {folder}")
         os.makedirs(os.path.join(candidate, "media"), exist_ok=True)
         os.makedirs(os.path.join(candidate, "render"), exist_ok=True)
         data = load_project(found)
@@ -637,7 +637,7 @@ class State:
                 out_frame = int(op.get("out"))
                 if out_frame <= in_frame:
                     raise ValueError(
-                        "Source Out must be after Source In")
+                        "Source Out phải đứng sau Source In")
                 medium = proj.media(op["media"])
                 track_id = op.get("track")
                 if not track_id:
@@ -815,7 +815,7 @@ class State:
                 elif action == "migrate":
                     result = _k.migrate(data)
                 else:
-                    raise ValueError(f"Unknown knowledge action: {action}")
+                    raise ValueError(f"Action knowledge không rõ: {action}")
             elif kind == "skills_save":
                 from .skills import save_skill
                 result = save_skill(None, op["skill"], op.get("title", ""),
@@ -936,8 +936,7 @@ class State:
                 _track, item = proj.item(op["item"])
                 target = int(op.get("frames") or op["to_frame"])
                 if target <= 0:
-                    raise ValueError("voice_fit needs a positive "
-                                     "frames/to_frame target")
+                    raise ValueError("voice_fit cần đích frames/to_frame dương")
                 needed = int(item["dur"]) / target
                 proj.set_speed(op["item"], needed)
                 result = {"item": op["item"], "speed": needed,
@@ -957,9 +956,7 @@ class State:
                 # executes anything.
                 if not op.get("confirm"):
                     raise ValueError(
-                        "plugin_download needs confirm: true (untrusted "
-                        "source); download first, then plugin_install "
-                        "the downloaded bundle")
+                        "plugin_download cần confirm: true (nguồn không tin cậy); hãy tải về trước, rồi plugin_install gói đã tải")
                 import os as _os
                 import tempfile as _tf
                 from .plugins import download_plugin_bundle
@@ -1033,9 +1030,9 @@ class State:
                         result = _cut(path, out)
                 except VisionUnavailable as exc:
                     raise ValueError(
-                        f"Vision backend missing: {exc}")
+                        f"Thiếu backend vision: {exc}")
             else:
-                raise ValueError(f"Unknown operation: {kind}")
+                raise ValueError(f"Thao tác không rõ: {kind}")
         except Exception:
             proj.restore(self.undo_stack.pop())
             raise
@@ -1050,7 +1047,7 @@ def _clip_covering(proj: Project, frame: int) -> tuple[dict, dict]:
         for item in track["items"]:
             if item["at"] <= frame < item["at"] + item["dur"]:
                 return track, item
-    raise ValueError("No clip covers the playhead frame")
+    raise ValueError("Không có clip nào phủ khung hình playhead")
 
 
 def _safe_upload_name(filename: str) -> str:
@@ -1251,7 +1248,7 @@ def make_handler(state: State):
                 if state.last_export and os.path.isfile(state.last_export):
                     self._serve_file(state.last_export)
                 else:
-                    self._send_json({"error": "No export yet"}, 404)
+                    self._send_json({"error": "Chưa có bản xuất nào"}, 404)
             elif parsed.path == "/api/waveform":
                 # Real waveform peaks for one media id (decoded with
                 # FFmpeg, RMS per bucket, normalised). Never invented:
@@ -1302,8 +1299,8 @@ def make_handler(state: State):
                     self._serve_file(path)
                 else:
                     self._send_json(
-                        {"error": "No preview yet for this transition; "
-                         "generate it first"}, 404)
+                        {"error": "Chưa có xem trước cho transition này; "
+                         "hãy tạo nó trước"}, 404)
             elif parsed.path == "/":
                 self._serve_file(os.path.join(STATIC_DIR, "index.html"))
             elif parsed.path.startswith("/static/"):
@@ -1312,9 +1309,9 @@ def make_handler(state: State):
                 if os.path.isfile(path):
                     self._serve_file(path)
                 else:
-                    self._send_json({"error": "Not found"}, 404)
+                    self._send_json({"error": "Không tìm thấy"}, 404)
             else:
-                self._send_json({"error": "Not found"}, 404)
+                self._send_json({"error": "Không tìm thấy"}, 404)
 
         def _media_file(self, media_id):
             """Return (medium, real_path) for a project media id, or
@@ -1347,7 +1344,7 @@ def make_handler(state: State):
             media_id = urllib.parse.unquote(raw_id)
             found = self._media_file(media_id)
             if not found:
-                self._send_json({"error": "Unknown media"}, 404)
+                self._send_json({"error": "Media không rõ"}, 404)
                 return
             medium, real = found
             try:
@@ -1355,7 +1352,7 @@ def make_handler(state: State):
                     real, thumbnail_path(state.project_dir, media_id),
                     medium.get("kind", ""))
             except (ValueError, RuntimeError, FileNotFoundError):
-                self._send_json({"error": "No thumbnail for this media"},
+                self._send_json({"error": "Không có thumbnail cho media này"},
                                 404)
                 return
             self._serve_file(thumb)
@@ -1378,13 +1375,13 @@ def make_handler(state: State):
             outside the media folder is 404 (never a traversal)."""
             media_id = urllib.parse.unquote(raw_id)
             if not media_id or "/" in media_id or "\\" in media_id:
-                self._send_json({"error": "Unknown media"}, 404)
+                self._send_json({"error": "Media không rõ"}, 404)
                 return
             with state.lock:
                 try:
                     medium = state.project.media(media_id)
                 except KeyError:
-                    self._send_json({"error": "Unknown media"}, 404)
+                    self._send_json({"error": "Media không rõ"}, 404)
                     return
                 path = medium["path"]
                 if not os.path.isabs(path):
@@ -1393,10 +1390,10 @@ def make_handler(state: State):
                 os.path.join(state.project_dir, "media"))
             real = os.path.realpath(path)
             if os.path.commonpath([real, media_dir]) != media_dir:
-                self._send_json({"error": "Unknown media"}, 404)
+                self._send_json({"error": "Media không rõ"}, 404)
                 return
             if not os.path.isfile(real):
-                self._send_json({"error": "Media file missing"}, 404)
+                self._send_json({"error": "Thiếu file media"}, 404)
                 return
             size = os.path.getsize(real)
             mime, _ = mimetypes.guess_type(real)
@@ -1407,7 +1404,7 @@ def make_handler(state: State):
                 try:
                     spec = range_header[len("bytes="):].strip()
                     if "," in spec:
-                        raise ValueError("multi-range not supported")
+                        raise ValueError("Không hỗ trợ multi-range")
                     a, _, b = spec.partition("-")
                     start = int(a) if a else max(0, size - int(b))
                     end = int(b) if b else size - 1
@@ -1499,12 +1496,12 @@ def make_handler(state: State):
                         if not name or "/" in name or "\\" in name \
                                 or ".." in name:
                             raise ValueError(
-                                "Project name must be a plain folder name")
+                                "Tên project phải là tên thư mục thường")
                         root = state.projects_root()
                         folder = os.path.join(root, name)
                         if os.path.exists(folder):
                             raise ValueError(
-                                f"Project folder already exists: {name}")
+                                f"Thư mục project đã tồn tại: {name}")
                         os.makedirs(os.path.join(folder, "media"),
                                     exist_ok=True)
                         os.makedirs(os.path.join(folder, "render"),
@@ -1529,8 +1526,7 @@ def make_handler(state: State):
                         if os.path.commonpath([candidate, root]) != root \
                                 or not os.path.isdir(candidate):
                             raise ValueError(
-                                "Reveal target must be a project folder "
-                                "inside projects/")
+                                "Thư mục đích hiện phải là thư mục project bên trong projects/")
                         if sys.platform == "win32":
                             os.startfile(candidate)  # noqa: S606
                         elif shutil.which("xdg-open"):
@@ -1538,9 +1534,7 @@ def make_handler(state: State):
                             subprocess.Popen(["xdg-open", candidate])
                         else:
                             raise RuntimeError(
-                                "Reveal is only supported on Windows "
-                                "(os.startfile); copy the project path "
-                                "from the welcome panel instead")
+                                "Chức năng hiện thư mục chỉ hỗ trợ trên Windows (os.startfile); hãy sao chép đường dẫn project từ panel chào mừng")
                         self._send_json({"ok": True, "path": candidate})
                     elif parsed.path == "/api/undo":
                         self._read_json()
@@ -1553,7 +1547,7 @@ def make_handler(state: State):
                         with state.project_lock():
                             state.refresh_from_disk()
                             if not state.undo_stack:
-                                raise ValueError("Nothing to undo")
+                                raise ValueError("Không có gì để hoàn tác")
                             state.redo_stack.append(
                                 state.project.snapshot())
                             state.project.restore(state.undo_stack.pop())
@@ -1566,7 +1560,7 @@ def make_handler(state: State):
                         with state.project_lock():
                             state.refresh_from_disk()
                             if not state.redo_stack:
-                                raise ValueError("Nothing to redo")
+                                raise ValueError("Không có gì để làm lại")
                             state.undo_stack.append(
                                 state.project.snapshot())
                             state.project.restore(state.redo_stack.pop())
@@ -1634,7 +1628,7 @@ def make_handler(state: State):
                                      if callable(v)), None)
                         if not hook:
                             raise ValueError(
-                                f"Plugin {body['plugin']!r} has no hook")
+                                f"Plugin {body['plugin']!r} không có hook")
                         # Round 25: refresh, snapshot, apply, and save
                         # are one locked section (see apply()). The
                         # snapshot is taken after the refresh, so a
@@ -1692,12 +1686,10 @@ def make_handler(state: State):
                         if ext not in (".webm", ".mp4", ".m4a", ".ogg",
                                        ".oga", ".wav", ".mp3", ".flac"):
                             raise ValueError(
-                                f"Voiceover recording must be an audio "
-                                f"file, not {filename!r}")
+                                f"Bản ghi voiceover phải là file audio, không phải {filename!r}")
                         if len(payload) == 0:
                             raise ValueError(
-                                "Voiceover recording is empty; hold the "
-                                "record button, speak, then stop")
+                                "Bản ghi voiceover rỗng; hãy giữ nút ghi, nói, rồi dừng")
                         media_dir = os.path.join(state.project_dir,
                                                  "media")
                         os.makedirs(media_dir, exist_ok=True)
@@ -1771,7 +1763,7 @@ def make_handler(state: State):
                                 result = {"ok": True, "media": medium}
                         self._send_json(result)
                     else:
-                        self._send_json({"error": "Not found"}, 404)
+                        self._send_json({"error": "Không tìm thấy"}, 404)
             except (ValueError, KeyError, FileNotFoundError, RuntimeError) as exc:
                 self._send_json({"error": str(exc)}, 400)
             except Exception as exc:  # noqa: BLE001 - surfaced to the UI
