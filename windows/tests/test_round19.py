@@ -48,10 +48,12 @@ STILL_HONEST = [
     "vibeedit_chat_send", "vibeedit_chat_command",
     "vibeedit_chat_status", "vibeedit_agent_ask", "vibeedit_chat_stop",
     "vibeedit_plugins_setup", "vibeedit_clip_send_to_agent",
-    "vibeedit_acme_voice_fast", "vibeedit_ui_frame", "vibeedit_ui_frames",
+    "vibeedit_acme_voice_fast",
+    # Round 20: ui_frame/ui_frames left (now real, FFmpeg timeline frames).
     "vibeedit_playback_toggle", "vibeedit_playback_stop",
     "vibeedit_view_compare", "vibeedit_view_safe_area",
-    "vibeedit_show_shortcuts", "vibeedit_show_settings",
+    # Round 20: show_shortcuts left (now real, parsed from app.js).
+    "vibeedit_show_settings",
     "vibeedit_ui_action", "vibeedit_ui_dialog",
     "vibeedit_agent_open", "vibeedit_agent_terminals",
     "vibeedit_agent_toggle_dock", "vibeedit_app_vibeedit",
@@ -97,8 +99,8 @@ class TestRound19RegistryCounts(unittest.TestCase):
                   if (t.get("description") or "").startswith(
                       "Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(honest), 59)
-        self.assertEqual(len(TOOLS) - len(honest), 420)
+        self.assertEqual(len(honest), 56)  # Round 20: 59 -> 56
+        self.assertEqual(len(TOOLS) - len(honest), 423)  # Round 20
 
     def test_converted_descriptions_not_honest(self):
         by_name = {t["name"]: t["description"] for t in TOOLS}
@@ -942,5 +944,5 @@ class TestRound19RegistryFinal(unittest.TestCase):
         honest = [t for t in TOOLS
                   if t["description"].startswith("Not available")]
         self.assertEqual(len(TOOLS), 479)
-        self.assertEqual(len(real), 420)
-        self.assertEqual(len(honest), 59)
+        self.assertEqual(len(real), 423)  # Round 20: 420 -> 423
+        self.assertEqual(len(honest), 56)  # Round 20: 59 -> 56

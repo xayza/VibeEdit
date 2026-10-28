@@ -506,7 +506,7 @@ TOOLS.extend([
     {"name": "vibeedit_chat_transcript", "description": "Not available in this Windows build: no chat session exists in this headless server."},
     {"name": "vibeedit_show_about", "description": "About dialog content for this headless build: same data as app_version (MCP server, Python and project-schema versions); no dialog window exists here."},
     {"name": "vibeedit_show_commands", "description": "Commands dialog content for this headless build: same list as mcp_tools_list (tools + count); no dialog window exists here."},
-    {"name": "vibeedit_show_shortcuts", "description": "Not available in this Windows build: no shortcuts dialog exists in this headless server."},
+    {"name": "vibeedit_show_shortcuts", "description": "Keyboard shortcuts derived at runtime by parsing static/app.js keydown listeners (not a hand-kept table): key combos with the code action each triggers; keys with no binding are absent, never listed as bound."},
     {"name": "vibeedit_show_settings", "description": "Not available in this Windows build: no settings dialog exists in this headless server."},
     {"name": "vibeedit_show_plugins", "description": "Plugins dialog content for this headless build: same list as plugins_list (discovered plugins + enable state); no dialog window exists here."},
     {"name": "vibeedit_show_review", "description": "Review dialog content for this headless build: same data as review_get (validation, stats, last export); no dialog window exists here."},
@@ -524,8 +524,8 @@ TOOLS.extend([
     {"name": "vibeedit_ui_view", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
     {"name": "vibeedit_ui_select", "description": "Set the server session selection to the given timeline item ids (validated against the open project; unknown ids raise); with no items argument, returns the current selection. Selection is session state, reset on open; clip_backdrop defaults to it."},
     {"name": "vibeedit_ui_seek", "description": "Set the server session playhead to an absolute frame (frame int, clamped at 0); returns the new frame. Same session playhead the playhead_* step tools move."},
-    {"name": "vibeedit_ui_frame", "description": "Not available in this Windows build: no live player frame exists in this headless server; use media_frame for a media first frame."},
-    {"name": "vibeedit_ui_frames", "description": "Not available in this Windows build: no live player frames exist in this headless server."},
+    {"name": "vibeedit_ui_frame", "description": "One timeline frame rendered with FFmpeg (draft preset) and extracted at the session playhead, or the given time_s: the actual composed frame, not a media first frame. Returns PNG base64 plus dimensions."},
+    {"name": "vibeedit_ui_frames", "description": "Timeline frames rendered with FFmpeg (draft preset) and extracted at the given times_s, or evenly spaced when only count is given: actual composed frames, not media first frames. Returns PNG base64 plus dimensions per frame."},
     {"name": "vibeedit_ui_respond", "description": "Not available in this Windows build: no live UI session exists for this headless server to respond in."},
     {"name": "vibeedit_ui_actions", "description": "Not available in this Windows build: no live UI session exists for this headless server."},
     {"name": "vibeedit_playback_toggle", "description": "Not available in this Windows build: no playback engine exists in this headless server."},
@@ -680,6 +680,398 @@ TOOLS.extend([
     {"name": "vibeedit_transcript_words", "description": "Split text items into words (alias of captions_words)."},
     {"name": "vibeedit_library_save_selection", "description": "Save the selected clip/text item into the library (alias of library_add)."},
 ])
+
+
+# ---------------------------------------------------------------------------
+# Round 20: keyboard-shortcut map derived from static/app.js at runtime.
+#
+# show_shortcuts keeps NO hand-copied table (that would drift the moment
+# app.js changes). Instead it parses the live keydown listeners: JS
+# comments are blanked with a string-aware scanner, document keydown
+# listener bodies are extracted by balanced-brace matching, and each
+# branch is read mechanically (modifier groups, key === "..." tests,
+# action-call rules below). The deliberately-unbound shortcuts named
+# in the round-18 comment block can never appear: comments are gone
+# before parsing, so only code that actually binds a key is listed.
+# Failure mode is loud, not silently wrong: if the parser cannot find
+# the pinned shortcuts, the round-20 tests fail instead of returning
+# a half-invented map. Known limitation: a ${...} interpolation
+# containing braces or quotes would miscount braces (the listeners
+# only use bare identifiers there); a regex literal containing a
+# brace inside a listener body would do the same.
+# ---------------------------------------------------------------------------
+
+def _js_clean_with_mask(src):
+    """Return (clean, is_code): JS source with comments blanked out.
+
+    Strings stay verbatim but are marked non-code, so brace matching
+    never counts a brace inside a string. Template literals stay
+    verbatim too; ${...} interpolations are skipped as string
+    content (bare identifiers only, as used in the listeners).
+    """
+    clean = []
+    is_code = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            clean.append(" ")
+            is_code.append(False)
+            i = j
+        elif c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            clean.append(" ")
+            is_code.append(False)
+            i = j
+        elif c in ("'", '"'):
+            q = c
+            j = i + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == q:
+                    j += 1
+                    break
+                j += 1
+            clean.append(src[i:j])
+            is_code.extend([False] * (j - i))
+            i = j
+        elif c == "`":
+            j = i + 1
+            depth = 0
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == "`" and depth == 0:
+                    j += 1
+                    break
+                if src[j] == "$" and j + 1 < n and src[j + 1] == "{":
+                    depth += 1
+                    j += 2
+                    continue
+                if src[j] == "}" and depth > 0:
+                    depth -= 1
+                    j += 1
+                    continue
+                j += 1
+            clean.append(src[i:j])
+            is_code.extend([False] * (j - i))
+            i = j
+        else:
+            clean.append(c)
+            is_code.append(True)
+            i += 1
+    return "".join(clean), is_code
+
+
+def _js_match_brace(text, mask, open_pos):
+    """Index of the code '}' matching the code '{' at open_pos."""
+    depth = 0
+    for p in range(open_pos, len(text)):
+        if not mask[p]:
+            continue
+        if text[p] == "{":
+            depth += 1
+        elif text[p] == "}":
+            depth -= 1
+            if depth == 0:
+                return p
+    return None
+
+
+def _js_match_paren(text, mask, open_pos):
+    """Index of the code ')' matching the code '(' at open_pos."""
+    depth = 0
+    for p in range(open_pos, len(text)):
+        if not mask[p]:
+            continue
+        if text[p] == "(":
+            depth += 1
+        elif text[p] == ")":
+            depth -= 1
+            if depth == 0:
+                return p
+    return None
+
+
+def _js_next_code_brace(text, mask, start):
+    for p in range(start, len(text)):
+        if mask[p] and text[p] == "{":
+            return p
+    return None
+
+
+def _js_keydown_regions(clean, mask):
+    """(body_text, body_mask) for each document keydown listener."""
+    regions = []
+    needle = 'addEventListener("keydown"'
+    start = 0
+    while True:
+        k = clean.find(needle, start)
+        if k < 0:
+            return regions
+        # Only document-level listeners: zone.addEventListener (the
+        # import dropzone's Enter/Space picker activation) is not a
+        # global shortcut and must not be listed.
+        if clean[max(0, k - 9):k] != "document.":
+            start = k + 1
+            continue
+        b = _js_next_code_brace(clean, mask, k + len(needle))
+        if b is None:
+            return regions
+        close = _js_match_brace(clean, mask, b)
+        if close is None:
+            return regions
+        regions.append((clean[b + 1:close], mask[b + 1:close]))
+        start = close + 1
+
+
+def _js_defined_functions(clean):
+    """Top-level `function name(` declarations (async allowed)."""
+    import re
+    return set(re.findall(r"(?m)^\s*(?:async\s+)?function\s+(\w+)\s*\(",
+                          clean))
+
+
+def _js_scan_branches(text, mask):
+    """(condition, body) for each if/else-if in the region.
+
+    Block bodies (``if (...) { ... }``) yield the block contents;
+    single-statement branches (``if (...) markSource("in");``) yield
+    the statement. Guard branches (``if (...) return;``) are yielded
+    too, but carry no key test so callers skip them.
+    """
+    import re
+    out = []
+    pos = 0
+    while True:
+        m = re.search(r"(?:else\s+)?if\s*\(", text[pos:])
+        if m is None:
+            return out
+        base = pos + m.start()
+        if not mask[base]:
+            pos = base + 1
+            continue
+        paren_open = pos + m.end() - 1
+        paren_close = _js_match_paren(text, mask, paren_open)
+        if paren_close is None:
+            return out
+        p = paren_close + 1
+        while p < len(text) and (not mask[p] or text[p] in " \t\r\n"):
+            p += 1
+        if p >= len(text):
+            return out
+        if text[p] == "{":
+            close = _js_match_brace(text, mask, p)
+            if close is None:
+                return out
+            out.append((text[paren_open + 1:paren_close],
+                        text[p + 1:close]))
+            pos = close + 1
+        else:
+            s = None
+            for q in range(p, len(text)):
+                if mask[q] and text[q] == ";":
+                    s = q
+                    break
+            if s is None:
+                return out
+            out.append((text[paren_open + 1:paren_close],
+                        text[p:s + 1]))
+            pos = s + 1
+
+
+def _shortcut_branch_action(body, defined_fns):
+    """The action a branch triggers, by mechanical rules in order.
+
+    1. An api("PATH", ...) call -> POST PATH (save/undo/redo).
+    2. A call to a function declared in app.js -> that function.
+    3. click("ID") / railClick("TAB") / $("ID") + .click() -> the click.
+    4. .pause() / .play() on the preview element.
+    5. Otherwise the branch's first stripped line, verbatim.
+    """
+    import re
+    m = re.search(r'api\("([^"]+)"', body)
+    if m:
+        return "POST " + m.group(1)
+    for m in re.finditer(r"(\w+)\s*\(", body):
+        if m.group(1) in defined_fns:
+            return m.group(1) + "()"
+    m = re.search(r'click\("([^"]+)"\)', body)
+    if m:
+        return "click " + m.group(1)
+    m = re.search(r'railClick\("([^"]+)"\)', body)
+    if m:
+        return "open rail tab " + m.group(1)
+    m = re.search(r'\$\("([^"]+)"\)', body)
+    if m and ".click(" in body:
+        return "click " + m.group(1)
+    if ".pause()" in body:
+        return "pause preview"
+    if ".play()" in body:
+        return "play preview"
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    return lines[0][:80] if lines else "(no action)"
+
+
+_KEY_DISPLAY = {" ": "Space", "backspace": "Backspace",
+                "delete": "Delete", "arrowleft": "ArrowLeft",
+                "arrowright": "ArrowRight", "escape": "Escape"}
+
+
+def _shortcut_display_key(key):
+    if key in _KEY_DISPLAY:
+        return _KEY_DISPLAY[key]
+    if len(key) == 1:
+        return key.upper()
+    return key.capitalize()
+
+
+def _shortcut_combo(ctrl, shift, alt, key):
+    parts = []
+    if ctrl:
+        parts.append("Ctrl")
+    if alt:
+        parts.append("Alt")
+    if shift:
+        parts.append("Shift")
+    parts.append(_shortcut_display_key(key))
+    return "+".join(parts)
+
+
+def _shortcut_keys_from_condition(cond):
+    """(key, shift_override) per key === "..." alternative in cond.
+
+    Alternatives are split on ||; shift_override is True/False when
+    the alternative states it, else None (caller supplies the default).
+    """
+    import re
+    out = []
+    for alt in cond.split("||"):
+        m = re.search(r"""(?:key|e\.key)\s*===\s*"([^"]+)""", alt)
+        if not m:
+            continue
+        if re.search(r"!\s*(?:e\.shiftKey|shift)\b", alt):
+            shift = False
+        elif re.search(r"(?:e\.shiftKey|shift)\b", alt):
+            shift = True
+        else:
+            shift = None
+        out.append((m.group(1), shift))
+    return out
+
+
+def _shortcut_parse_listener(text, mask, defined_fns):
+    """Shortcuts from one keydown listener body -> [(combo, action)]."""
+    import re
+    found = []
+    seen = set()
+
+    def add(ctrl, shift, alt, key, action):
+        norm = key.lower()
+        combo = _shortcut_combo(ctrl, shift, alt, norm)
+        if combo in seen:
+            return
+        seen.add(combo)
+        found.append((combo, action))
+
+    # Escape-style negative key guard: if (e.key !== "X") return;
+    m = re.search(r"""if\s*\(\s*e\.key\s*!==\s*"([^"]+)"\s*\)\s*return\s*;""",
+                  text)
+    if m and mask[m.start()]:
+        add(False, False, False, m.group(1),
+            _shortcut_branch_action(text, defined_fns))
+        return found
+
+    # Modifier-group form (round-18 handler): each group's branches
+    # inherit the group's modifiers; a branch's own && shift / !shift
+    # overrides the group's shift.
+    groups = [
+        (re.compile(r"if\s*\(\s*ctrl\s*&&\s*!alt\s*\)"), (True, None, False)),
+        (re.compile(r"if\s*\(\s*alt\s*&&\s*!ctrl\s*\)"), (False, None, True)),
+        (re.compile(r"if\s*\(\s*shift\s*&&\s*!ctrl\s*&&\s*!alt\s*\)"),
+         (False, True, False)),
+        (re.compile(r"if\s*\(\s*!ctrl\s*&&\s*!shift\s*&&\s*!alt\s*\)"),
+         (False, False, False)),
+    ]
+    grouped = False
+    for g_re, (g_ctrl, g_shift, g_alt) in groups:
+        gm = g_re.search(text)
+        if gm is None or not mask[gm.start()]:
+            continue
+        grouped = True
+        b = _js_next_code_brace(text, mask, gm.end())
+        if b is None:
+            continue
+        close = _js_match_brace(text, mask, b)
+        if close is None:
+            continue
+        for cond, body in _js_scan_branches(text[b + 1:close],
+                                             mask[b + 1:close]):
+            for key, shift in _shortcut_keys_from_condition(cond):
+                add(g_ctrl, g_shift if shift is None else shift, g_alt,
+                    key, _shortcut_branch_action(body, defined_fns))
+    if grouped:
+        return found
+
+    # Guard form: a leading return-guard fixes the base modifiers for
+    # the whole listener (Ctrl required, or Ctrl forbidden).
+    base_ctrl = False
+    if re.search(r"if\s*\(\s*!\s*\(\s*e\.ctrlKey\s*\|\|\s*e\.metaKey\s*\)"
+                 r"\s*\)\s*return\s*;", text):
+        base_ctrl = True
+    for cond, body in _js_scan_branches(text, mask):
+        for key, shift in _shortcut_keys_from_condition(cond):
+            add(base_ctrl, False if shift is None else shift, False,
+                key, _shortcut_branch_action(body, defined_fns))
+    return found
+
+
+def shortcuts_from_app_js(app_js_path):
+    """Parse static/app.js keydown listeners into a shortcut map.
+
+    Returns {"source", "listeners", "typing_guard", "shortcuts"}.
+    Raises ValueError when the file is missing (never an empty map
+    presented as if shortcuts did not exist).
+    """
+    import os
+    if not os.path.isfile(app_js_path):
+        raise ValueError(
+            "show_shortcuts: static/app.js not found at "
+            f"{app_js_path}; cannot derive the shortcut map")
+    with open(app_js_path, encoding="utf-8") as fh:
+        src = fh.read()
+    clean, mask = _js_clean_with_mask(src)
+    defined_fns = _js_defined_functions(clean)
+    regions = _js_keydown_regions(clean, mask)
+    shortcuts = []
+    seen = set()
+    guarded = 0
+    for text, m in regions:
+        if "shortcutIsTypingTarget" in text or "tagName" in text:
+            guarded += 1
+        for combo, action in _shortcut_parse_listener(text, m,
+                                                      defined_fns):
+            if combo in seen:
+                continue
+            seen.add(combo)
+            shortcuts.append({"keys": combo, "action": action})
+    shortcuts.sort(key=lambda s: s["keys"])
+    return {
+        "source": "static/app.js keydown listeners, parsed at runtime "
+                  "(not a hand-kept table)",
+        "listeners": len(regions),
+        "typing_guard": (f"{guarded} of {len(regions)} listeners skip "
+                         "shortcuts while typing in an input/textarea/"
+                         "select/contenteditable element; Escape is "
+                         "unguarded"),
+        "shortcuts": shortcuts,
+    }
 
 
 class MCPServer:
@@ -2741,6 +3133,104 @@ class MCPServer:
                 raise ValueError("ui_seek: frame must be an int")
             self.playhead_frame = max(0, frame)
             return {"frame": self.playhead_frame}
+        if name == "vibeedit_show_shortcuts":
+            # Round 20: derived from the live app.js, never hand-kept.
+            import os
+            app_js = os.path.join(
+                os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__))),
+                "static", "app.js")
+            return shortcuts_from_app_js(app_js)
+        if name in ("vibeedit_ui_frame", "vibeedit_ui_frames"):
+            # Round 20: render the timeline (draft preset) with FFmpeg
+            # and extract real composed frames at the requested times.
+            # No live player exists headless, so the render IS the
+            # player-frame source; a media first frame would be wrong
+            # here (it shows the source, not the timeline at that time).
+            import base64
+            import os
+            import shutil
+            import subprocess
+            import tempfile
+            from .project import fps_value
+            from .render import find_tool, render
+            proj = self._require()
+            fps = fps_value(proj.fps)
+            duration = proj.duration_seconds()
+            if duration <= 0 or not fps:
+                raise ValueError(
+                    "ui_frame: timeline is empty, nothing to render")
+            if name == "vibeedit_ui_frame":
+                if args.get("time") is None and args.get("time_s") is None:
+                    times = [self.playhead_frame / fps]
+                else:
+                    raw = (args["time"] if args.get("time") is not None
+                           else args.get("time_s"))
+                    try:
+                        times = [float(raw)]
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            "ui_frame: time must be a number of seconds")
+            else:
+                if args.get("times") is not None or \
+                        args.get("times_s") is not None:
+                    raw_list = (args["times"]
+                                if args.get("times") is not None
+                                else args.get("times_s"))
+                    try:
+                        times = [float(t) for t in raw_list]
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            "ui_frames: times must be numbers of seconds")
+                else:
+                    try:
+                        count = int(args.get("count", 5))
+                    except (TypeError, ValueError):
+                        raise ValueError("ui_frames: count must be an int")
+                    if count < 1:
+                        raise ValueError("ui_frames: count must be >= 1")
+                    times = [duration * (i + 0.5) / count
+                             for i in range(count)]
+            for t in times:
+                if not 0 <= t < duration:
+                    raise ValueError(
+                        f"ui_frame: time {t} outside timeline "
+                        f"[0, {duration})")
+            tmp = tempfile.mkdtemp(prefix="vibeedit-frame-")
+            try:
+                out = os.path.join(tmp, "timeline.mp4")
+                render(proj.data, proj.folder, out, preset="draft")
+                ffmpeg = find_tool("ffmpeg")
+                frames = []
+                for t in times:
+                    png = os.path.join(tmp, f"frame-{len(frames)}.png")
+                    proc = subprocess.run(
+                        [ffmpeg, "-v", "error", "-i", out,
+                         "-ss", repr(t), "-frames:v", "1", "-y", png],
+                        capture_output=True, text=True)
+                    if proc.returncode != 0 or not os.path.isfile(png):
+                        raise ValueError(
+                            f"ui_frame: could not extract frame at {t}s: "
+                            f"{proc.stderr.strip()}")
+                    with open(png, "rb") as fh:
+                        raw = fh.read()
+                    if raw[:8] != b"\x89PNG\r\n\x1a\n" or len(raw) < 24:
+                        raise ValueError(
+                            "ui_frame: FFmpeg did not produce a PNG frame")
+                    frames.append({
+                        "time": t,
+                        "width": int.from_bytes(raw[16:20], "big"),
+                        "height": int.from_bytes(raw[20:24], "big"),
+                        "png_base64": base64.b64encode(raw).decode(),
+                    })
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            if name == "vibeedit_ui_frame":
+                return {"frame": frames[0], "preset": "draft",
+                        "duration": duration,
+                        "playhead_frame": self.playhead_frame}
+            return {"frames": frames, "preset": "draft",
+                    "duration": duration}
         if name == "vibeedit_context_get":
             # Round 19: headless equivalent of live editor context — a
             # snapshot assembled from the open project + session state.

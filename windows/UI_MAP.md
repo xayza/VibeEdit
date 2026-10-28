@@ -170,15 +170,14 @@ tên lệnh, không phải nhãn.
   seek lại preview theo playhead mới — không chuyển chế độ, không tải
   lại trang.
 
-## 10. Ghi chú plugin/agent-kit (không phải việc của vòng giao diện)
+## 10. Ghi chú plugin/agent-kit (ĐÃ CŨ — xem vòng 15, giữ lại để rõ lịch sử)
 
-Agent kit (bashcut-agent-kit) và plugins (bashcut-plugins) đều CẦN cho
-parity đầy đủ nhưng không cần để editor lõi chạy. Bản Windows hiện chỉ
-có 4 skill (`windows/skills/`), `agent_kit_check`/`install` chạy từ
-thư mục local, thiếu auto-update bản phát hành đã ký; plugin hiện chỉ
-tìm trong máy local, thiếu fetch registry — lưu ý: registry TỒN TẠI
-(static `registry.json` trong bashcut-plugins), bản ghi cũ nói "không
-tồn tại" là sai. Cả hai xếp SAU vòng giao diện, dưới dạng chức năng.
+Ghi chú gốc ở đây (4 skill, thiếu auto-update, plugin chỉ tìm local)
+đã lỗi thời từ vòng 15: hiện có 21 skill kèm manifest SHA-256,
+`agent_kit_update`/`agent_kit_later` đã thật (kiểm chữ ký Ed25519),
+plugin đã fetch registry `bashcut-plugins` (cache 24 giờ, kiểm SHA-256
++ chữ ký, cài dạng review-only vì manifest registry là macOS-only).
+Chi tiết đúng hiện tại nằm ở `PARITY.md`, không phải mục này.
 
 ## 11. Bố cục vòng 18 (bổ sung sau, không sửa các mục 1–10)
 
